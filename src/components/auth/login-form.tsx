@@ -21,7 +21,10 @@ function getPortalMode() {
     return "pos" as const;
   }
 
-  return window.location.port === "3001" ? ("owner" as const) : ("pos" as const);
+  const hostname = window.location.hostname.toLowerCase();
+  const isOwnerHost = hostname === "owner.globalfsms.com" || hostname.startsWith("owner.");
+
+  return isOwnerHost || window.location.port === "3001" ? ("owner" as const) : ("pos" as const);
 }
 
 export function LoginForm() {
