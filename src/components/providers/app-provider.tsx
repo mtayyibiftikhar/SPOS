@@ -24,7 +24,7 @@ import type {
   WorkspaceKind
 } from "@/types/pos";
 import { localeMeta, resolveTranslation, type TranslationKey, type TranslationValues } from "@/lib/i18n";
-import { normalizeDemoUsers } from "@/lib/demo-auth";
+import { DEFAULT_OWNER_BOOTSTRAP, normalizeDemoUsers, type OwnerBootstrapAccount } from "@/lib/demo-auth";
 import { initialAppState } from "@/lib/mock-data";
 import { applySettlementToBills, getCustomerAccountMetrics } from "@/lib/customer-accounts";
 import {
@@ -577,7 +577,7 @@ function normalizeStoredProducts(products: DemoAppState["products"]) {
   }, []);
 }
 
-function normalizeStoredState(stored: DemoAppState) {
+function normalizeStoredState(stored: DemoAppState, ownerBootstrap: OwnerBootstrapAccount = DEFAULT_OWNER_BOOTSTRAP) {
   const ownerSeed =
     initialAppState.users.find((user) => user.role === "super_admin") ?? initialAppState.users[0];
   const rawProductKeys = stored.productKeys ?? initialAppState.productKeys;
@@ -609,7 +609,7 @@ function normalizeStoredState(stored: DemoAppState) {
       loginAdCtaLabel: stored.brand?.loginAdCtaLabel ?? initialAppState.brand.loginAdCtaLabel,
       loginAdCtaUrl: stored.brand?.loginAdCtaUrl ?? initialAppState.brand.loginAdCtaUrl
     },
-    users: normalizeDemoUsers(stored.users ?? initialAppState.users, ownerSeed),
+    users: normalizeDemoUsers(stored.users ?? initialAppState.users, ownerSeed, ownerBootstrap),
     shops: (stored.shops ?? initialAppState.shops).map((shop) => {
       const license = (stored.licenses ?? initialAppState.licenses).find((entry) => entry.shopId === shop.id);
 
@@ -687,7 +687,7 @@ function normalizeStoredState(stored: DemoAppState) {
   } satisfies DemoAppState;
 }
 
-function loadStoredState() {
+function loadStoredState(ownerBootstrap: OwnerBootstrapAccount = DEFAULT_OWNER_BOOTSTRAP) {
   if (typeof window === "undefined") {
     return null;
   }
@@ -699,7 +699,7 @@ function loadStoredState() {
   }
 
   try {
-    return normalizeStoredState(JSON.parse(raw) as DemoAppState);
+    return normalizeStoredState(JSON.parse(raw) as DemoAppState, ownerBootstrap);
   } catch {
     return null;
   }
@@ -767,20 +767,26 @@ function persistLocalOwnerStateSnapshot(state: DemoAppState) {
   }).catch(() => undefined);
 }
 
-export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<DemoAppState>(initialAppState);
+export function AppProvider({
+  children,
+  ownerBootstrap = DEFAULT_OWNER_BOOTSTRAP
+}: {
+  children: React.ReactNode;
+  ownerBootstrap?: OwnerBootstrapAccount;
+}) {
+  const [state, setState] = useState<DemoAppState>(() => normalizeStoredState(initialAppState, ownerBootstrap));
   const [isHydrated, setIsHydrated] = useState(false);
 
   useEffect(() => {
     let active = true;
 
     const loadState = async () => {
-      const localState = loadStoredState();
+      const localState = loadStoredState(ownerBootstrap);
 
       try {
         const response = await fetch(SHARED_STATE_ENDPOINT, { cache: "no-store" });
         const payload = (await response.json()) as { state?: DemoAppState | null };
-        const sharedState = payload.state ? normalizeStoredState(payload.state) : null;
+        const sharedState = payload.state ? normalizeStoredState(payload.state, ownerBootstrap) : null;
 
         if (!active) {
           return;
@@ -5132,7 +5138,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         try {
           const parsed = JSON.parse(raw) as { state?: DemoAppState } | DemoAppState;
           const importedState = "state" in parsed && parsed.state ? parsed.state : parsed;
-          const normalizedState = normalizeStoredState(importedState as DemoAppState);
+          const normalizedState = normalizeStoredState(importedState as DemoAppState, ownerBootstrap);
 
           setState(normalizedState);
 

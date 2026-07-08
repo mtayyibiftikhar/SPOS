@@ -5,7 +5,6 @@ import { startTransition, useEffect, useMemo, useState, type FormEvent } from "r
 import { useRouter } from "next/navigation";
 import { ArrowRight, KeyRound, LockKeyhole, LogOut, ShieldCheck, Sparkles, Store, UserRound } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
-import { OWNER_ADMIN_CREDENTIALS } from "@/lib/demo-auth";
 import { LocaleSwitcher } from "@/components/shared/locale-switcher";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -91,13 +90,14 @@ export function LoginForm() {
     [activatedShop, state.users]
   );
   const selectedUser = registeredShopUsers.find((user) => user.id === selectedUserId) ?? registeredShopUsers[0];
+  const ownerUser = state.users.find((user) => user.role === "super_admin" && user.isActive);
   const isOwnerMode = mode === "owner";
   const requiresActivation = !isOwnerMode && !activatedShop;
   const requiresFirstRunSetup = !isOwnerMode && Boolean(activatedShop) && !activatedShopHasAdmin;
 
   useEffect(() => {
     if (isOwnerMode) {
-      setEmail(OWNER_ADMIN_CREDENTIALS.email);
+      setEmail(ownerUser?.email ?? "");
       return;
     }
 
@@ -111,7 +111,7 @@ export function LoginForm() {
       });
       setEmail(preferredUser?.email ?? "");
     }
-  }, [activatedShop, activatedShopHasAdmin, isOwnerMode, registeredShopUsers, state.users]);
+  }, [activatedShop, activatedShopHasAdmin, isOwnerMode, ownerUser?.email, registeredShopUsers, state.users]);
 
   useEffect(() => {
     if (!isOwnerMode && selectedUser) {
