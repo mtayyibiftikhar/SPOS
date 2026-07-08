@@ -388,6 +388,9 @@ interface AppContextValue {
     allowedDevices: number;
     expiresAt?: string;
   }) => { ok: boolean; message?: string; productKey?: string };
+  ownerDeleteProductKey: (payload: {
+    productKeyId: string;
+  }) => { ok: boolean; message?: string };
   activateProductKey: (payload: {
     key: string;
     browserInfo?: string;
@@ -778,6 +781,23 @@ function persistLocalOwnerStateSnapshot(state: DemoAppState) {
   syncOwnerStateToCloud(state);
 }
 
+function buildOwnerCloudSyncState(state: DemoAppState) {
+  return {
+    categories: state.categories,
+    licenses: state.licenses,
+    productKeys: state.productKeys,
+    settingsByShop: state.settingsByShop,
+    shops: state.shops,
+    users: state.users
+      .filter((user) => user.role === "super_admin")
+      .map((user) => ({
+        email: user.email,
+        isActive: user.isActive,
+        role: user.role
+      }))
+  };
+}
+
 function syncOwnerStateToCloud(state: DemoAppState) {
   if (typeof window === "undefined") {
     return;
@@ -796,11 +816,23 @@ function syncOwnerStateToCloud(state: DemoAppState) {
       "x-owner-email": ownerEmail
     },
     body: JSON.stringify({
-      state: {
-        ...state,
-        session: null
-      }
+      state: buildOwnerCloudSyncState(state)
     })
+  }).catch(() => undefined);
+}
+
+function deleteOwnerProductKeyFromCloud(productKey: string, ownerEmail?: string) {
+  if (typeof window === "undefined" || !ownerEmail) {
+    return;
+  }
+
+  void fetch("/api/owner/delete-product-key", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-owner-email": ownerEmail
+    },
+    body: JSON.stringify({ productKey })
   }).catch(() => undefined);
 }
 
@@ -2031,6 +2063,60 @@ export function AppProvider({
                 targetId: shopId,
                 detail: `Generated ${maskKey(productKey)} for ${shop.name}.`,
                 createdAt
+              },
+              ...current.auditLogs
+            ]
+          };
+
+          persistLocalOwnerStateSnapshot(nextState);
+
+          return nextState;
+        });
+
+        return result;
+      },
+      ownerDeleteProductKey: ({ productKeyId }) => {
+        if (!session || session.role !== "super_admin") {
+          return { ok: false, message: "Only the POS owner can delete product keys." };
+        }
+
+        let result: { ok: boolean; message?: string } = {
+          ok: false,
+          message: "Unable to delete product key."
+        };
+
+        setState((current) => {
+          const productKey = current.productKeys.find((entry) => entry.id === productKeyId);
+
+          if (!productKey) {
+            result = { ok: false, message: "Product key not found." };
+            return current;
+          }
+
+          const shop = current.shops.find((entry) => entry.id === productKey.shopId);
+          const deletedAt = new Date().toISOString();
+          const ownerEmail = current.users.find((user) => user.role === "super_admin" && user.isActive)?.email;
+
+          result = {
+            ok: true,
+            message: "Product key deleted."
+          };
+
+          deleteOwnerProductKeyFromCloud(productKey.key, ownerEmail);
+
+          const nextState = {
+            ...current,
+            productKeys: current.productKeys.filter((entry) => entry.id !== productKeyId),
+            deviceActivations: current.deviceActivations.filter((entry) => entry.productKeyId !== productKeyId),
+            auditLogs: [
+              {
+                id: createId("audit"),
+                shopId: productKey.shopId,
+                actorId: session.id,
+                action: "owner.product_key.delete",
+                targetId: productKeyId,
+                detail: `Deleted ${maskKey(productKey.key)} for ${shop?.name ?? "shop"}.`,
+                createdAt: deletedAt
               },
               ...current.auditLogs
             ]

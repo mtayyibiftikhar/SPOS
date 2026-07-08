@@ -245,6 +245,7 @@ export default function OwnerPage() {
     locale,
     ownerCreateShop,
     ownerDeleteShop,
+    ownerDeleteProductKey,
     ownerGenerateProductKey,
     ownerResetShopUserPassword,
     ownerSetLicense,
@@ -932,6 +933,14 @@ export default function OwnerPage() {
               </option>
             ))}
           </Select>
+          <Button
+            size="sm"
+            onClick={() => showResult(ownerDeleteProductKey({ productKeyId: productKey.id }), productKey.shopId)}
+            variant="danger"
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Delete
+          </Button>
         </div>
       </div>
     );

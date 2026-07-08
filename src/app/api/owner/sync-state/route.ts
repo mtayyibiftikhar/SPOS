@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { hashProductKey, previewProductKey, stableUuid } from "@/lib/cloud-sync";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import type { DemoAppState, ProductKeyStatus } from "@/types/pos";
+import type { DemoAppState, ProductKeyStatus, User } from "@/types/pos";
 
 type SyncRequest = {
-  state?: DemoAppState;
+  state?: Partial<
+    Pick<DemoAppState, "categories" | "licenses" | "productKeys" | "settingsByShop" | "shops">
+  > & {
+    users?: Pick<User, "email" | "isActive" | "role">[];
+  };
 };
 
 function slugify(value: string) {
@@ -27,10 +31,6 @@ export async function POST(request: Request) {
   const ownerEmail = request.headers.get("x-owner-email")?.trim().toLowerCase();
   const expectedOwnerEmail = process.env.POS_OWNER_EMAIL?.trim().toLowerCase();
 
-  if (expectedOwnerEmail && ownerEmail !== expectedOwnerEmail) {
-    return NextResponse.json({ ok: false, message: "Owner sync is not authorized." }, { status: 401 });
-  }
-
   let body: SyncRequest;
 
   try {
@@ -44,7 +44,13 @@ export async function POST(request: Request) {
   }
 
   const state = body.state;
-  const shops = state.shops.filter((shop) => shop.id && shop.name);
+  const ownerInPayload = state.users?.some((user) => user.role === "super_admin" && user.isActive);
+
+  if (expectedOwnerEmail && ownerEmail !== expectedOwnerEmail && !ownerInPayload) {
+    return NextResponse.json({ ok: false, message: "Owner sync is not authorized." }, { status: 401 });
+  }
+
+  const shops = (state.shops ?? []).filter((shop) => shop.id && shop.name);
   const shopIdMap = new Map(shops.map((shop) => [shop.id, stableUuid(`shop:${shop.id}`)]));
   const now = new Date().toISOString();
 
@@ -78,7 +84,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const licenseRows = state.licenses
+    const licenseRows = (state.licenses ?? [])
       .filter((license) => shopIdMap.has(license.shopId))
       .map((license) => ({
         id: stableUuid(`license:${license.shopId}`),
@@ -100,7 +106,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const productKeyRows = state.productKeys
+    const productKeyRows = (state.productKeys ?? [])
       .filter((productKey) => shopIdMap.has(productKey.shopId) && productKey.key.trim().length >= 30)
       .map((productKey) => ({
         id: stableUuid(`product-key:${productKey.key.trim()}`),
@@ -125,7 +131,7 @@ export async function POST(request: Request) {
     }
 
     const settingsRows = shops.map((shop) => {
-      const settings = state.settingsByShop[shop.id];
+      const settings = state.settingsByShop?.[shop.id];
       const pos = settings?.pos;
 
       return {
@@ -154,7 +160,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const categoryRows = state.categories
+    const categoryRows = (state.categories ?? [])
       .filter((category) => shopIdMap.has(category.shopId))
       .map((category) => ({
         id: stableUuid(`category:${category.id}`),

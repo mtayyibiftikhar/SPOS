@@ -80,6 +80,37 @@ export default function RegisterPage() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!form.productKey) {
+      return;
+    }
+
+    const productKey = state.productKeys.find((entry) => entry.key.trim() === form.productKey.trim());
+    const shop = productKey ? state.shops.find((entry) => entry.id === productKey.shopId) : null;
+    const settings = shop ? state.settingsByShop[shop.id] : null;
+
+    if (!shop) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      shopName: current.shopName || settings?.pos.shopName || shop.name,
+      address: current.address || settings?.pos.address || shop.address,
+      phone: current.phone || settings?.pos.phone || shop.phone,
+      email: current.email || settings?.pos.email || shop.email || "",
+      website: current.website || settings?.pos.website || shop.website || "",
+      currency: current.currency || settings?.pos.currency || shop.currency || "SAR",
+      vatNumber: current.vatNumber || settings?.pos.vatNumber || "",
+      receiptQrUrl: current.receiptQrUrl || settings?.pos.receiptQrUrl || "",
+      taxEnabled: settings?.tax.enabled ?? current.taxEnabled,
+      taxName: current.taxName || settings?.tax.name || "VAT",
+      taxRate: current.taxRate || settings?.tax.rate || 15,
+      taxMode: settings?.tax.mode ?? current.taxMode,
+      receiptFooterText: current.receiptFooterText || settings?.receipt.footerText || `Thank you for visiting ${shop.name}.`
+    }));
+  }, [form.productKey, state.productKeys, state.settingsByShop, state.shops]);
+
   const updateForm = <TKey extends keyof typeof form>(key: TKey, value: (typeof form)[TKey]) => {
     setForm((current) => ({
       ...current,

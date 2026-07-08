@@ -64,6 +64,14 @@ function getPortalMode() {
   return isOwnerHost || window.location.port === "3001" ? ("owner" as const) : ("pos" as const);
 }
 
+function isLocalDemoHost() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return ["localhost", "127.0.0.1"].includes(window.location.hostname);
+}
+
 export function LoginForm() {
   const router = useRouter();
   const { activateProductKey, logoutStoreDevice, mergeCloudActivationState, state, login, t } = usePosApp();
@@ -222,7 +230,7 @@ export function LoginForm() {
         return;
       }
 
-      if (response.status !== 404 && response.status !== 500) {
+      if (!isLocalDemoHost() || (response.status !== 404 && response.status !== 500)) {
         setActivationMessage(payload.message ?? "Product key activation failed.");
         setIsPending(false);
         return;
