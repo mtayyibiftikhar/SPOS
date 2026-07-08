@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+dist/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Local POS demo/runtime data
+.local/
+_local_owner_state/
+_backups/
+
+# Logs and generated local diagnostics
+*.log
+*.err
+*.err.log
+.logs/
+.next-*.log
+.next-*.err.log
+.next-*.err
+.billing-response.html
+.layout-dev-chunk.js
+
+# Local-only launch helpers
+simple-pos-localhost-task.xml
+
+# Codex/local assistant workspace metadata
+.agents/
+.codex/
+
+# Vercel local metadata
+.vercel/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
