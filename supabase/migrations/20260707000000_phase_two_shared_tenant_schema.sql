@@ -33,10 +33,19 @@ create table if not exists public.shops (
   currency text not null default 'SAR',
   timezone text not null default 'Asia/Riyadh',
   plan_name text not null default 'Starter',
+  billing_cycle text not null default 'monthly',
+  package_price numeric(12,2) not null default 0,
+  total_paid numeric(12,2) not null default 0,
+  last_owner_payment_at timestamptz,
   license_status public.license_status not null default 'trial',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.shops add column if not exists billing_cycle text not null default 'monthly';
+alter table public.shops add column if not exists package_price numeric(12,2) not null default 0;
+alter table public.shops add column if not exists total_paid numeric(12,2) not null default 0;
+alter table public.shops add column if not exists last_owner_payment_at timestamptz;
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,

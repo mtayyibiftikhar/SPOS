@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
+function isMissingOwnerBillingColumnsError(error: { code?: string; message?: string }) {
+  return (
+    error.code === "PGRST204" ||
+    /billing_cycle|package_price|total_paid|last_owner_payment_at/i.test(error.message ?? "")
+  );
+}
+
 export async function GET(request: Request) {
   const ownerEmail = request.headers.get("x-owner-email")?.trim().toLowerCase();
   const expectedOwnerEmail = process.env.POS_OWNER_EMAIL?.trim().toLowerCase();
@@ -11,21 +18,26 @@ export async function GET(request: Request) {
 
   try {
     const supabase = createSupabaseAdminClient();
+    const shopsResult = await supabase
+      .from("shops")
+      .select("id, name, email, phone, address, plan_name, billing_cycle, package_price, total_paid, last_owner_payment_at, license_status, created_at");
+    const shops =
+      shopsResult.error && isMissingOwnerBillingColumnsError(shopsResult.error)
+        ? await supabase.from("shops").select("id, name, email, phone, address, plan_name, license_status, created_at")
+        : shopsResult;
     const [
-      { data: shops, error: shopsError },
       { data: productKeys, error: productKeysError },
       { data: profiles, error: profilesError },
       { data: devices, error: devicesError },
       { data: licenses, error: licensesError }
     ] = await Promise.all([
-      supabase.from("shops").select("id, name, email, phone, address, plan_name, license_status, created_at"),
       supabase.from("product_keys").select("id, shop_id, key_preview, status, allowed_devices, activated_at, expires_at"),
       supabase.from("profiles").select("id, shop_id, name, email, phone, role, is_active, last_login_at, created_at"),
       supabase.from("device_activations").select("id, shop_id, product_key_id, browser_info, activated_at, last_seen_at"),
       supabase.from("licenses").select("id, shop_id, status, expires_at, last_payment_at, auto_lock_days_after_expiry, locked_at, lock_reason")
     ]);
 
-    if (shopsError) throw shopsError;
+    if (shops.error) throw shops.error;
     if (productKeysError) throw productKeysError;
     if (profilesError) throw profilesError;
     if (devicesError) throw devicesError;
@@ -33,7 +45,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      shops: shops ?? [],
+      shops: shops.data ?? [],
       productKeys: productKeys ?? [],
       profiles: profiles ?? [],
       devices: devices ?? [],

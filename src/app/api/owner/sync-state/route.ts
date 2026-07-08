@@ -27,6 +27,13 @@ function normalizeStatus(status: ProductKeyStatus) {
     : "unused";
 }
 
+function isMissingOwnerBillingColumnsError(error: { code?: string; message?: string }) {
+  return (
+    error.code === "PGRST204" ||
+    /billing_cycle|package_price|total_paid|last_owner_payment_at/i.test(error.message ?? "")
+  );
+}
+
 export async function POST(request: Request) {
   const ownerEmail = request.headers.get("x-owner-email")?.trim().toLowerCase();
   const expectedOwnerEmail = process.env.POS_OWNER_EMAIL?.trim().toLowerCase();
@@ -72,6 +79,10 @@ export async function POST(request: Request) {
           currency: shop.currency || "SAR",
           timezone: shop.timezone || "Asia/Riyadh",
           plan_name: shop.planName || "Starter",
+          billing_cycle: shop.billingCycle ?? "monthly",
+          package_price: Math.max(0, Number(shop.packagePrice ?? 0)),
+          total_paid: Math.max(0, Number(shop.totalPaid ?? 0)),
+          last_owner_payment_at: shop.lastOwnerPaymentAt ?? null,
           license_status: shop.licenseStatus || "trial",
           created_at: shop.createdAt || now,
           updated_at: now
@@ -80,7 +91,18 @@ export async function POST(request: Request) {
       const { error } = await supabase.from("shops").upsert(shopRows, { onConflict: "id" });
 
       if (error) {
-        throw error;
+        if (!isMissingOwnerBillingColumnsError(error)) {
+          throw error;
+        }
+
+        const fallbackRows = shopRows.map(
+          ({ billing_cycle, package_price, total_paid, last_owner_payment_at, ...row }) => row
+        );
+        const { error: fallbackError } = await supabase.from("shops").upsert(fallbackRows, { onConflict: "id" });
+
+        if (fallbackError) {
+          throw fallbackError;
+        }
       }
     }
 
