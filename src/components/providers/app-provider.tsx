@@ -110,6 +110,7 @@ type OwnerCreateShopInput = {
 };
 
 type RegisterInstalledShopInput = {
+  adminUserId?: string;
   setupEmail?: string;
   setupPassword?: string;
   ownerSnapshot?: Partial<DemoAppState> | null;
@@ -141,7 +142,7 @@ type RegisterInstalledShopInput = {
 type CloudActivationStatePatch = Partial<
   Pick<
     DemoAppState,
-    "categories" | "deviceActivations" | "licenses" | "productKeys" | "settingsByShop" | "shops"
+    "categories" | "deviceActivations" | "licenses" | "productKeys" | "settingsByShop" | "shops" | "users"
   >
 >;
 
@@ -365,6 +366,10 @@ interface AppContextValue {
   t: (key: TranslationKey, values?: TranslationValues) => string;
   setLocale: (locale: Locale) => void;
   login: (payload: LoginPayload) => { ok: boolean; message?: string; workspace?: WorkspaceKind };
+  completeCloudLogin: (payload: {
+    user: User;
+    workspace: WorkspaceKind;
+  }) => { ok: boolean; message?: string; workspace?: WorkspaceKind };
   logout: () => void;
   logoutStoreDevice: (payload: {
     shopId: string;
@@ -843,6 +848,7 @@ function mergeCloudActivationStatePatch(current: DemoAppState, patch: CloudActiv
     licenses: mergeRowsById(current.licenses, patch.licenses ?? []),
     productKeys: mergeRowsById(current.productKeys, patch.productKeys ?? []),
     deviceActivations: mergeRowsById(current.deviceActivations, patch.deviceActivations ?? []),
+    users: mergeRowsById(current.users, patch.users ?? []),
     categories: mergeRowsById(current.categories, patch.categories ?? []),
     settingsByShop: {
       ...current.settingsByShop,
@@ -1190,6 +1196,66 @@ export function AppProvider({
 
         return { ok: true, workspace };
       },
+      completeCloudLogin: ({ user, workspace }) => {
+        if (!user.isActive) {
+          return { ok: false, message: "This user is inactive. Ask the shop admin to reactivate access." };
+        }
+
+        if (workspace === "owner" && user.role !== "super_admin") {
+          return { ok: false, message: resolveTranslation(state.ui.locale, "login.error", dictionaryOverrides) };
+        }
+
+        if (workspace === "shop" && !user.shopId) {
+          return { ok: false, message: resolveTranslation(state.ui.locale, "login.error", dictionaryOverrides) };
+        }
+
+        if (workspace === "shop" && user.shopId) {
+          const accessBlock = getShopAccessBlock(state, user.shopId);
+
+          if (accessBlock) {
+            return { ok: false, message: accessBlock };
+          }
+
+          if (!hasActivatedDeviceAccess(state, user.shopId)) {
+            return {
+              ok: false,
+              message: "Activate this shop product key on this device before signing in."
+            };
+          }
+        }
+
+        const lastLoginAt = new Date().toISOString();
+
+        setState((current) => {
+          const existingUser = current.users.find(
+            (entry) => entry.id === user.id || entry.email.trim().toLowerCase() === user.email.trim().toLowerCase()
+          );
+          const sessionUser = {
+            ...existingUser,
+            ...user,
+            passwordHash: existingUser?.passwordHash ?? user.passwordHash,
+            lastLoginAt
+          };
+          const users = existingUser
+            ? current.users.map((entry) => (entry.id === existingUser.id ? sessionUser : entry))
+            : [sessionUser, ...current.users];
+
+          return {
+            ...current,
+            session: {
+              id: sessionUser.id,
+              shopId: sessionUser.shopId,
+              name: sessionUser.name,
+              email: sessionUser.email,
+              role: sessionUser.role,
+              workspace
+            },
+            users
+          };
+        });
+
+        return { ok: true, workspace };
+      },
       logout: () => {
         setState((current) => ({
           ...current,
@@ -1486,7 +1552,7 @@ export function AppProvider({
             existingLicense?.expiresAt ??
             new Date(Date.now() + 14 * 86_400_000).toISOString();
           const shopId = existingProductKey?.shopId ?? createId("shop");
-          const adminUserId = createId("user");
+          const adminUserId = payload.adminUserId ?? createId("user");
           const productKeyId = existingProductKey?.id ?? createId("pk");
           const productKey = existingProductKey?.key ?? generateProductKeyCode(working.productKeys);
           const categoryId = createId("cat");

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { startTransition, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, KeyRound, LockKeyhole, LogOut, ShieldCheck, Sparkles, Store, UserRound } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
@@ -22,11 +22,17 @@ type CloudActivationResponse = {
   cloudState?: Partial<
     Pick<
       DemoAppState,
-      "categories" | "deviceActivations" | "licenses" | "productKeys" | "settingsByShop" | "shops"
+      "categories" | "deviceActivations" | "licenses" | "productKeys" | "settingsByShop" | "shops" | "users"
     >
   > | null;
   hasShopAdmin?: boolean;
   shopId?: string;
+};
+
+type ShopCloudLoginResponse = {
+  ok: boolean;
+  message?: string;
+  user?: DemoAppState["users"][number];
 };
 
 function getBrowserInfo() {
@@ -89,7 +95,7 @@ function cacheCloudActivationState(productKey: string, cloudState: CloudActivati
 
 export function LoginForm() {
   const router = useRouter();
-  const { activateProductKey, logoutStoreDevice, mergeCloudActivationState, state, login, t } = usePosApp();
+  const { activateProductKey, completeCloudLogin, logoutStoreDevice, mergeCloudActivationState, state, login, t } = usePosApp();
   const [mode, setMode] = useState<"pos" | "owner">("pos");
   const [browserInfo, setBrowserInfo] = useState("");
   const [email, setEmail] = useState("");
@@ -182,27 +188,66 @@ export function LoginForm() {
     }
   }, [isOwnerMode, selectedUser]);
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
     setIsPending(true);
 
-    startTransition(() => {
-      const result = login({
-        email,
-        password,
-        workspace: isOwnerMode ? "owner" : "shop"
-      });
+    const result = login({
+      email,
+      password,
+      workspace: isOwnerMode ? "owner" : "shop"
+    });
 
-      if (!result.ok) {
-        setError(result.message ?? t("login.error"));
+    if (result.ok) {
+      router.push(result.workspace === "owner" ? "/owner" : "/dashboard");
+      setIsPending(false);
+      return;
+    }
+
+    if (isOwnerMode || !activatedShop) {
+      setError(result.message ?? t("login.error"));
+      setIsPending(false);
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/auth/shop-login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          shopId: activatedShop.id
+        })
+      });
+      const payload = (await response.json()) as ShopCloudLoginResponse;
+
+      if (!payload.ok || !payload.user) {
+        setError(payload.message ?? result.message ?? t("login.error"));
         setIsPending(false);
         return;
       }
 
-      router.push(result.workspace === "owner" ? "/owner" : "/dashboard");
+      const cloudResult = completeCloudLogin({
+        user: payload.user,
+        workspace: "shop"
+      });
+
+      if (!cloudResult.ok) {
+        setError(cloudResult.message ?? t("login.error"));
+        setIsPending(false);
+        return;
+      }
+
+      router.push("/dashboard");
+    } catch {
+      setError(result.message ?? t("login.error"));
+    } finally {
       setIsPending(false);
-    });
+    }
   };
 
   const activateKey = async () => {

@@ -26,6 +26,38 @@ const steps = [
 
 type StepId = (typeof steps)[number]["id"];
 
+type RegisterFormState = {
+  setupEmail: string;
+  setupPassword: string;
+  productKey: string;
+  shopName: string;
+  logoUrl: string;
+  address: string;
+  phone: string;
+  email: string;
+  website: string;
+  currency: string;
+  vatNumber: string;
+  receiptQrUrl: string;
+  taxEnabled: boolean;
+  taxName: string;
+  taxRate: number;
+  taxMode: "inclusive" | "exclusive";
+  receiptFooterText: string;
+  adminName: string;
+  adminEmail: string;
+  adminPhone: string;
+  adminPassword: string;
+};
+
+type CompleteInstallationResponse = {
+  adminUser?: DemoAppState["users"][number];
+  alreadyInstalled?: boolean;
+  message?: string;
+  ok: boolean;
+  shopId?: string;
+};
+
 async function loadLocalOwnerSnapshot() {
   try {
     const response = await fetch("/api/local-owner-state", { cache: "no-store" });
@@ -35,6 +67,22 @@ async function loadLocalOwnerSnapshot() {
   } catch {
     return null;
   }
+}
+
+async function completeCloudInstallation(payload: RegisterFormState) {
+  const response = await fetch("/api/installation/complete", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  const result = (await response.json()) as CompleteInstallationResponse;
+
+  return {
+    ...result,
+    status: response.status
+  };
 }
 
 function loadCachedCloudActivationSnapshot(productKey?: string) {
@@ -80,7 +128,7 @@ export default function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [logoFeedback, setLogoFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<RegisterFormState>({
     setupEmail: "",
     setupPassword: "",
     productKey: "",
@@ -214,10 +262,37 @@ export default function RegisterPage() {
     }
 
     setIsSubmitting(true);
-    const ownerSnapshot = loadCachedCloudActivationSnapshot(form.productKey) ?? (await loadLocalOwnerSnapshot());
+    const cachedCloudSnapshot = loadCachedCloudActivationSnapshot(form.productKey);
+    const ownerSnapshot = cachedCloudSnapshot ?? (await loadLocalOwnerSnapshot());
+    let cloudAdminUserId: string | undefined;
+
+    if (cachedCloudSnapshot) {
+      try {
+        const cloudResult = await completeCloudInstallation(form);
+
+        if (!cloudResult.ok) {
+          if (cloudResult.alreadyInstalled) {
+            setError(cloudResult.message ?? "This shop is already installed. Go back to login and sign in.");
+            setIsSubmitting(false);
+            return;
+          }
+
+          setError(cloudResult.message ?? "Unable to complete online shop setup.");
+          setIsSubmitting(false);
+          return;
+        }
+
+        cloudAdminUserId = cloudResult.adminUser?.id;
+      } catch {
+        setError("Could not reach the online setup service. Please refresh and try again.");
+        setIsSubmitting(false);
+        return;
+      }
+    }
 
     const result = registerInstalledShop({
       ...form,
+      adminUserId: cloudAdminUserId,
       ownerSnapshot,
       createCashier: false,
       taxRate: Number(form.taxRate)

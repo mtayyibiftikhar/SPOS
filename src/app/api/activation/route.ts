@@ -198,7 +198,7 @@ export async function POST(request: Request) {
       { data: settings },
       { data: categories },
       { data: activationRow },
-      { count: shopAdminCount }
+      { data: profiles }
     ] = await Promise.all([
       supabase
         .from("shops")
@@ -227,9 +227,8 @@ export async function POST(request: Request) {
         .maybeSingle(),
       supabase
         .from("profiles")
-        .select("id", { count: "exact", head: true })
+        .select("id, shop_id, name, email, phone, role, is_active, last_login_at, created_at")
         .eq("shop_id", productKeyRow.shop_id)
-        .eq("role", "shop_admin")
     ]);
 
     return NextResponse.json({
@@ -298,6 +297,18 @@ export async function POST(request: Request) {
                 description: category.description ?? undefined,
                 createdAt: category.created_at ?? now
               })) ?? [],
+            users:
+              profiles?.map((profile) => ({
+                id: profile.id,
+                shopId: profile.shop_id ?? undefined,
+                name: profile.name,
+                email: profile.email,
+                phone: profile.phone ?? undefined,
+                role: profile.role,
+                isActive: profile.is_active,
+                lastLoginAt: profile.last_login_at ?? undefined,
+                createdAt: profile.created_at ?? now
+              })) ?? [],
             settingsByShop: {
               [shop.id]: {
                 pos: {
@@ -333,7 +344,7 @@ export async function POST(request: Request) {
             }
           }
         : null,
-      hasShopAdmin: (shopAdminCount ?? 0) > 0,
+      hasShopAdmin: profiles?.some((profile) => profile.role === "shop_admin" && profile.is_active) ?? false,
       licenseStatus,
       shopId: productKeyRow.shop_id
     });
