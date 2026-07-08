@@ -236,7 +236,13 @@ export function LoginForm() {
         return;
       }
     } catch {
-      // Keep the local fallback available for localhost/demo mode.
+      if (!isLocalDemoHost()) {
+        setActivationMessage("Could not reach the online activation service. Please refresh and try again.");
+        setIsPending(false);
+        return;
+      }
+
+      // Keep the local fallback available for localhost/demo mode only.
     }
 
     const result = activateProductKey({
