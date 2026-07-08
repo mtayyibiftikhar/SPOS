@@ -8,6 +8,7 @@ import type {
   Customer,
   CustomerAccountPayment,
   DemoAppState,
+  DeviceActivation,
   DictionaryEntry,
   Locale,
   LicenseStatus,
@@ -65,6 +66,7 @@ import { createId, getDirection, hashSecret } from "@/lib/utils";
 
 const STORAGE_KEY = "simple-pos-demo-state";
 const SHARED_STATE_ENDPOINT = "/api/local-state";
+const SHOP_CLOUD_STATE_ENDPOINT = "/api/shop-state";
 const MIN_PASSWORD_LENGTH = 8;
 
 function validatePasswordLength(password: string, label = "Password") {
@@ -146,6 +148,46 @@ type CloudActivationStatePatch = Partial<
   Pick<
     DemoAppState,
     "categories" | "deviceActivations" | "licenses" | "productKeys" | "settingsByShop" | "shops" | "users"
+  >
+>;
+
+type ShopCloudStatePatch = Partial<
+  Pick<
+    DemoAppState,
+    | "accountPaymentSequencesByShop"
+    | "auditLogs"
+    | "billItems"
+    | "bills"
+    | "businessDays"
+    | "cashMovements"
+    | "categories"
+    | "customerAccountPayments"
+    | "customers"
+    | "dayCloses"
+    | "deletedProducts"
+    | "deviceActivations"
+    | "dictionaryEntries"
+    | "expenseCategories"
+    | "expenses"
+    | "inventoryAdjustments"
+    | "inventoryBatches"
+    | "ledgerEntries"
+    | "licenses"
+    | "payments"
+    | "productKeys"
+    | "products"
+    | "purchaseOrderItems"
+    | "purchaseOrders"
+    | "receiptSequencesByShop"
+    | "refundItems"
+    | "refunds"
+    | "settingsByShop"
+    | "shops"
+    | "shifts"
+    | "suppliers"
+    | "supportSessions"
+    | "supportTickets"
+    | "users"
   >
 >;
 
@@ -879,6 +921,174 @@ function mergeCloudActivationStatePatch(current: DemoAppState, patch: CloudActiv
   } satisfies DemoAppState;
 }
 
+function rowsForShop<TItem extends { shopId?: string }>(rows: TItem[], shopId: string) {
+  return rows.filter((row) => row.shopId === shopId);
+}
+
+function replaceRowsForShop<TItem extends { shopId?: string }>(currentRows: TItem[], cloudRows: TItem[] | undefined, shopId: string) {
+  if (!cloudRows) {
+    return currentRows;
+  }
+
+  return [...currentRows.filter((row) => row.shopId !== shopId), ...cloudRows];
+}
+
+function buildShopCloudSyncState(state: DemoAppState, shopId: string): ShopCloudStatePatch {
+  const shopBills = rowsForShop(state.bills, shopId);
+  const billIds = new Set(shopBills.map((bill) => bill.id));
+  const shopRefunds = rowsForShop(state.refunds, shopId);
+  const refundIds = new Set(shopRefunds.map((refund) => refund.id));
+  const shopPurchaseOrders = rowsForShop(state.purchaseOrders, shopId);
+  const purchaseOrderIds = new Set(shopPurchaseOrders.map((order) => order.id));
+
+  return {
+    shops: state.shops.filter((shop) => shop.id === shopId),
+    licenses: rowsForShop(state.licenses, shopId),
+    productKeys: rowsForShop(state.productKeys, shopId),
+    deviceActivations: rowsForShop(state.deviceActivations, shopId),
+    users: rowsForShop(state.users.filter((user) => user.shopId), shopId),
+    categories: rowsForShop(state.categories, shopId),
+    products: rowsForShop(state.products, shopId),
+    inventoryAdjustments: rowsForShop(state.inventoryAdjustments, shopId),
+    inventoryBatches: rowsForShop(state.inventoryBatches, shopId),
+    suppliers: rowsForShop(state.suppliers, shopId),
+    purchaseOrders: shopPurchaseOrders,
+    purchaseOrderItems: state.purchaseOrderItems.filter((item) => purchaseOrderIds.has(item.purchaseOrderId)),
+    deletedProducts: rowsForShop(state.deletedProducts, shopId),
+    customers: rowsForShop(state.customers, shopId),
+    customerAccountPayments: rowsForShop(state.customerAccountPayments, shopId),
+    bills: shopBills,
+    billItems: state.billItems.filter((item) => billIds.has(item.billId)),
+    refunds: shopRefunds,
+    refundItems: state.refundItems.filter((item) => refundIds.has(item.refundId)),
+    payments: state.payments.filter((payment) => billIds.has(payment.billId)),
+    ledgerEntries: rowsForShop(state.ledgerEntries, shopId),
+    businessDays: rowsForShop(state.businessDays, shopId),
+    shifts: rowsForShop(state.shifts, shopId),
+    dayCloses: rowsForShop(state.dayCloses, shopId),
+    cashMovements: rowsForShop(state.cashMovements, shopId),
+    expenseCategories: rowsForShop(state.expenseCategories, shopId),
+    expenses: rowsForShop(state.expenses, shopId),
+    receiptSequencesByShop: {
+      [shopId]: state.receiptSequencesByShop[shopId] ?? 1
+    },
+    accountPaymentSequencesByShop: {
+      [shopId]: state.accountPaymentSequencesByShop[shopId] ?? 1
+    },
+    settingsByShop: state.settingsByShop[shopId]
+      ? {
+          [shopId]: state.settingsByShop[shopId]
+        }
+      : {},
+    dictionaryEntries: state.dictionaryEntries,
+    supportTickets: rowsForShop(state.supportTickets, shopId),
+    supportSessions: rowsForShop(state.supportSessions, shopId),
+    auditLogs: state.auditLogs.filter((log) => log.shopId === shopId)
+  };
+}
+
+function mergeShopCloudStatePatch(current: DemoAppState, patch: ShopCloudStatePatch, shopId: string) {
+  const currentBillIds = new Set(rowsForShop(current.bills, shopId).map((bill) => bill.id));
+  const currentRefundIds = new Set(rowsForShop(current.refunds, shopId).map((refund) => refund.id));
+  const currentPurchaseOrderIds = new Set(rowsForShop(current.purchaseOrders, shopId).map((order) => order.id));
+
+  return {
+    ...current,
+    shops: patch.shops ? [...current.shops.filter((shop) => shop.id !== shopId), ...patch.shops] : current.shops,
+    licenses: replaceRowsForShop(current.licenses, patch.licenses, shopId),
+    productKeys: replaceRowsForShop(current.productKeys, patch.productKeys, shopId),
+    deviceActivations: replaceRowsForShop(current.deviceActivations, patch.deviceActivations, shopId),
+    users: replaceRowsForShop(current.users.filter((user) => user.shopId), patch.users, shopId).concat(
+      current.users.filter((user) => !user.shopId)
+    ),
+    categories: replaceRowsForShop(current.categories, patch.categories, shopId),
+    products: replaceRowsForShop(current.products, patch.products, shopId),
+    inventoryAdjustments: replaceRowsForShop(current.inventoryAdjustments, patch.inventoryAdjustments, shopId),
+    inventoryBatches: replaceRowsForShop(current.inventoryBatches, patch.inventoryBatches, shopId),
+    suppliers: replaceRowsForShop(current.suppliers, patch.suppliers, shopId),
+    purchaseOrders: replaceRowsForShop(current.purchaseOrders, patch.purchaseOrders, shopId),
+    purchaseOrderItems: patch.purchaseOrderItems
+      ? [
+          ...current.purchaseOrderItems.filter((item) => !currentPurchaseOrderIds.has(item.purchaseOrderId)),
+          ...patch.purchaseOrderItems
+        ]
+      : current.purchaseOrderItems,
+    deletedProducts: replaceRowsForShop(current.deletedProducts, patch.deletedProducts, shopId),
+    customers: replaceRowsForShop(current.customers, patch.customers, shopId),
+    customerAccountPayments: replaceRowsForShop(current.customerAccountPayments, patch.customerAccountPayments, shopId),
+    bills: replaceRowsForShop(current.bills, patch.bills, shopId),
+    billItems: patch.billItems
+      ? [...current.billItems.filter((item) => !currentBillIds.has(item.billId)), ...patch.billItems]
+      : current.billItems,
+    refunds: replaceRowsForShop(current.refunds, patch.refunds, shopId),
+    refundItems: patch.refundItems
+      ? [...current.refundItems.filter((item) => !currentRefundIds.has(item.refundId)), ...patch.refundItems]
+      : current.refundItems,
+    payments: patch.payments
+      ? [...current.payments.filter((payment) => !currentBillIds.has(payment.billId)), ...patch.payments]
+      : current.payments,
+    ledgerEntries: replaceRowsForShop(current.ledgerEntries, patch.ledgerEntries, shopId),
+    businessDays: replaceRowsForShop(current.businessDays, patch.businessDays, shopId),
+    shifts: replaceRowsForShop(current.shifts, patch.shifts, shopId),
+    dayCloses: replaceRowsForShop(current.dayCloses, patch.dayCloses, shopId),
+    cashMovements: replaceRowsForShop(current.cashMovements, patch.cashMovements, shopId),
+    expenseCategories: replaceRowsForShop(current.expenseCategories, patch.expenseCategories, shopId),
+    expenses: replaceRowsForShop(current.expenses, patch.expenses, shopId),
+    receiptSequencesByShop: {
+      ...current.receiptSequencesByShop,
+      ...(patch.receiptSequencesByShop ?? {})
+    },
+    accountPaymentSequencesByShop: {
+      ...current.accountPaymentSequencesByShop,
+      ...(patch.accountPaymentSequencesByShop ?? {})
+    },
+    settingsByShop: {
+      ...current.settingsByShop,
+      ...(patch.settingsByShop ?? {})
+    },
+    dictionaryEntries: patch.dictionaryEntries ?? current.dictionaryEntries,
+    supportTickets: replaceRowsForShop(current.supportTickets, patch.supportTickets, shopId),
+    supportSessions: replaceRowsForShop(current.supportSessions, patch.supportSessions, shopId),
+    auditLogs: patch.auditLogs
+      ? [...current.auditLogs.filter((log) => log.shopId !== shopId), ...patch.auditLogs]
+      : current.auditLogs
+  } satisfies DemoAppState;
+}
+
+function buildShopCloudHeaders(state: DemoAppState, shopId: string, session: SessionUser | null) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "x-shop-id": shopId
+  };
+  const shopKey = state.productKeys.find((productKey) => productKey.shopId === shopId && productKey.key.trim().length >= 30);
+
+  if (shopKey) {
+    headers["x-product-key"] = shopKey.key;
+  }
+
+  if (session?.shopId === shopId) {
+    headers["x-user-id"] = session.id;
+    headers["x-user-email"] = session.email;
+  }
+
+  return headers;
+}
+
+function syncShopStateToCloud(state: DemoAppState, shopId: string, session: SessionUser | null) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  void fetch(SHOP_CLOUD_STATE_ENDPOINT, {
+    method: "POST",
+    headers: buildShopCloudHeaders(state, shopId, session),
+    body: JSON.stringify({
+      shopId,
+      state: buildShopCloudSyncState(state, shopId)
+    })
+  }).catch(() => undefined);
+}
+
 export function AppProvider({
   children,
   ownerBootstrap = DEFAULT_OWNER_BOOTSTRAP
@@ -888,6 +1098,8 @@ export function AppProvider({
 }) {
   const [state, setState] = useState<DemoAppState>(() => normalizeStoredState(initialAppState, ownerBootstrap));
   const [isHydrated, setIsHydrated] = useState(false);
+  const [cloudLoadAttemptedShopIds, setCloudLoadAttemptedShopIds] = useState<Record<string, boolean>>({});
+  const [cloudLoadedShopIds, setCloudLoadedShopIds] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let active = true;
@@ -1044,6 +1256,99 @@ export function AppProvider({
   const currentUsers = state.users.filter((user) => user.shopId === currentShopId);
   const currentBusinessDay = getActiveBusinessDay(state.businessDays, currentShopId);
   const currentShift = getActiveShift(state.shifts, currentShopId, session?.id ?? null);
+  const activatedCloudShopId =
+    state.deviceActivations.reduce<DeviceActivation | null>((latest, activation) => {
+      if (!latest || activation.lastSeenAt.localeCompare(latest.lastSeenAt) > 0) {
+        return activation;
+      }
+
+      return latest;
+    }, null)?.shopId ?? null;
+  const cloudSyncShopId =
+    session?.workspace === "shop" && session.shopId ? session.shopId : activatedCloudShopId;
+
+  useEffect(() => {
+    if (!isHydrated || !cloudSyncShopId || cloudLoadAttemptedShopIds[cloudSyncShopId]) {
+      return;
+    }
+
+    let active = true;
+
+    const loadShopCloudState = async () => {
+      try {
+        const response = await fetch(`${SHOP_CLOUD_STATE_ENDPOINT}?shopId=${encodeURIComponent(cloudSyncShopId)}`, {
+          cache: "no-store",
+          headers: buildShopCloudHeaders(state, cloudSyncShopId, session)
+        });
+        const payload = (await response.json()) as {
+          ok: boolean;
+          message?: string;
+          state?: ShopCloudStatePatch | null;
+        };
+
+        if (!active) {
+          return;
+        }
+
+        setCloudLoadAttemptedShopIds((current) => ({
+          ...current,
+          [cloudSyncShopId]: true
+        }));
+
+        if (!payload.ok) {
+          return;
+        }
+
+        if (payload.state) {
+          setState((current) => ({
+            ...mergeShopCloudStatePatch(current, payload.state ?? {}, cloudSyncShopId),
+            session: current.session
+          }));
+        }
+
+        setCloudLoadedShopIds((current) => ({
+          ...current,
+          [cloudSyncShopId]: true
+        }));
+      } catch {
+        if (active) {
+          setCloudLoadAttemptedShopIds((current) => ({
+            ...current,
+            [cloudSyncShopId]: true
+          }));
+        }
+      }
+    };
+
+    void loadShopCloudState();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    activatedCloudShopId,
+    cloudLoadAttemptedShopIds,
+    cloudSyncShopId,
+    isHydrated,
+    session,
+    state.productKeys
+  ]);
+
+  useEffect(() => {
+    if (
+      !isHydrated ||
+      !cloudSyncShopId ||
+      !cloudLoadedShopIds[cloudSyncShopId] ||
+      session?.workspace !== "shop" ||
+      session.role === "support"
+    ) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => syncShopStateToCloud(state, cloudSyncShopId, session), 900);
+
+    return () => window.clearTimeout(timer);
+  }, [cloudLoadedShopIds, cloudSyncShopId, isHydrated, session, state]);
 
   useEffect(() => {
     if (!isHydrated || session?.workspace !== "shop" || !session.shopId || session.role === "support") {

@@ -120,6 +120,13 @@ create table if not exists public.device_activations (
   unique (product_key_id, device_fingerprint)
 );
 
+create table if not exists public.shop_cloud_snapshots (
+  shop_id uuid primary key references public.shops(id) on delete cascade,
+  state jsonb not null default '{}'::jsonb,
+  updated_by uuid references public.profiles(id),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.pos_settings (
   shop_id uuid primary key references public.shops(id) on delete cascade,
   shop_name text not null,
@@ -572,6 +579,7 @@ alter table public.brand_profile enable row level security;
 alter table public.licenses enable row level security;
 alter table public.product_keys enable row level security;
 alter table public.device_activations enable row level security;
+alter table public.shop_cloud_snapshots enable row level security;
 alter table public.pos_settings enable row level security;
 alter table public.product_categories enable row level security;
 alter table public.products enable row level security;
@@ -640,6 +648,7 @@ begin
     'licenses',
     'product_keys',
     'device_activations',
+    'shop_cloud_snapshots',
     'pos_settings',
     'product_categories',
     'products',
