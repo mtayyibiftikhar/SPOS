@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
+import { hashProductKey } from "@/lib/cloud-sync";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type ActivationRequest = {
@@ -7,10 +7,6 @@ type ActivationRequest = {
   deviceFingerprint?: string;
   productKey?: string;
 };
-
-function hashProductKey(value: string) {
-  return createHash("sha256").update(value.trim()).digest("hex");
-}
 
 function resolveEffectiveLicenseStatus(license: {
   auto_lock_days_after_expiry?: number | null;
@@ -65,7 +61,7 @@ export async function POST(request: Request) {
     const keyHash = hashProductKey(productKey);
     const { data: productKeyRow, error: productKeyError } = await supabase
       .from("product_keys")
-      .select("id, shop_id, status, allowed_devices, expires_at")
+      .select("id, shop_id, status, allowed_devices, created_at, activated_at, expires_at")
       .eq("key_hash", keyHash)
       .maybeSingle();
 
@@ -196,8 +192,148 @@ export async function POST(request: Request) {
       target_id: productKeyRow.id
     });
 
+    const [
+      { data: shop },
+      { data: refreshedLicense },
+      { data: settings },
+      { data: categories },
+      { data: activationRow },
+      { count: shopAdminCount }
+    ] = await Promise.all([
+      supabase
+        .from("shops")
+        .select("id, name, slug, email, website, phone, address, currency, timezone, plan_name, license_status, created_at")
+        .eq("id", productKeyRow.shop_id)
+        .maybeSingle(),
+      supabase
+        .from("licenses")
+        .select("id, shop_id, status, expires_at, last_payment_at, auto_lock_days_after_expiry, locked_at, lock_reason")
+        .eq("shop_id", productKeyRow.shop_id)
+        .maybeSingle(),
+      supabase
+        .from("pos_settings")
+        .select("shop_id, shop_name, logo_url, address, phone, email, website, currency, vat_number, receipt_qr_url, printer_settings, receipt_settings, tax_settings")
+        .eq("shop_id", productKeyRow.shop_id)
+        .maybeSingle(),
+      supabase
+        .from("product_categories")
+        .select("id, shop_id, name, description, created_at")
+        .eq("shop_id", productKeyRow.shop_id),
+      supabase
+        .from("device_activations")
+        .select("id, shop_id, product_key_id, browser_info, activated_at, last_seen_at")
+        .eq("product_key_id", productKeyRow.id)
+        .eq("device_fingerprint", deviceFingerprint)
+        .maybeSingle(),
+      supabase
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .eq("shop_id", productKeyRow.shop_id)
+        .eq("role", "shop_admin")
+    ]);
+
     return NextResponse.json({
       ok: true,
+      cloudState: shop
+        ? {
+            shops: [
+              {
+                id: shop.id,
+                name: shop.name,
+                slug: shop.slug,
+                email: shop.email ?? undefined,
+                website: shop.website ?? undefined,
+                phone: shop.phone ?? "",
+                address: shop.address ?? "",
+                currency: shop.currency ?? "SAR",
+                timezone: shop.timezone ?? "Asia/Riyadh",
+                planName: shop.plan_name ?? "Starter",
+                licenseStatus: shop.license_status,
+                createdAt: shop.created_at ?? now
+              }
+            ],
+            licenses: refreshedLicense
+              ? [
+                  {
+                    id: refreshedLicense.id,
+                    shopId: refreshedLicense.shop_id,
+                    status: refreshedLicense.status,
+                    expiresAt: refreshedLicense.expires_at ?? undefined,
+                    lastPaymentAt: refreshedLicense.last_payment_at ?? undefined,
+                    autoLockDaysAfterExpiry: refreshedLicense.auto_lock_days_after_expiry ?? 7,
+                    lockedAt: refreshedLicense.locked_at ?? undefined,
+                    lockReason: refreshedLicense.lock_reason ?? undefined
+                  }
+                ]
+              : [],
+            productKeys: [
+              {
+                id: productKeyRow.id,
+                key: productKey,
+                status: "active",
+                shopId: productKeyRow.shop_id,
+                allowedDevices: productKeyRow.allowed_devices,
+                createdAt: productKeyRow.created_at ?? now,
+                activatedAt: productKeyRow.activated_at ?? now,
+                expiresAt: productKeyRow.expires_at ?? undefined
+              }
+            ],
+            deviceActivations: activationRow
+              ? [
+                  {
+                    id: activationRow.id,
+                    shopId: activationRow.shop_id,
+                    productKeyId: activationRow.product_key_id,
+                    browserInfo: activationRow.browser_info ?? browserInfo,
+                    activatedAt: activationRow.activated_at ?? now,
+                    lastSeenAt: activationRow.last_seen_at ?? now
+                  }
+                ]
+              : [],
+            categories:
+              categories?.map((category) => ({
+                id: category.id,
+                shopId: category.shop_id,
+                name: category.name,
+                description: category.description ?? undefined,
+                createdAt: category.created_at ?? now
+              })) ?? [],
+            settingsByShop: {
+              [shop.id]: {
+                pos: {
+                  shopName: settings?.shop_name ?? shop.name,
+                  logoUrl: settings?.logo_url ?? undefined,
+                  address: settings?.address ?? shop.address ?? "",
+                  phone: settings?.phone ?? shop.phone ?? "",
+                  email: settings?.email ?? shop.email ?? undefined,
+                  website: settings?.website ?? shop.website ?? undefined,
+                  currency: settings?.currency ?? shop.currency ?? "SAR",
+                  vatNumber: settings?.vat_number ?? undefined,
+                  receiptQrUrl: settings?.receipt_qr_url ?? undefined
+                },
+                printer: settings?.printer_settings ?? {
+                  receiptSize: "80mm",
+                  autoPrintAfterSale: false
+                },
+                receipt: settings?.receipt_settings ?? {
+                  footerText: `Thank you for visiting ${shop.name}.`,
+                  showTax: true,
+                  showCustomer: true,
+                  showCashier: true,
+                  receiptSize: "80mm"
+                },
+                tax: settings?.tax_settings ?? {
+                  enabled: true,
+                  name: "VAT",
+                  rate: 15,
+                  mode: "inclusive",
+                  showOnReceipt: true
+                }
+              }
+            }
+          }
+        : null,
+      hasShopAdmin: (shopAdminCount ?? 0) > 0,
       licenseStatus,
       shopId: productKeyRow.shop_id
     });

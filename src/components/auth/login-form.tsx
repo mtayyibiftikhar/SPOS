@@ -11,9 +11,46 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import type { DemoAppState } from "@/types/pos";
+
+const DEVICE_FINGERPRINT_KEY = "simple-pos-device-fingerprint";
+
+type CloudActivationResponse = {
+  ok: boolean;
+  message?: string;
+  cloudState?: Partial<
+    Pick<
+      DemoAppState,
+      "categories" | "deviceActivations" | "licenses" | "productKeys" | "settingsByShop" | "shops"
+    >
+  > | null;
+  hasShopAdmin?: boolean;
+  shopId?: string;
+};
 
 function getBrowserInfo() {
   return typeof window === "undefined" ? "" : window.navigator.userAgent;
+}
+
+function getDeviceFingerprint() {
+  if (typeof window === "undefined") {
+    return "server-device";
+  }
+
+  const existingFingerprint = window.localStorage.getItem(DEVICE_FINGERPRINT_KEY);
+
+  if (existingFingerprint) {
+    return existingFingerprint;
+  }
+
+  const fingerprint =
+    typeof window.crypto?.randomUUID === "function"
+      ? window.crypto.randomUUID()
+      : `device-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  window.localStorage.setItem(DEVICE_FINGERPRINT_KEY, fingerprint);
+
+  return fingerprint;
 }
 
 function getPortalMode() {
@@ -29,7 +66,7 @@ function getPortalMode() {
 
 export function LoginForm() {
   const router = useRouter();
-  const { activateProductKey, logoutStoreDevice, state, login, t } = usePosApp();
+  const { activateProductKey, logoutStoreDevice, mergeCloudActivationState, state, login, t } = usePosApp();
   const [mode, setMode] = useState<"pos" | "owner">("pos");
   const [browserInfo, setBrowserInfo] = useState("");
   const [email, setEmail] = useState("");
@@ -145,7 +182,7 @@ export function LoginForm() {
     });
   };
 
-  const activateKey = () => {
+  const activateKey = async () => {
     setActivationMessage(null);
     setError(null);
     const normalizedActivationKey = activationKey.trim();
@@ -154,6 +191,46 @@ export function LoginForm() {
       ? state.users.some((user) => user.shopId === productKeyBeforeActivation.shopId && user.role === "shop_admin")
       : false;
 
+    setIsPending(true);
+
+    try {
+      const response = await fetch("/api/activation", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          browserInfo: browserInfo || getBrowserInfo(),
+          deviceFingerprint: getDeviceFingerprint(),
+          productKey: normalizedActivationKey
+        })
+      });
+      const payload = (await response.json()) as CloudActivationResponse;
+
+      if (payload.ok && payload.cloudState) {
+        mergeCloudActivationState(payload.cloudState);
+
+        if (!payload.hasShopAdmin) {
+          setActivationMessage("Activation accepted. Complete the first-time store setup to create the shop admin.");
+          router.push(`/register?key=${encodeURIComponent(normalizedActivationKey)}`);
+          setIsPending(false);
+          return;
+        }
+
+        setActivationMessage("Store activated on this device. You can now sign in with the store users.");
+        setIsPending(false);
+        return;
+      }
+
+      if (response.status !== 404 && response.status !== 500) {
+        setActivationMessage(payload.message ?? "Product key activation failed.");
+        setIsPending(false);
+        return;
+      }
+    } catch {
+      // Keep the local fallback available for localhost/demo mode.
+    }
+
     const result = activateProductKey({
       key: normalizedActivationKey,
       browserInfo: browserInfo || getBrowserInfo()
@@ -161,16 +238,19 @@ export function LoginForm() {
 
     if (!result.ok) {
       setActivationMessage(result.message ?? "Product key activation failed.");
+      setIsPending(false);
       return;
     }
 
     if (!shopAlreadyHasAdmin) {
       setActivationMessage("Activation accepted. Complete the first-time store setup to create the shop admin.");
       router.push(`/register?key=${encodeURIComponent(normalizedActivationKey)}`);
+      setIsPending(false);
       return;
     }
 
     setActivationMessage("Store activated on this device. You can now sign in with the store users.");
+    setIsPending(false);
   };
 
   const handleStoreLogout = (event: FormEvent<HTMLFormElement>) => {
@@ -312,8 +392,8 @@ export function LoginForm() {
                   {activationMessage}
                 </p>
               ) : null}
-              <Button className="w-full" onClick={activateKey}>
-                Verify activation key
+              <Button className="w-full" disabled={isPending} onClick={activateKey}>
+                {isPending ? "Verifying..." : "Verify activation key"}
               </Button>
               <Button asChild className="w-full" variant="secondary">
                 <Link href="/register">First-time store setup</Link>

@@ -138,6 +138,13 @@ type RegisterInstalledShopInput = {
   cashierPassword?: string;
 };
 
+type CloudActivationStatePatch = Partial<
+  Pick<
+    DemoAppState,
+    "categories" | "deviceActivations" | "licenses" | "productKeys" | "settingsByShop" | "shops"
+  >
+>;
+
 type OwnerLicenseInput = {
   shopId: string;
   status: LicenseStatus;
@@ -385,6 +392,7 @@ interface AppContextValue {
     key: string;
     browserInfo?: string;
   }) => { ok: boolean; message?: string; shopId?: string };
+  mergeCloudActivationState: (payload: CloudActivationStatePatch) => void;
   ownerSetLicense: (payload: OwnerLicenseInput) => { ok: boolean; message?: string };
   ownerSetProductKeyStatus: (payload: {
     productKeyId: string;
@@ -766,6 +774,49 @@ function persistLocalOwnerStateSnapshot(state: DemoAppState) {
     },
     body: JSON.stringify({ state })
   }).catch(() => undefined);
+
+  syncOwnerStateToCloud(state);
+}
+
+function syncOwnerStateToCloud(state: DemoAppState) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const ownerEmail = state.users.find((user) => user.role === "super_admin" && user.isActive)?.email;
+
+  if (!ownerEmail) {
+    return;
+  }
+
+  void fetch("/api/owner/sync-state", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-owner-email": ownerEmail
+    },
+    body: JSON.stringify({
+      state: {
+        ...state,
+        session: null
+      }
+    })
+  }).catch(() => undefined);
+}
+
+function mergeCloudActivationStatePatch(current: DemoAppState, patch: CloudActivationStatePatch) {
+  return {
+    ...current,
+    shops: mergeRowsById(current.shops, patch.shops ?? []),
+    licenses: mergeRowsById(current.licenses, patch.licenses ?? []),
+    productKeys: mergeRowsById(current.productKeys, patch.productKeys ?? []),
+    deviceActivations: mergeRowsById(current.deviceActivations, patch.deviceActivations ?? []),
+    categories: mergeRowsById(current.categories, patch.categories ?? []),
+    settingsByShop: {
+      ...current.settingsByShop,
+      ...(patch.settingsByShop ?? {})
+    }
+  } satisfies DemoAppState;
 }
 
 export function AppProvider({
@@ -906,6 +957,26 @@ export function AppProvider({
   }, [isHydrated]);
 
   const session = state.session;
+
+  useEffect(() => {
+    if (!isHydrated || session?.workspace !== "owner" || session.role !== "super_admin") {
+      return;
+    }
+
+    const timer = window.setTimeout(() => syncOwnerStateToCloud(state), 700);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    isHydrated,
+    session?.role,
+    session?.workspace,
+    state.categories,
+    state.licenses,
+    state.productKeys,
+    state.settingsByShop,
+    state.shops
+  ]);
+
   const currentShopId = session?.shopId ?? state.shops[0]?.id ?? null;
   const currentShop = state.shops.find((shop) => shop.id === currentShopId) ?? null;
   const currentLicense = state.licenses.find((license) => license.shopId === currentShopId) ?? null;
@@ -1324,9 +1395,12 @@ export function AppProvider({
               return current;
             }
 
+            const hasStoredSetupCredentials = Boolean(existingShop.setupEmail || existingShop.setupPasswordHash);
+
             if (
-              existingShop.setupEmail?.trim().toLowerCase() !== normalizedSetupEmail ||
-              existingShop.setupPasswordHash !== hashSecret(normalizedSetupPassword)
+              hasStoredSetupCredentials &&
+              (existingShop.setupEmail?.trim().toLowerCase() !== normalizedSetupEmail ||
+                existingShop.setupPasswordHash !== hashSecret(normalizedSetupPassword))
             ) {
               result = {
                 ok: false,
@@ -2122,6 +2196,9 @@ export function AppProvider({
         });
 
         return result;
+      },
+      mergeCloudActivationState: (payload) => {
+        setState((current) => mergeCloudActivationStatePatch(current, payload));
       },
       ownerSetLicense: ({ shopId, status, expiresAt, planName, allowedDevices, autoLockDaysAfterExpiry, lockReason }) => {
         if (!session || session.role !== "super_admin") {
