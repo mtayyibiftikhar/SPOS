@@ -452,24 +452,24 @@ export function buildReceiptPdfDocument({
     const productName =
       sanitizePdfText(item.productName.en || item.productName.ar || item.productName.ur || "Item") || "Item";
 
-    appendWrappedText(elements, productName, { bold: true, size: 10, spacingAfter: 2 }, receiptSize);
+    appendWrappedText(elements, productName, { bold: true, size: 10.2, spacingAfter: 4 }, receiptSize);
     appendPair(
       elements,
       `Qty ${item.quantity} x ${formatAmount(item.unitPrice, currency)}`,
       formatAmount(item.lineTotal, currency),
-      { size: 9, spacingAfter: 7 }
+      { size: 9, spacingAfter: item.discountAmount > 0 ? 5 : 11 }
     );
     if (item.discountAmount > 0) {
       appendPair(
         elements,
         "Item discount",
         `-${formatAmount(item.discountAmount, currency)}`,
-        { size: 8.5, spacingAfter: 7 }
+        { size: 8.5, spacingAfter: 11 }
       );
     }
 
     if (index < items.length - 1) {
-      appendRule(elements, { spacingAfter: 6 });
+      appendRule(elements, { spacingBefore: 1, spacingAfter: 8 });
     }
   });
 

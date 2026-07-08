@@ -21,20 +21,33 @@ export function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
 }
 
+export function normalizeDiscountValue(
+  discountType: DiscountType,
+  discountValue: number,
+  maxFixedAmount: number
+) {
+  const safeValue = Number.isFinite(discountValue) ? Math.max(0, discountValue) : 0;
+  const limit = discountType === "percentage" ? 100 : Math.max(0, maxFixedAmount);
+
+  return roundMoney(Math.min(safeValue, limit));
+}
+
 export function calculateDiscountAmount(
   subtotal: number,
   discountType: DiscountType,
   discountValue: number
 ) {
-  if (discountValue <= 0) {
+  const normalizedDiscountValue = normalizeDiscountValue(discountType, discountValue, subtotal);
+
+  if (normalizedDiscountValue <= 0) {
     return 0;
   }
 
   if (discountType === "percentage") {
-    return roundMoney(Math.min(subtotal, subtotal * (discountValue / 100)));
+    return roundMoney(Math.min(subtotal, subtotal * (normalizedDiscountValue / 100)));
   }
 
-  return roundMoney(Math.min(subtotal, discountValue));
+  return roundMoney(Math.min(subtotal, normalizedDiscountValue));
 }
 
 export function calculateBillTotals({

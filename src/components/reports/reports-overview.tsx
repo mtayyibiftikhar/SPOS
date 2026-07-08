@@ -8,6 +8,7 @@ import {
   Clock3,
   Download,
   Package,
+  ReceiptText,
   Users2,
   WalletCards
 } from "lucide-react";
@@ -32,7 +33,11 @@ import { WorkspaceSectionsNav } from "@/components/ui/workspace-sections-nav";
 import { formatBusinessDate, formatCurrency, formatDateTime } from "@/lib/utils";
 
 type RangePreset = "today" | "yesterday" | "week" | "month" | "year" | "custom";
-type ReportView = "overview" | "profit" | "cashier" | "inventory" | "refunds";
+type ReportView = "overview" | "profit" | "cashier" | "inventory" | "refunds" | "tax";
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
 
 function SummaryRow({
   label,
@@ -162,7 +167,8 @@ export function ReportsOverview() {
     requestedView === "profit" ||
     requestedView === "cashier" ||
     requestedView === "inventory" ||
-    requestedView === "refunds"
+    requestedView === "refunds" ||
+    requestedView === "tax"
       ? requestedView
       : "overview";
 
@@ -415,6 +421,109 @@ export function ReportsOverview() {
     [currentShop, selectedRange.dateFrom, selectedRange.dateTo, state.refunds, timeZone]
   );
 
+  const taxSummary = useMemo(() => {
+    const emptySummary = {
+      invoiceTax: 0,
+      refundTax: 0,
+      netPayableTax: 0,
+      customerPaidTax: 0,
+      customerDueTax: 0,
+      authorityPaidTax: 0,
+      remainingPayableTax: 0,
+      cashTax: 0,
+      cardTax: 0,
+      accountTax: 0,
+      cashRefundTax: 0,
+      cardRefundTax: 0,
+      accountRefundTax: 0,
+      billCount: 0,
+      refundCount: 0
+    };
+
+    if (!currentShop) {
+      return emptySummary;
+    }
+
+    const periodBills = state.bills.filter((bill) => {
+      if (bill.shopId !== currentShop.id || bill.status === "cancelled") {
+        return false;
+      }
+
+      const businessDate = getEntryBusinessDate(bill.createdAt, timeZone, bill.businessDate);
+
+      return businessDate >= selectedRange.dateFrom && businessDate <= selectedRange.dateTo;
+    });
+    const periodRefunds = state.refunds.filter((refund) => {
+      if (refund.shopId !== currentShop.id) {
+        return false;
+      }
+
+      const businessDate = getEntryBusinessDate(refund.returnDate, timeZone, refund.businessDate);
+
+      return businessDate >= selectedRange.dateFrom && businessDate <= selectedRange.dateTo;
+    });
+    const refundTaxAmount = (refund: (typeof periodRefunds)[number]) => {
+      const originalBill = state.bills.find((bill) => bill.id === refund.originalBillId);
+
+      if (!originalBill || originalBill.total <= 0 || originalBill.taxAmount <= 0) {
+        return 0;
+      }
+
+      return roundMoney(Math.abs(originalBill.taxAmount * (refund.amount / originalBill.total)));
+    };
+    const invoiceTax = roundMoney(periodBills.reduce((sum, bill) => sum + bill.taxAmount, 0));
+    const refundTax = roundMoney(periodRefunds.reduce((sum, refund) => sum + refundTaxAmount(refund), 0));
+    const customerPaidTax = roundMoney(
+      periodBills.reduce((sum, bill) => {
+        if (bill.total <= 0 || bill.taxAmount <= 0) {
+          return sum;
+        }
+
+        const paidRatio = Math.min(Math.max(bill.paidAmount, 0), bill.total) / bill.total;
+
+        return sum + bill.taxAmount * paidRatio;
+      }, 0)
+    );
+    const cashTax = roundMoney(
+      periodBills.filter((bill) => bill.paymentMethod === "cash").reduce((sum, bill) => sum + bill.taxAmount, 0)
+    );
+    const cardTax = roundMoney(
+      periodBills.filter((bill) => bill.paymentMethod === "card").reduce((sum, bill) => sum + bill.taxAmount, 0)
+    );
+    const accountTax = roundMoney(
+      periodBills.filter((bill) => bill.paymentMethod === "account").reduce((sum, bill) => sum + bill.taxAmount, 0)
+    );
+    const cashRefundTax = roundMoney(
+      periodRefunds.filter((refund) => refund.paymentMethod === "cash").reduce((sum, refund) => sum + refundTaxAmount(refund), 0)
+    );
+    const cardRefundTax = roundMoney(
+      periodRefunds.filter((refund) => refund.paymentMethod === "card").reduce((sum, refund) => sum + refundTaxAmount(refund), 0)
+    );
+    const accountRefundTax = roundMoney(
+      periodRefunds.filter((refund) => refund.paymentMethod === "account").reduce((sum, refund) => sum + refundTaxAmount(refund), 0)
+    );
+    const netPayableTax = roundMoney(invoiceTax - refundTax);
+    const authorityPaidTax = 0;
+
+    return {
+      invoiceTax,
+      refundTax,
+      netPayableTax,
+      customerPaidTax,
+      customerDueTax: roundMoney(Math.max(0, netPayableTax - customerPaidTax)),
+      authorityPaidTax,
+      remainingPayableTax: roundMoney(netPayableTax - authorityPaidTax),
+      cashTax,
+      cardTax,
+      accountTax,
+      cashRefundTax,
+      cardRefundTax,
+      accountRefundTax,
+      billCount: periodBills.length,
+      refundCount: periodRefunds.length
+    };
+  }, [currentShop, selectedRange.dateFrom, selectedRange.dateTo, state.bills, state.refunds, timeZone]);
+
   const filteredLedgerEntries = useMemo(
     () =>
       state.ledgerEntries
@@ -563,7 +672,8 @@ export function ReportsOverview() {
         profit: "Profit & Loss Report",
         cashier: "Sales by Employee Report",
         inventory: "Inventory Report",
-        refunds: "Refund Report"
+        refunds: "Refund Report",
+        tax: "Tax Payable Report"
       };
       const sections =
         activeView === "cashier"
@@ -657,6 +767,53 @@ export function ReportsOverview() {
                       : [{ label: t("reports.rangeEmpty"), value: "-" }]
                   }
                 ];
+      const reportSections =
+        activeView === "tax"
+          ? [
+              {
+                title: t("reports.taxReportTitle"),
+                rows: [
+                  { label: t("reports.taxInvoiceOutput"), value: formatCurrency(taxSummary.invoiceTax, currency, "en") },
+                  { label: t("reports.taxReversed"), value: formatCurrency(-taxSummary.refundTax, currency, "en") },
+                  {
+                    label: t("reports.taxNetPayable"),
+                    value: formatCurrency(taxSummary.netPayableTax, currency, "en"),
+                    detail: t("reports.taxNetPayableDesc")
+                  },
+                  {
+                    label: t("reports.taxPaidByCustomers"),
+                    value: formatCurrency(taxSummary.customerPaidTax, currency, "en"),
+                    detail: t("reports.taxPaidByCustomersDesc")
+                  },
+                  {
+                    label: t("reports.taxPaidToAuthority"),
+                    value: formatCurrency(taxSummary.authorityPaidTax, currency, "en"),
+                    detail: t("reports.taxPaidToAuthorityDesc")
+                  },
+                  { label: t("reports.taxRemainingPayable"), value: formatCurrency(taxSummary.remainingPayableTax, currency, "en") }
+                ]
+              },
+              {
+                title: t("reports.taxPaymentSplit"),
+                rows: [
+                  { label: t("common.cash"), value: formatCurrency(taxSummary.cashTax, currency, "en") },
+                  { label: t("common.card"), value: formatCurrency(taxSummary.cardTax, currency, "en") },
+                  { label: t("common.account"), value: formatCurrency(taxSummary.accountTax, currency, "en") },
+                  { label: t("reports.cashRefunds"), value: formatCurrency(-taxSummary.cashRefundTax, currency, "en") },
+                  { label: t("reports.cardRefunds"), value: formatCurrency(-taxSummary.cardRefundTax, currency, "en") },
+                  { label: t("reports.accountRefunds"), value: formatCurrency(-taxSummary.accountRefundTax, currency, "en") }
+                ]
+              },
+              {
+                title: t("reports.exportVolumeSection"),
+                rows: [
+                  { label: t("reports.exportBillCount"), value: String(taxSummary.billCount) },
+                  { label: t("reports.exportRefundCount"), value: String(taxSummary.refundCount) },
+                  { label: t("reports.periodLabel"), value: selectedRangeLabel }
+                ]
+              }
+            ]
+          : sections;
       const accountingSections = [
         {
           title: "Accounting controls",
@@ -688,7 +845,7 @@ export function ReportsOverview() {
         generatedAt: formatDateTime(new Date().toISOString(), "en"),
         logoUrl: currentSettings?.pos.logoUrl,
         period: selectedRangeLabel,
-        sections: [...sections, ...accountingSections],
+        sections: [...reportSections, ...accountingSections],
         shopName: currentShop.name,
         subtitle: t("reports.rangeSubtitle"),
         title: titleByView[activeView]
@@ -738,6 +895,12 @@ export function ReportsOverview() {
             active: activeView === "refunds",
             label: t("reports.sectionRefunds"),
             description: t("reports.sectionRefundsDesc")
+          },
+          {
+            href: "/reports?view=tax",
+            active: activeView === "tax",
+            label: t("reports.sectionTax"),
+            description: t("reports.sectionTaxDesc")
           }
         ]}
       />
@@ -986,6 +1149,78 @@ export function ReportsOverview() {
               ) : (
                 <p className="mt-5 text-sm leading-6 text-slate-600">{t("reports.rangeEmpty")}</p>
               )}
+            </Card>
+          </div>
+        </div>
+      ) : null}
+
+      {activeView === "tax" ? (
+        <div className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MetricCard
+              description={t("reports.taxInvoiceOutputDesc")}
+              label={t("reports.taxInvoiceOutput")}
+              value={formatCurrency(taxSummary.invoiceTax, currency, locale)}
+            />
+            <MetricCard
+              description={t("reports.taxReversedDesc")}
+              label={t("reports.taxReversed")}
+              value={formatCurrency(-taxSummary.refundTax, currency, locale)}
+            />
+            <MetricCard
+              description={t("reports.taxNetPayableDesc")}
+              label={t("reports.taxNetPayable")}
+              value={formatCurrency(taxSummary.netPayableTax, currency, locale)}
+            />
+            <MetricCard
+              description={t("reports.taxPaidByCustomersDesc")}
+              label={t("reports.taxPaidByCustomers")}
+              value={formatCurrency(taxSummary.customerPaidTax, currency, locale)}
+            />
+          </div>
+
+          <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+            <Card className="p-6">
+              <div className="flex items-center gap-2">
+                <ReceiptText className="h-5 w-5 text-ink" />
+                <div>
+                  <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.taxReportTitle")}</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">{selectedRangeLabel}</p>
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-3">
+                <SummaryRow label={t("reports.taxInvoiceOutput")} value={formatCurrency(taxSummary.invoiceTax, currency, locale)} />
+                <SummaryRow label={t("reports.taxReversed")} value={formatCurrency(-taxSummary.refundTax, currency, locale)} />
+                <SummaryRow label={t("reports.taxNetPayable")} value={formatCurrency(taxSummary.netPayableTax, currency, locale)} />
+                <SummaryRow label={t("reports.taxPaidByCustomers")} value={formatCurrency(taxSummary.customerPaidTax, currency, locale)} />
+                <SummaryRow label={t("reports.taxCustomerDue")} value={formatCurrency(taxSummary.customerDueTax, currency, locale)} />
+                <SummaryRow label={t("reports.taxPaidToAuthority")} value={formatCurrency(taxSummary.authorityPaidTax, currency, locale)} />
+                <SummaryRow label={t("reports.taxRemainingPayable")} value={formatCurrency(taxSummary.remainingPayableTax, currency, locale)} />
+              </div>
+
+              <div className="mt-5 rounded-3xl border border-dashed border-line bg-shell/70 p-4 text-sm leading-6 text-slate-600">
+                {t("reports.taxPaidToAuthorityDesc")}
+              </div>
+            </Card>
+
+            <Card className="p-6">
+              <div className="flex items-center gap-2">
+                <WalletCards className="h-5 w-5 text-ink" />
+                <div>
+                  <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.taxPaymentSplit")}</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">{t("reports.taxPaymentSplitDesc")}</p>
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-3">
+                <SummaryRow label={t("common.cash")} value={formatCurrency(taxSummary.cashTax, currency, locale)} />
+                <SummaryRow label={t("common.card")} value={formatCurrency(taxSummary.cardTax, currency, locale)} />
+                <SummaryRow label={t("common.account")} value={formatCurrency(taxSummary.accountTax, currency, locale)} />
+                <SummaryRow label={t("reports.cashRefunds")} value={formatCurrency(-taxSummary.cashRefundTax, currency, locale)} />
+                <SummaryRow label={t("reports.cardRefunds")} value={formatCurrency(-taxSummary.cardRefundTax, currency, locale)} />
+                <SummaryRow label={t("reports.accountRefunds")} value={formatCurrency(-taxSummary.accountRefundTax, currency, locale)} />
+              </div>
             </Card>
           </div>
         </div>

@@ -49,6 +49,7 @@ import {
   findExistingCustomer,
   findCustomerPhoneConflict,
   getBillStatus,
+  normalizeDiscountValue,
   normalizeCustomer,
   shouldPersistCustomer
 } from "@/lib/billing";
@@ -4397,14 +4398,20 @@ export function AppProvider({
               const product = availableProducts.find((candidate) => candidate.id === item.productId);
 
               const normalizedUnitPrice = Math.round(Math.max(item.unitPrice, 0) * 100) / 100;
-              const normalizedDiscountValue = Math.round(Math.max(item.discountValue ?? 0, 0) * 100) / 100;
+              const normalizedDiscountType = item.discountType ?? "fixed";
+              const grossLineTotal = Math.round(normalizedUnitPrice * Math.max(item.quantity, 0) * 100) / 100;
+              const normalizedDiscountValue = normalizeDiscountValue(
+                normalizedDiscountType,
+                item.discountValue ?? 0,
+                grossLineTotal
+              );
 
               if (!product || product.status !== "active" || item.quantity <= 0 || normalizedUnitPrice <= 0) {
                 return null;
               }
 
               return {
-                discountType: item.discountType ?? "fixed",
+                discountType: normalizedDiscountType,
                 discountValue: normalizedDiscountValue,
                 product,
                 quantity: item.quantity,
@@ -4502,6 +4509,23 @@ export function AppProvider({
             return current;
           }
 
+          const billDiscountBase = Math.round(
+            validItems.reduce((sum, item) => {
+              const grossLineTotal = Math.round(item.unitPrice * item.quantity * 100) / 100;
+              const itemDiscountAmount = calculateDiscountAmount(
+                grossLineTotal,
+                item.discountType,
+                item.discountValue
+              );
+
+              return sum + Math.max(0, grossLineTotal - itemDiscountAmount);
+            }, 0) * 100
+          ) / 100;
+          const normalizedBillDiscountValue = normalizeDiscountValue(
+            payload.discountType,
+            payload.discountValue,
+            billDiscountBase
+          );
           const totals = calculateBillTotals({
             items: validItems.map((item) => ({
               discountType: item.discountType,
@@ -4511,7 +4535,7 @@ export function AppProvider({
               taxable: item.product.taxable
             })),
             discountType: payload.discountType,
-            discountValue: payload.discountValue,
+            discountValue: normalizedBillDiscountValue,
             taxEnabled: taxSettings?.enabled ?? false,
             taxRate: taxSettings?.rate ?? 0,
             taxMode: taxSettings?.mode ?? "inclusive"
@@ -4570,7 +4594,7 @@ export function AppProvider({
             subtotal: totals.subtotal,
             itemDiscountAmount: totals.itemDiscountAmount,
             discountType: payload.discountType,
-            discountValue: payload.discountValue,
+            discountValue: normalizedBillDiscountValue,
             discountAmount: totals.discountAmount,
             taxName: taxSettings?.enabled ? taxSettings.name : undefined,
             taxRate: taxSettings?.enabled ? taxSettings.rate : 0,

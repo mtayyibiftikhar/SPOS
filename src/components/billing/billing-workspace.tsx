@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -23,7 +23,13 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PhoneNumberField } from "@/components/ui/phone-number-field";
-import { calculateBillTotals, calculateDiscountAmount, calculatePaidAndDue, getLocalizedProductName } from "@/lib/billing";
+import {
+  calculateBillTotals,
+  calculateDiscountAmount,
+  calculatePaidAndDue,
+  getLocalizedProductName,
+  normalizeDiscountValue
+} from "@/lib/billing";
 import { paymentMethodLabelKeys } from "@/lib/i18n";
 import { combinePhoneNumber, DEFAULT_PHONE_COUNTRY_CODE, sanitizePhoneDigits, splitPhoneNumber } from "@/lib/phone";
 import { cn, formatCurrency } from "@/lib/utils";
@@ -109,6 +115,18 @@ function sanitizePriceInput(value: string) {
   const [wholePart = "", decimalPart] = onlyDigitsAndDots.split(".");
 
   return decimalPart === undefined ? wholePart : `${wholePart}.${decimalPart.slice(0, 2)}`;
+}
+
+function clampDiscountInput(discountType: DiscountType, value: string, maxFixedAmount: number) {
+  const sanitizedValue = sanitizePriceInput(value);
+  const parsedValue = Number.parseFloat(sanitizedValue);
+  const normalizedValue = normalizeDiscountValue(
+    discountType,
+    Number.isFinite(parsedValue) ? parsedValue : 0,
+    maxFixedAmount
+  );
+
+  return formatEditablePrice(normalizedValue);
 }
 
 function StatusChip({ icon: Icon, label, tone }: StatusChipProps) {
@@ -289,11 +307,13 @@ export function BillingWorkspace() {
 
           const parsedUnitPrice = Number.parseFloat(line.unitPriceInput);
           const unitPrice = Number.isFinite(parsedUnitPrice) ? Math.round(parsedUnitPrice * 100) / 100 : 0;
-          const parsedDiscountValue = Number.parseFloat(line.discountValueInput);
-          const discountValue = Number.isFinite(parsedDiscountValue)
-            ? Math.round(Math.max(parsedDiscountValue, 0) * 100) / 100
-            : 0;
           const grossLineTotal = Math.round(unitPrice * line.quantity * 100) / 100;
+          const parsedDiscountValue = Number.parseFloat(line.discountValueInput);
+          const discountValue = normalizeDiscountValue(
+            line.discountType,
+            Number.isFinite(parsedDiscountValue) ? parsedDiscountValue : 0,
+            grossLineTotal
+          );
           const discountAmount = calculateDiscountAmount(grossLineTotal, line.discountType, discountValue);
 
           return {
@@ -383,6 +403,21 @@ export function BillingWorkspace() {
   }
 
   const customerDisplayName = normalizedCustomerName || t("billing.walkInCustomer");
+  const getLineDiscountLimit = (line: CartLine) => {
+    const parsedUnitPrice = Number.parseFloat(line.unitPriceInput);
+    const unitPrice = Number.isFinite(parsedUnitPrice) ? Math.max(0, Math.round(parsedUnitPrice * 100) / 100) : 0;
+
+    return Math.round(unitPrice * line.quantity * 100) / 100;
+  };
+
+  useEffect(() => {
+    const nextDiscountValue = clampDiscountInput(discountType, discountValue, totals.subtotal);
+
+    if (nextDiscountValue !== discountValue) {
+      setDiscountValue(nextDiscountValue);
+    }
+  }, [discountType, discountValue, totals.subtotal]);
+
   const isProductStockBlocked = (product: Product) =>
     product.kind === "product" && (cartQuantityByProductId[product.id] ?? 0) >= product.stockQuantity;
   const getStockBlockedMessage = (product: Product) =>
@@ -433,7 +468,22 @@ export function BillingWorkspace() {
     }
 
     setCart((current) =>
-      current.map((line) => (line.productId === productId ? { ...line, quantity } : line))
+      current.map((line) => {
+        if (line.productId !== productId) {
+          return line;
+        }
+
+        const nextLine = { ...line, quantity };
+
+        return {
+          ...nextLine,
+          discountValueInput: clampDiscountInput(
+            nextLine.discountType,
+            nextLine.discountValueInput,
+            getLineDiscountLimit(nextLine)
+          )
+        };
+      })
     );
   };
 
@@ -441,9 +491,22 @@ export function BillingWorkspace() {
     const sanitizedValue = sanitizePriceInput(value);
 
     setCart((current) =>
-      current.map((line) =>
-        line.productId === productId ? { ...line, unitPriceInput: sanitizedValue } : line
-      )
+      current.map((line) => {
+        if (line.productId !== productId) {
+          return line;
+        }
+
+        const nextLine = { ...line, unitPriceInput: sanitizedValue };
+
+        return {
+          ...nextLine,
+          discountValueInput: clampDiscountInput(
+            nextLine.discountType,
+            nextLine.discountValueInput,
+            getLineDiscountLimit(nextLine)
+          )
+        };
+      })
     );
   };
 
@@ -452,14 +515,28 @@ export function BillingWorkspace() {
     patch: Partial<Pick<CartLine, "discountType" | "discountValueInput">>
   ) => {
     setCart((current) =>
-      current.map((line) =>
-        line.productId === productId
-          ? {
-              ...line,
-              ...patch
-            }
-          : line
-      )
+      current.map((line) => {
+        if (line.productId !== productId) {
+          return line;
+        }
+
+        const nextDiscountType = patch.discountType ?? line.discountType;
+        const nextDiscountValueInput = patch.discountValueInput ?? line.discountValueInput;
+        const nextLine = {
+          ...line,
+          ...patch,
+          discountType: nextDiscountType
+        };
+
+        return {
+          ...nextLine,
+          discountValueInput: clampDiscountInput(
+            nextDiscountType,
+            nextDiscountValueInput,
+            getLineDiscountLimit(nextLine)
+          )
+        };
+      })
     );
   };
 
@@ -479,15 +556,33 @@ export function BillingWorkspace() {
         const parsedValue = Number.parseFloat(line.unitPriceInput);
 
         if (Number.isFinite(parsedValue) && parsedValue > 0) {
-          return {
+          const nextLine = {
             ...line,
             unitPriceInput: formatEditablePrice(Math.round(parsedValue * 100) / 100)
           };
+
+          return {
+            ...nextLine,
+            discountValueInput: clampDiscountInput(
+              nextLine.discountType,
+              nextLine.discountValueInput,
+              getLineDiscountLimit(nextLine)
+            )
+          };
         }
 
-        return {
+        const nextLine = {
           ...line,
           unitPriceInput: formatEditablePrice(fallback.salePrice)
+        };
+
+        return {
+          ...nextLine,
+          discountValueInput: clampDiscountInput(
+            nextLine.discountType,
+            nextLine.discountValueInput,
+            getLineDiscountLimit(nextLine)
+          )
         };
       })
     );
@@ -659,6 +754,7 @@ export function BillingWorkspace() {
 
     setIsSubmitting(true);
 
+    const normalizedBillDiscountValue = Number(clampDiscountInput(discountType, discountValue, totals.subtotal));
     const payload = {
       customer: {
         email: customerForm.email.trim(),
@@ -668,7 +764,7 @@ export function BillingWorkspace() {
         whatsapp: normalizedCustomerWhatsapp
       },
       discountType,
-      discountValue: Number(discountValue || 0),
+      discountValue: normalizedBillDiscountValue,
       items: cartProducts.map((line) => ({
         discountType: line.discountType,
         discountValue: line.discountValue,
@@ -1410,7 +1506,10 @@ export function BillingWorkspace() {
                       "flex-1 rounded-[12px] px-3 py-2 text-sm font-semibold transition",
                       discountType === "fixed" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-white"
                     )}
-                    onClick={() => setDiscountType("fixed")}
+                    onClick={() => {
+                      setDiscountType("fixed");
+                      setDiscountValue((current) => clampDiscountInput("fixed", current, totals.subtotal));
+                    }}
                     type="button"
                   >
                     {t("common.fixed")}
@@ -1420,7 +1519,10 @@ export function BillingWorkspace() {
                       "flex-1 rounded-[12px] px-3 py-2 text-sm font-semibold transition",
                       discountType === "percentage" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-white"
                     )}
-                    onClick={() => setDiscountType("percentage")}
+                    onClick={() => {
+                      setDiscountType("percentage");
+                      setDiscountValue((current) => clampDiscountInput("percentage", current, totals.subtotal));
+                    }}
                     type="button"
                   >
                     {t("common.percentage")}
@@ -1436,7 +1538,9 @@ export function BillingWorkspace() {
                   className="rounded-[16px] border-slate-200 bg-slate-50"
                   inputMode="decimal"
                   value={discountValue}
-                  onChange={(event) => setDiscountValue(sanitizePriceInput(event.target.value) || "0")}
+                  onChange={(event) =>
+                    setDiscountValue(clampDiscountInput(discountType, event.target.value, totals.subtotal))
+                  }
                 />
               </div>
 
