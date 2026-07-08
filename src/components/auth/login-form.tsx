@@ -136,8 +136,25 @@ export function LoginForm() {
   const activatedShop = activatedProductKey
     ? state.shops.find((shop) => shop.id === activatedProductKey.shopId) ?? null
     : null;
+  const activatedProductKeyAliases = useMemo(
+    () =>
+      activatedProductKey
+        ? state.productKeys.filter((productKey) => productKey.key.trim() === activatedProductKey.key.trim())
+        : [],
+    [activatedProductKey, state.productKeys]
+  );
+  const activatedShopIds = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...(activatedShop ? [activatedShop.id] : []),
+          ...activatedProductKeyAliases.map((productKey) => productKey.shopId)
+        ])
+      ),
+    [activatedProductKeyAliases, activatedShop]
+  );
   const activatedShopHasAdmin = Boolean(
-    activatedShop && state.users.some((user) => user.shopId === activatedShop.id && user.role === "shop_admin")
+    activatedShop && state.users.some((user) => user.shopId && activatedShopIds.includes(user.shopId) && user.role === "shop_admin")
   );
   const activatedSettings = activatedShop ? state.settingsByShop[activatedShop.id] : null;
   const shopLogo = activatedSettings?.pos.logoUrl;
@@ -147,7 +164,7 @@ export function LoginForm() {
     () =>
       activatedShop
         ? state.users
-            .filter((user) => user.shopId === activatedShop.id && user.isActive && user.role !== "support")
+            .filter((user) => user.shopId && activatedShopIds.includes(user.shopId) && user.isActive && user.role !== "support")
             .sort((left, right) => {
               if (left.role === right.role) {
                 return left.name.localeCompare(right.name);
@@ -156,7 +173,7 @@ export function LoginForm() {
               return left.role === "shop_admin" ? -1 : 1;
             })
         : [],
-    [activatedShop, state.users]
+    [activatedShop, activatedShopIds, state.users]
   );
   const selectedUser = registeredShopUsers.find((user) => user.id === selectedUserId) ?? registeredShopUsers[0];
   const ownerUser = state.users.find((user) => user.role === "super_admin" && user.isActive);
@@ -254,10 +271,14 @@ export function LoginForm() {
     setActivationMessage(null);
     setError(null);
     const normalizedActivationKey = activationKey.trim();
-    const productKeyBeforeActivation = state.productKeys.find((productKey) => productKey.key.trim() === normalizedActivationKey);
-    const shopAlreadyHasAdmin = productKeyBeforeActivation
-      ? state.users.some((user) => user.shopId === productKeyBeforeActivation.shopId && user.role === "shop_admin")
-      : false;
+    const productKeysBeforeActivation = state.productKeys.filter(
+      (productKey) => productKey.key.trim() === normalizedActivationKey
+    );
+    const shopIdsBeforeActivation = productKeysBeforeActivation.map((productKey) => productKey.shopId);
+    const shopAlreadyHasAdmin =
+      shopIdsBeforeActivation.length > 0
+        ? state.users.some((user) => user.shopId && shopIdsBeforeActivation.includes(user.shopId) && user.role === "shop_admin")
+        : false;
 
     setIsPending(true);
 
@@ -279,7 +300,7 @@ export function LoginForm() {
         cacheCloudActivationState(normalizedActivationKey, payload.cloudState);
         mergeCloudActivationState(payload.cloudState);
 
-        if (!payload.hasShopAdmin) {
+        if (!payload.hasShopAdmin && !shopAlreadyHasAdmin) {
           setActivationMessage("Activation accepted. Complete the first-time store setup to create the shop admin.");
           router.push(`/register?key=${encodeURIComponent(normalizedActivationKey)}`);
           setIsPending(false);
@@ -435,16 +456,16 @@ export function LoginForm() {
             <span className="inline-flex rounded-2xl bg-emerald-50 p-3 text-emerald-700">
               <Store className="h-5 w-5" />
             </span>
-            <h2 className="mt-5 font-display text-3xl font-semibold text-slate-950">Complete store setup</h2>
+            <h2 className="mt-5 font-display text-3xl font-semibold text-slate-950">Create first admin</h2>
             <p className="mt-3 text-sm leading-6 text-slate-600">
-              This device is activated for {activatedShop?.name}, but the first store admin has not been created yet.
+              {activatedShop?.name} is already created and this device is activated. Add the first admin login once; after that this screen becomes the normal staff sign-in.
             </p>
             <div className="mt-7 space-y-4">
               <Button asChild className="w-full">
-                <Link href={`/register?key=${encodeURIComponent(activatedProductKey?.key ?? "")}`}>Create store admin</Link>
+                <Link href={`/register?key=${encodeURIComponent(activatedProductKey?.key ?? "")}`}>Create first admin</Link>
               </Button>
               <p className="rounded-2xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">
-                After this setup is complete, this screen will only show the normal staff sign-in.
+                Store details come from the activation key; this step only creates the first user login.
               </p>
             </div>
           </div>

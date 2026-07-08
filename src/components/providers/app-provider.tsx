@@ -1426,24 +1426,6 @@ export function AppProvider({
             return current;
           }
 
-          if (!normalizedSetupEmail || !normalizedSetupPassword) {
-            result = {
-              ok: false,
-              message: "Store setup email and password are required."
-            };
-            return current;
-          }
-
-          const setupPasswordError = validatePasswordLength(normalizedSetupPassword, "Store setup password");
-
-          if (setupPasswordError) {
-            result = {
-              ok: false,
-              message: setupPasswordError
-            };
-            return current;
-          }
-
           if (
             working.users.some(
               (user) =>
@@ -1495,16 +1477,35 @@ export function AppProvider({
 
             const hasStoredSetupCredentials = Boolean(existingShop.setupEmail || existingShop.setupPasswordHash);
 
-            if (
-              hasStoredSetupCredentials &&
-              (existingShop.setupEmail?.trim().toLowerCase() !== normalizedSetupEmail ||
-                existingShop.setupPasswordHash !== hashSecret(normalizedSetupPassword))
-            ) {
-              result = {
-                ok: false,
-                message: "Store setup email or password does not match the owner-created shop."
-              };
-              return current;
+            if (hasStoredSetupCredentials) {
+              if (!normalizedSetupEmail || !normalizedSetupPassword) {
+                result = {
+                  ok: false,
+                  message: "Store setup email and password are required."
+                };
+                return current;
+              }
+
+              const setupPasswordError = validatePasswordLength(normalizedSetupPassword, "Store setup password");
+
+              if (setupPasswordError) {
+                result = {
+                  ok: false,
+                  message: setupPasswordError
+                };
+                return current;
+              }
+
+              if (
+                existingShop.setupEmail?.trim().toLowerCase() !== normalizedSetupEmail ||
+                existingShop.setupPasswordHash !== hashSecret(normalizedSetupPassword)
+              ) {
+                result = {
+                  ok: false,
+                  message: "Store setup email or password does not match the owner-created shop."
+                };
+                return current;
+              }
             }
 
             if (["revoked", "locked", "expired"].includes(existingProductKey.status)) {

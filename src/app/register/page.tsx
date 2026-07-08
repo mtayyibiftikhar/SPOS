@@ -183,6 +183,10 @@ export default function RegisterPage() {
       return;
     }
 
+    if (cachedDetails) {
+      setActiveStep((current) => (current === "setup" ? "admin" : current));
+    }
+
     setForm((current) => ({
       ...current,
       shopName: current.shopName || settings?.pos.shopName || shop.name,
@@ -333,9 +337,9 @@ export default function RegisterPage() {
           <Card className="p-4">
             <div className="rounded-[28px] bg-[linear-gradient(150deg,#07111f_0%,#0f2d2c_100%)] p-6 text-white">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-200">First run setup</p>
-              <h2 className="mt-4 font-display text-3xl font-semibold">Register this shop</h2>
+              <h2 className="mt-4 font-display text-3xl font-semibold">Create first admin</h2>
               <p className="mt-4 text-sm leading-7 text-white/75">
-                Use the setup login and activation key created in the owner portal, then create the first store admin.
+                The shop details come from the activation key. Create the first admin login once, then the POS will open the normal staff sign-in screen.
               </p>
             </div>
 
@@ -375,7 +379,7 @@ export default function RegisterPage() {
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Step 1</p>
                 <h2 className="mt-2 font-display text-3xl font-semibold text-slate-950">Store setup login</h2>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Enter the setup email and password created by the POS owner for this store.
+                  Enter the setup email and password only for local/demo owner-created shops. Cloud activation keys can continue without this step.
                 </p>
                 <div className="mt-6 grid gap-4 md:grid-cols-2">
                   <label className="space-y-2">
