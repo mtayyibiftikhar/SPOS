@@ -14,6 +14,8 @@ import { resizeImageFileToDataUrl } from "@/lib/image-upload";
 import { cn } from "@/lib/utils";
 import type { DemoAppState } from "@/types/pos";
 
+const CLOUD_ACTIVATION_STORAGE_KEY = "simple-pos-cloud-activation-state";
+
 const steps = [
   { id: "setup", label: "Store login", icon: ShieldCheck },
   { id: "shop", label: "Shop details", icon: Building2 },
@@ -33,6 +35,42 @@ async function loadLocalOwnerSnapshot() {
   } catch {
     return null;
   }
+}
+
+function loadCachedCloudActivationSnapshot(productKey?: string) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(CLOUD_ACTIVATION_STORAGE_KEY);
+
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as { productKey?: string; state?: Partial<DemoAppState> | null };
+
+    if (productKey && parsed.productKey?.trim() !== productKey.trim()) {
+      return null;
+    }
+
+    return parsed.state ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function findActivationDetails(snapshot: Partial<DemoAppState> | null, productKey: string) {
+  const activatedKey = snapshot?.productKeys?.find((entry) => entry.key.trim() === productKey.trim());
+  const shop = activatedKey ? snapshot?.shops?.find((entry) => entry.id === activatedKey.shopId) : null;
+  const settings = shop ? snapshot?.settingsByShop?.[shop.id] : null;
+
+  if (!shop) {
+    return null;
+  }
+
+  return { shop, settings };
 }
 
 export default function RegisterPage() {
@@ -85,9 +123,13 @@ export default function RegisterPage() {
       return;
     }
 
+    const cachedSnapshot = loadCachedCloudActivationSnapshot(form.productKey);
+    const cachedDetails = findActivationDetails(cachedSnapshot, form.productKey);
     const productKey = state.productKeys.find((entry) => entry.key.trim() === form.productKey.trim());
-    const shop = productKey ? state.shops.find((entry) => entry.id === productKey.shopId) : null;
-    const settings = shop ? state.settingsByShop[shop.id] : null;
+    const localShop = productKey ? state.shops.find((entry) => entry.id === productKey.shopId) : null;
+    const localSettings = localShop ? state.settingsByShop[localShop.id] : null;
+    const shop = cachedDetails?.shop ?? localShop;
+    const settings = cachedDetails?.settings ?? localSettings;
 
     if (!shop) {
       return;
@@ -172,7 +214,7 @@ export default function RegisterPage() {
     }
 
     setIsSubmitting(true);
-    const ownerSnapshot = await loadLocalOwnerSnapshot();
+    const ownerSnapshot = loadCachedCloudActivationSnapshot(form.productKey) ?? (await loadLocalOwnerSnapshot());
 
     const result = registerInstalledShop({
       ...form,

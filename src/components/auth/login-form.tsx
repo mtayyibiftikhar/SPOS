@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import type { DemoAppState } from "@/types/pos";
 
 const DEVICE_FINGERPRINT_KEY = "simple-pos-device-fingerprint";
+const CLOUD_ACTIVATION_STORAGE_KEY = "simple-pos-cloud-activation-state";
 
 type CloudActivationResponse = {
   ok: boolean;
@@ -70,6 +71,20 @@ function isLocalDemoHost() {
   }
 
   return ["localhost", "127.0.0.1"].includes(window.location.hostname);
+}
+
+function cacheCloudActivationState(productKey: string, cloudState: CloudActivationResponse["cloudState"]) {
+  if (typeof window === "undefined" || !cloudState) {
+    return;
+  }
+
+  window.sessionStorage.setItem(
+    CLOUD_ACTIVATION_STORAGE_KEY,
+    JSON.stringify({
+      productKey,
+      state: cloudState
+    })
+  );
 }
 
 export function LoginForm() {
@@ -216,6 +231,7 @@ export function LoginForm() {
       const payload = (await response.json()) as CloudActivationResponse;
 
       if (payload.ok && payload.cloudState) {
+        cacheCloudActivationState(normalizedActivationKey, payload.cloudState);
         mergeCloudActivationState(payload.cloudState);
 
         if (!payload.hasShopAdmin) {

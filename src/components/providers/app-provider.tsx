@@ -112,7 +112,7 @@ type OwnerCreateShopInput = {
 type RegisterInstalledShopInput = {
   setupEmail?: string;
   setupPassword?: string;
-  ownerSnapshot?: DemoAppState | null;
+  ownerSnapshot?: Partial<DemoAppState> | null;
   productKey?: string;
   shopName: string;
   logoUrl?: string;
@@ -733,7 +733,7 @@ function mergeRowsById<TItem extends { id: string }>(localRows: TItem[], ownerRo
   ] as TItem[];
 }
 
-function mergeOwnerPortalState(current: DemoAppState, ownerSnapshot?: DemoAppState | null) {
+function mergeOwnerPortalState(current: DemoAppState, ownerSnapshot?: Partial<DemoAppState> | null) {
   if (!ownerSnapshot) {
     return current;
   }
