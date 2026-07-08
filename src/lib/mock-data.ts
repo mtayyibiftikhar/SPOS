@@ -52,6 +52,10 @@ export const initialAppState: DemoAppState = {
       currency: "SAR",
       timezone: "Asia/Riyadh",
       planName: "Starter",
+      billingCycle: "monthly",
+      packagePrice: 99,
+      totalPaid: 99,
+      lastOwnerPaymentAt: "2026-06-28T10:30:00.000Z",
       licenseStatus: "active",
       createdAt: now
     }
@@ -285,6 +289,7 @@ export const initialAppState: DemoAppState = {
         showTax: true,
         showCustomer: true,
         showCashier: true,
+        showVatNumber: true,
         receiptSize: "80mm"
       },
       tax: {

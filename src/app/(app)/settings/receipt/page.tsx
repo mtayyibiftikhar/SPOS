@@ -13,6 +13,7 @@ export default function ReceiptSettingsPage() {
   const [showTax, setShowTax] = useState(currentSettings?.receipt.showTax ?? true);
   const [showCustomer, setShowCustomer] = useState(currentSettings?.receipt.showCustomer ?? true);
   const [showCashier, setShowCashier] = useState(currentSettings?.receipt.showCashier ?? true);
+  const [showVatNumber, setShowVatNumber] = useState(currentSettings?.receipt.showVatNumber ?? true);
   const [receiptSize, setReceiptSize] = useState(currentSettings?.receipt.receiptSize ?? "80mm");
 
   if (!currentSettings) {
@@ -33,6 +34,7 @@ export default function ReceiptSettingsPage() {
             showTax,
             showCustomer,
             showCashier,
+            showVatNumber,
             receiptSize
           });
         }}
@@ -61,6 +63,10 @@ export default function ReceiptSettingsPage() {
           <label className="flex items-center gap-3">
             <input checked={showCashier} className="h-4 w-4" onChange={(event) => setShowCashier(event.target.checked)} type="checkbox" />
             {t("common.showCashier")}
+          </label>
+          <label className="flex items-center gap-3">
+            <input checked={showVatNumber} className="h-4 w-4" onChange={(event) => setShowVatNumber(event.target.checked)} type="checkbox" />
+            {t("common.showVatNumber")}
           </label>
         </div>
         <div className="md:col-span-2">

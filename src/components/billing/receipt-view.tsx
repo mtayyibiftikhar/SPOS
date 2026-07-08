@@ -395,7 +395,7 @@ export function ReceiptView({ billId }: { billId: string }) {
                 <span className="font-medium text-ink">{t("common.dueAmount")}:</span>{" "}
                 {formatCurrency(bill.dueAmount, shop?.currency ?? "SAR", locale)}
               </p>
-              {posSettings?.vatNumber ? (
+              {receiptSettings?.showVatNumber && posSettings?.vatNumber ? (
                 <p>
                   <span className="font-medium text-ink">{t("common.vatNumber")}:</span>{" "}
                   {posSettings.vatNumber}
@@ -503,12 +503,12 @@ export function ReceiptView({ billId }: { billId: string }) {
             </div>
           </div>
 
-          {receiptSettings?.footerText || posSettings?.vatNumber || receiptQrImageUrl ? (
+          {receiptSettings?.footerText || (receiptSettings?.showVatNumber && posSettings?.vatNumber) || receiptQrImageUrl ? (
             <div className="border-t border-dashed border-line pt-5">
               <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_160px] sm:items-center">
                 <div className="text-center text-sm text-slate-600 sm:text-left">
                   {receiptSettings?.footerText ? <p>{receiptSettings.footerText}</p> : null}
-                  {posSettings?.vatNumber ? (
+                  {receiptSettings?.showVatNumber && posSettings?.vatNumber ? (
                     <p className="mt-3">
                       <span className="font-medium text-ink">{t("common.vatNumber")}:</span>{" "}
                       {posSettings.vatNumber}

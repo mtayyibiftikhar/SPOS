@@ -120,6 +120,7 @@ const englishTranslations = {
   "common.showTax": "Show tax",
   "common.showCustomer": "Show customer",
   "common.showCashier": "Show cashier",
+  "common.showVatNumber": "Show VAT number",
   "common.taxEnabled": "Tax enabled",
   "common.showTaxOnReceipt": "Show tax on receipt",
   "common.taxName": "Tax name",

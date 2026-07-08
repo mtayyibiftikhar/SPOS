@@ -2,6 +2,7 @@ export type WorkspaceKind = "shop" | "owner";
 export type UserRole = "super_admin" | "shop_admin" | "cashier" | "support";
 export type LicenseStatus = "trial" | "active" | "expired" | "locked";
 export type ProductKeyStatus = "unused" | "active" | "expired" | "locked" | "revoked";
+export type BillingCycle = "monthly" | "quarterly" | "yearly";
 export type ProductKind = "product" | "service";
 export type ProductStatus = "active" | "inactive";
 export type PaymentMethod = "cash" | "card" | "account";
@@ -38,6 +39,10 @@ export interface Shop {
   currency: string;
   timezone: string;
   planName: string;
+  billingCycle?: BillingCycle;
+  packagePrice?: number;
+  totalPaid?: number;
+  lastOwnerPaymentAt?: string;
   licenseStatus: LicenseStatus;
   createdAt: string;
 }
@@ -444,6 +449,7 @@ export interface ReceiptSettings {
   showTax: boolean;
   showCustomer: boolean;
   showCashier: boolean;
+  showVatNumber: boolean;
   receiptSize: ReceiptSize;
 }
 

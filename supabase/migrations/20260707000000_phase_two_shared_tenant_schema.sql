@@ -123,7 +123,7 @@ create table if not exists public.pos_settings (
   vat_number text,
   receipt_qr_url text,
   printer_settings jsonb not null default '{"receiptSize":"80mm","autoPrintAfterSale":false}'::jsonb,
-  receipt_settings jsonb not null default '{"footerText":"","showTax":true,"showCustomer":true,"showCashier":true,"receiptSize":"80mm"}'::jsonb,
+  receipt_settings jsonb not null default '{"footerText":"","showTax":true,"showCustomer":true,"showCashier":true,"showVatNumber":true,"receiptSize":"80mm"}'::jsonb,
   tax_settings jsonb not null default '{"enabled":true,"name":"VAT","rate":15,"mode":"inclusive","showOnReceipt":true}'::jsonb,
   updated_at timestamptz not null default now()
 );

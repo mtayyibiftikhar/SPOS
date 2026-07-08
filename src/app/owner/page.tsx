@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   BarChart3,
   Bell,
   Building2,
   Copy,
+  CreditCard,
   FileClock,
   KeyRound,
   LayoutDashboard,
@@ -21,7 +22,7 @@ import {
   UsersRound,
   type LucideIcon
 } from "lucide-react";
-import type { LicenseStatus, ProductKey, ProductKeyStatus, Shop } from "@/types/pos";
+import type { BillingCycle, DeviceActivation, LicenseStatus, ProductKey, ProductKeyStatus, Shop, User } from "@/types/pos";
 import { usePosApp } from "@/components/providers/app-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,6 +42,7 @@ const ownerSections = [
   { id: "create", label: "Create shop", description: "Prepare client", icon: UserRoundPlus },
   { id: "stores", label: "Stores", description: "Status groups", icon: Building2 },
   { id: "keys", label: "Activation keys", description: "Copy and revoke", icon: KeyRound },
+  { id: "billing", label: "Billing", description: "Packages and paid", icon: CreditCard },
   { id: "reports", label: "Reports", description: "Licenses and sales", icon: BarChart3 },
   { id: "branding", label: "Branding", description: "POS company", icon: Palette },
   { id: "access", label: "Access", description: "Support and reset", icon: UserCog },
@@ -50,6 +52,45 @@ const ownerSections = [
 type OwnerSectionId = (typeof ownerSections)[number]["id"];
 type StoreFilter = "all" | "active" | "trial" | "expiring" | "locked" | "expired";
 type ReportRange = "today" | "week" | "month" | "year" | "custom";
+
+type OwnerCloudSummary = {
+  devices: Array<{
+    activated_at: string | null;
+    browser_info: string | null;
+    id: string;
+    last_seen_at: string | null;
+    product_key_id: string;
+    shop_id: string;
+  }>;
+  productKeys: Array<{
+    allowed_devices: number;
+    expires_at: string | null;
+    id: string;
+    key_preview: string;
+    shop_id: string;
+    status: ProductKeyStatus;
+  }>;
+  profiles: Array<{
+    created_at: string | null;
+    email: string;
+    id: string;
+    is_active: boolean;
+    last_login_at: string | null;
+    name: string;
+    phone: string | null;
+    role: User["role"];
+    shop_id: string | null;
+  }>;
+  shops: Array<{
+    address: string | null;
+    email: string | null;
+    id: string;
+    license_status: LicenseStatus;
+    name: string;
+    phone: string | null;
+    plan_name: string | null;
+  }>;
+};
 
 function dateInputValue(value?: string) {
   return value ? value.slice(0, 10) : "";
@@ -148,6 +189,28 @@ function buildRange(range: ReportRange, customStart: string, customEnd: string) 
   }
 
   return { start, end };
+}
+
+function previewProductKey(value: string) {
+  const normalized = value.trim();
+
+  return normalized.length <= 12 ? normalized : `${normalized.slice(0, 8)}...${normalized.slice(-4)}`;
+}
+
+function normalizedMatch(value?: string | null) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function mergeUsers(localUsers: User[], cloudUsers: User[]) {
+  return Array.from(
+    new Map([...cloudUsers, ...localUsers].map((user) => [user.email.trim().toLowerCase() || user.id, user])).values()
+  );
+}
+
+function mergeDevices(localDevices: DeviceActivation[], cloudDevices: DeviceActivation[]) {
+  return Array.from(new Map([...cloudDevices, ...localDevices].map((device) => [device.id, device])).values()).sort(
+    (left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt)
+  );
 }
 
 function inRange(value: string | undefined, start: Date, end: Date) {
@@ -251,6 +314,7 @@ export default function OwnerPage() {
     ownerSetLicense,
     ownerSetProductKeyStatus,
     ownerStartSupportSession,
+    ownerUpdateShopProfile,
     setBrandProfile,
     state,
     t
@@ -268,14 +332,22 @@ export default function OwnerPage() {
     phone: "",
     address: "",
     planName: "Starter",
+    billingCycle: "monthly" as BillingCycle,
+    packagePrice: 0,
+    totalPaid: 0,
     licenseStatus: "trial" as LicenseStatus,
     expiresAt: "",
     allowedDevices: 2,
     autoLockDaysAfterExpiry: 3
   });
   const [licenseDrafts, setLicenseDrafts] = useState<
-    Record<string, { status: LicenseStatus; expiresAt: string; planName: string; allowedDevices: number; autoLockDaysAfterExpiry: number; lockReason: string }>
+    Record<string, { status: LicenseStatus; expiresAt: string; planName: string; billingCycle: BillingCycle; packagePrice: number; totalPaid: number; allowedDevices: number; autoLockDaysAfterExpiry: number; lockReason: string }>
   >({});
+  const [shopProfileDrafts, setShopProfileDrafts] = useState<
+    Record<string, { shopName: string; email: string; setupEmail: string; setupPassword: string; phone: string; address: string }>
+  >({});
+  const [cloudSummary, setCloudSummary] = useState<OwnerCloudSummary | null>(null);
+  const [cloudSummaryStatus, setCloudSummaryStatus] = useState<string | null>(null);
   const [posName, setPosName] = useState(state.brand.posName);
   const [companyName, setCompanyName] = useState(state.brand.companyName);
   const [companyLogoUrl, setCompanyLogoUrl] = useState(state.brand.logoUrl ?? "");
@@ -304,13 +376,125 @@ export default function OwnerPage() {
   const [reportRange, setReportRange] = useState<ReportRange>("month");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
+  const ownerUser = state.users.find((user) => user.role === "super_admin" && user.isActive);
 
   const selectedShop = state.shops.find((shop) => shop.id === selectedShopId) ?? state.shops[0];
   const selectedShopSafeId = selectedShop?.id ?? "";
-  const selectedUsers = state.users.filter((user) => user.shopId === selectedShopSafeId);
-  const selectedKeys = state.productKeys.filter((key) => key.shopId === selectedShopSafeId);
-  const selectedDevices = state.deviceActivations.filter((device) => device.shopId === selectedShopSafeId);
   const selectedLicense = state.licenses.find((license) => license.shopId === selectedShopSafeId);
+
+  useEffect(() => {
+    if (!ownerUser?.email) {
+      return;
+    }
+
+    let active = true;
+
+    const loadCloudSummary = async () => {
+      try {
+        const response = await fetch("/api/owner/cloud-summary", {
+          cache: "no-store",
+          headers: {
+            "x-owner-email": ownerUser.email
+          }
+        });
+        const payload = (await response.json()) as ({ ok: true } & OwnerCloudSummary) | { ok: false; message?: string };
+
+        if (!active) {
+          return;
+        }
+
+        if (!payload.ok) {
+          setCloudSummaryStatus(payload.message ?? "Cloud summary is unavailable.");
+          return;
+        }
+
+        setCloudSummary({
+          devices: payload.devices,
+          productKeys: payload.productKeys,
+          profiles: payload.profiles,
+          shops: payload.shops
+        });
+        setCloudSummaryStatus(`Cloud summary synced at ${new Date().toLocaleTimeString()}.`);
+      } catch {
+        if (active) {
+          setCloudSummaryStatus("Cloud summary is unavailable.");
+        }
+      }
+    };
+
+    void loadCloudSummary();
+
+    return () => {
+      active = false;
+    };
+  }, [ownerUser?.email]);
+
+  const getCloudShopIds = (shop: Shop) => {
+    const localKeyPreviews = state.productKeys
+      .filter((key) => key.shopId === shop.id)
+      .map((key) => previewProductKey(key.key));
+
+    return (
+      cloudSummary?.shops
+        .filter((cloudShop) => {
+          const cloudKeyPreviews = cloudSummary.productKeys
+            .filter((key) => key.shop_id === cloudShop.id)
+            .map((key) => key.key_preview);
+
+          return (
+            cloudShop.id === shop.id ||
+            cloudKeyPreviews.some((preview) => localKeyPreviews.includes(preview)) ||
+            (normalizedMatch(cloudShop.email) && normalizedMatch(cloudShop.email) === normalizedMatch(shop.email)) ||
+            (normalizedMatch(cloudShop.phone) && normalizedMatch(cloudShop.phone) === normalizedMatch(shop.phone)) ||
+            (normalizedMatch(cloudShop.name) && normalizedMatch(cloudShop.name) === normalizedMatch(shop.name))
+          );
+        })
+        .map((cloudShop) => cloudShop.id) ?? []
+    );
+  };
+
+  const getStoreUsers = (shop: Shop) => {
+    const cloudShopIds = getCloudShopIds(shop);
+    const localUsers = state.users.filter((user) => user.shopId === shop.id);
+    const cloudUsers: User[] =
+      cloudSummary?.profiles
+        .filter((profile) => profile.shop_id && cloudShopIds.includes(profile.shop_id))
+        .map((profile) => ({
+          id: profile.id,
+          shopId: shop.id,
+          name: profile.name,
+          email: profile.email,
+          phone: profile.phone ?? undefined,
+          role: profile.role,
+          isActive: profile.is_active,
+          lastLoginAt: profile.last_login_at ?? undefined,
+          createdAt: profile.created_at ?? new Date().toISOString()
+        })) ?? [];
+
+    return mergeUsers(localUsers, cloudUsers);
+  };
+
+  const getStoreDevices = (shop: Shop) => {
+    const cloudShopIds = getCloudShopIds(shop);
+    const localDevices = state.deviceActivations.filter((device) => device.shopId === shop.id);
+    const cloudDevices: DeviceActivation[] =
+      cloudSummary?.devices
+        .filter((device) => cloudShopIds.includes(device.shop_id))
+        .map((device) => ({
+          id: device.id,
+          shopId: shop.id,
+          productKeyId: device.product_key_id,
+          browserInfo: device.browser_info ?? "Unknown browser",
+          activatedAt: device.activated_at ?? new Date().toISOString(),
+          lastSeenAt: device.last_seen_at ?? device.activated_at ?? new Date().toISOString()
+        })) ?? [];
+
+    return mergeDevices(localDevices, cloudDevices);
+  };
+
+  const selectedUsers = selectedShop ? getStoreUsers(selectedShop) : [];
+  const selectedKeys = state.productKeys.filter((key) => key.shopId === selectedShopSafeId);
+  const selectedDevices = selectedShop ? getStoreDevices(selectedShop) : [];
 
   const ownerMetrics = useMemo(() => {
     const rows = state.shops.map((shop) => {
@@ -318,8 +502,8 @@ export default function OwnerPage() {
       const status = getEffectiveLicenseStatus(license);
       const expiryDays = daysUntil(license?.expiresAt);
       const productKeys = state.productKeys.filter((entry) => entry.shopId === shop.id);
-      const users = state.users.filter((entry) => entry.shopId === shop.id);
-      const devices = state.deviceActivations.filter((entry) => entry.shopId === shop.id);
+      const users = getStoreUsers(shop);
+      const devices = getStoreDevices(shop);
 
       return { shop, license, status, expiryDays, productKeys, users, devices };
     });
@@ -334,7 +518,7 @@ export default function OwnerPage() {
     };
 
     return { rows, counts };
-  }, [state.deviceActivations, state.licenses, state.productKeys, state.shops, state.users]);
+  }, [cloudSummary, state.deviceActivations, state.licenses, state.productKeys, state.shops, state.users]);
 
   const filteredStoreRows = ownerMetrics.rows.filter((row) => {
     if (storeFilter === "all") {
@@ -357,11 +541,12 @@ export default function OwnerPage() {
     const netSales = customerSales - refundTotal;
     const paid = bills.reduce((sum, bill) => sum + bill.paidAmount, 0);
     const due = bills.reduce((sum, bill) => sum + bill.dueAmount, 0);
-    const activeUsers = state.users.filter((user) => user.shopId && user.isActive).length;
+    const activeUsers = ownerMetrics.rows.reduce((sum, row) => sum + row.users.filter((user) => user.isActive).length, 0);
+    const connectedDevices = ownerMetrics.rows.reduce((sum, row) => sum + row.devices.length, 0);
     const expiringSoon = ownerMetrics.counts.expiring;
 
-    return { start, end, bills, refunds, customerSales, refundTotal, netSales, paid, due, activeUsers, expiringSoon };
-  }, [customEnd, customStart, ownerMetrics.counts.expiring, reportRange, state.bills, state.refunds, state.users]);
+    return { start, end, bills, refunds, customerSales, refundTotal, netSales, paid, due, activeUsers, connectedDevices, expiringSoon };
+  }, [customEnd, customStart, ownerMetrics, reportRange, state.bills, state.refunds]);
 
   const showResult = (result: { ok: boolean; message?: string; productKey?: string; shopId?: string }, contextShopId?: string) => {
     if (result.ok) {
@@ -388,12 +573,25 @@ export default function OwnerPage() {
         status: license?.status ?? "trial",
         expiresAt: dateInputValue(license?.expiresAt),
         planName: shop?.planName ?? "Starter",
+        billingCycle: shop?.billingCycle ?? "monthly",
+        packagePrice: shop?.packagePrice ?? 0,
+        totalPaid: shop?.totalPaid ?? 0,
         allowedDevices: productKey?.allowedDevices ?? 2,
         autoLockDaysAfterExpiry: license?.autoLockDaysAfterExpiry ?? 3,
         lockReason: license?.lockReason ?? "Payment not received."
       }
     );
   };
+
+  const getShopProfileDraft = (shop: Shop) =>
+    shopProfileDrafts[shop.id] ?? {
+      shopName: shop.name,
+      email: shop.email ?? "",
+      setupEmail: shop.setupEmail ?? "",
+      setupPassword: "",
+      phone: shop.phone ?? "",
+      address: shop.address ?? ""
+    };
 
   const updateLicenseDraft = (shopId: string, values: Partial<ReturnType<typeof getLicenseDraft>>) => {
     setLicenseDrafts((current) => ({
@@ -403,6 +601,41 @@ export default function OwnerPage() {
         ...values
       }
     }));
+  };
+
+  const updateShopProfileDraft = (shop: Shop, values: Partial<ReturnType<typeof getShopProfileDraft>>) => {
+    setShopProfileDrafts((current) => ({
+      ...current,
+      [shop.id]: {
+        ...getShopProfileDraft(shop),
+        ...values
+      }
+    }));
+  };
+
+  const saveShopProfile = (shop: Shop) => {
+    const draft = getShopProfileDraft(shop);
+    const result = ownerUpdateShopProfile({
+      shopId: shop.id,
+      shopName: draft.shopName,
+      email: draft.email,
+      setupEmail: draft.setupEmail,
+      setupPassword: draft.setupPassword,
+      phone: draft.phone,
+      address: draft.address
+    });
+
+    showResult(result);
+
+    if (result.ok) {
+      setShopProfileDrafts((current) => ({
+        ...current,
+        [shop.id]: {
+          ...draft,
+          setupPassword: ""
+        }
+      }));
+    }
   };
 
   const copyActivationKey = async (key: string) => {
@@ -444,6 +677,9 @@ export default function OwnerPage() {
         status: statusOverride ?? draft.status,
         expiresAt: draft.expiresAt,
         planName: draft.planName,
+        billingCycle: draft.billingCycle,
+        packagePrice: draft.packagePrice,
+        totalPaid: draft.totalPaid,
         allowedDevices: draft.allowedDevices,
         autoLockDaysAfterExpiry: draft.autoLockDaysAfterExpiry,
         lockReason: draft.lockReason
@@ -683,6 +919,22 @@ export default function OwnerPage() {
           <Input value={createShopForm.planName} onChange={(event) => setCreateShopForm((current) => ({ ...current, planName: event.target.value }))} />
         </label>
         <label className="space-y-2">
+          <span className="text-sm font-semibold text-slate-950">Billing cycle</span>
+          <Select value={createShopForm.billingCycle} onChange={(event) => setCreateShopForm((current) => ({ ...current, billingCycle: event.target.value as BillingCycle }))}>
+            <option value="monthly">Monthly</option>
+            <option value="quarterly">Quarterly</option>
+            <option value="yearly">Yearly</option>
+          </Select>
+        </label>
+        <label className="space-y-2">
+          <span className="text-sm font-semibold text-slate-950">Package amount</span>
+          <Input min={0} type="number" value={createShopForm.packagePrice} onChange={(event) => setCreateShopForm((current) => ({ ...current, packagePrice: Number(event.target.value) }))} />
+        </label>
+        <label className="space-y-2">
+          <span className="text-sm font-semibold text-slate-950">Amount paid</span>
+          <Input min={0} type="number" value={createShopForm.totalPaid} onChange={(event) => setCreateShopForm((current) => ({ ...current, totalPaid: Number(event.target.value) }))} />
+        </label>
+        <label className="space-y-2">
           <span className="text-sm font-semibold text-slate-950">License status</span>
           <Select value={createShopForm.licenseStatus} onChange={(event) => setCreateShopForm((current) => ({ ...current, licenseStatus: event.target.value as LicenseStatus }))}>
             {licenseStatuses.map((status) => (
@@ -713,6 +965,7 @@ export default function OwnerPage() {
 
   const renderStores = () => {
     const draft = selectedShopSafeId ? getLicenseDraft(selectedShopSafeId) : null;
+    const profileDraft = selectedShop ? getShopProfileDraft(selectedShop) : null;
 
     return (
       <div className="grid gap-6">
@@ -810,6 +1063,50 @@ export default function OwnerPage() {
                 </div>
               ) : null}
             </Card>
+
+            {selectedShop && profileDraft ? (
+              <Card className="p-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Store profile</p>
+                    <h3 className="mt-2 font-display text-2xl font-semibold text-slate-950">Edit store details and setup login</h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      These details control the shop setup screen and the saved shop profile. Leave password blank to keep the existing password.
+                    </p>
+                  </div>
+                  <Badge variant="neutral">Owner editable</Badge>
+                </div>
+                <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-slate-950">Store name</span>
+                    <Input value={profileDraft.shopName} onChange={(event) => updateShopProfileDraft(selectedShop, { shopName: event.target.value })} />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-slate-950">Store email</span>
+                    <Input type="email" value={profileDraft.email} onChange={(event) => updateShopProfileDraft(selectedShop, { email: event.target.value })} />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-slate-950">Setup login email</span>
+                    <Input type="email" value={profileDraft.setupEmail} onChange={(event) => updateShopProfileDraft(selectedShop, { setupEmail: event.target.value })} />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-slate-950">New setup password</span>
+                    <Input minLength={8} placeholder="Leave blank to keep current" type="password" value={profileDraft.setupPassword} onChange={(event) => updateShopProfileDraft(selectedShop, { setupPassword: event.target.value })} />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-slate-950">Phone</span>
+                    <Input value={profileDraft.phone} onChange={(event) => updateShopProfileDraft(selectedShop, { phone: event.target.value })} />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-slate-950">Address</span>
+                    <Input value={profileDraft.address} onChange={(event) => updateShopProfileDraft(selectedShop, { address: event.target.value })} />
+                  </label>
+                  <Button className="xl:col-span-3" onClick={() => saveShopProfile(selectedShop)} variant="secondary">
+                    Save store profile
+                  </Button>
+                </div>
+              </Card>
+            ) : null}
 
             <div className="grid gap-5 lg:grid-cols-2">
               <Card className="p-5">
@@ -985,6 +1282,153 @@ export default function OwnerPage() {
     </div>
   );
 
+  const renderBilling = () => {
+    const draft = selectedShopSafeId ? getLicenseDraft(selectedShopSafeId) : null;
+    const recurring = state.shops.reduce(
+      (totals, shop) => {
+        const amount = shop.packagePrice ?? 0;
+        const cycle = shop.billingCycle ?? "monthly";
+
+        return {
+          ...totals,
+          [cycle]: totals[cycle] + amount,
+          totalPaid: totals.totalPaid + (shop.totalPaid ?? 0),
+          openPackageBalance: totals.openPackageBalance + Math.max(amount - (shop.totalPaid ?? 0), 0)
+        };
+      },
+      { monthly: 0, quarterly: 0, yearly: 0, totalPaid: 0, openPackageBalance: 0 } satisfies Record<BillingCycle, number> & {
+        totalPaid: number;
+        openPackageBalance: number;
+      }
+    );
+
+    return (
+      <div className="grid gap-6">
+        <Card className="p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Owner billing</p>
+              <h2 className="mt-2 font-display text-3xl font-semibold text-slate-950">Packages and store payments</h2>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                Track what each store is paying, the billing cycle, total amount collected, and the package balance.
+              </p>
+            </div>
+            <Select className="max-w-sm" value={selectedShopSafeId} onChange={(event) => setSelectedShopId(event.target.value)}>
+              {state.shops.map((shop) => (
+                <option key={shop.id} value={shop.id}>{shop.name}</option>
+              ))}
+            </Select>
+          </div>
+        </Card>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          {[
+            { label: "Monthly packages", value: formatCurrency(recurring.monthly, "SAR", locale) },
+            { label: "Quarterly packages", value: formatCurrency(recurring.quarterly, "SAR", locale) },
+            { label: "Yearly packages", value: formatCurrency(recurring.yearly, "SAR", locale) },
+            { label: "Total collected", value: formatCurrency(recurring.totalPaid, "SAR", locale) },
+            { label: "Open package balance", value: formatCurrency(recurring.openPackageBalance, "SAR", locale) }
+          ].map((item) => (
+            <Card className="p-5" key={item.label}>
+              <p className="text-sm text-slate-500">{item.label}</p>
+              <p className="mt-2 font-display text-2xl font-semibold text-slate-950">{item.value}</p>
+            </Card>
+          ))}
+        </div>
+
+        {selectedShop && draft ? (
+          <Card className="p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Selected store</p>
+                <h3 className="mt-2 font-display text-2xl font-semibold text-slate-950">{selectedShop.name}</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Update this store&apos;s package and payment record. This is owner billing, separate from the shop&apos;s POS sales.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant={licenseVariant(draft.status)}>{draft.status}</Badge>
+                <Badge variant="neutral">{draft.allowedDevices} devices</Badge>
+                <Badge variant="success">{selectedShop.billingCycle ?? "monthly"}</Badge>
+              </div>
+            </div>
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <label className="space-y-2">
+                <span className="text-sm font-semibold text-slate-950">Plan name</span>
+                <Input value={draft.planName} onChange={(event) => updateLicenseDraft(selectedShop.id, { planName: event.target.value })} />
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm font-semibold text-slate-950">Billing cycle</span>
+                <Select value={draft.billingCycle} onChange={(event) => updateLicenseDraft(selectedShop.id, { billingCycle: event.target.value as BillingCycle })}>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="yearly">Yearly</option>
+                </Select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm font-semibold text-slate-950">Package amount</span>
+                <Input min={0} type="number" value={draft.packagePrice} onChange={(event) => updateLicenseDraft(selectedShop.id, { packagePrice: Number(event.target.value) })} />
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm font-semibold text-slate-950">Total paid</span>
+                <Input min={0} type="number" value={draft.totalPaid} onChange={(event) => updateLicenseDraft(selectedShop.id, { totalPaid: Number(event.target.value) })} />
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm font-semibold text-slate-950">License status</span>
+                <Select value={draft.status} onChange={(event) => updateLicenseDraft(selectedShop.id, { status: event.target.value as LicenseStatus })}>
+                  {licenseStatuses.map((status) => (
+                    <option key={status} value={status}>{t(licenseStatusLabelKeys[status])}</option>
+                  ))}
+                </Select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm font-semibold text-slate-950">Expiry date</span>
+                <Input type="date" value={draft.expiresAt} onChange={(event) => updateLicenseDraft(selectedShop.id, { expiresAt: event.target.value })} />
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm font-semibold text-slate-950">Device limit</span>
+                <Input min={1} type="number" value={draft.allowedDevices} onChange={(event) => updateLicenseDraft(selectedShop.id, { allowedDevices: Number(event.target.value) })} />
+              </label>
+              <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Balance</p>
+                <p className="mt-2 font-display text-2xl font-semibold text-slate-950">
+                  {formatCurrency(Math.max(draft.packagePrice - draft.totalPaid, 0), "SAR", locale)}
+                </p>
+              </div>
+              <Button className="xl:col-span-4" onClick={() => saveLicense(selectedShop.id)}>
+                Save billing and license
+              </Button>
+            </div>
+          </Card>
+        ) : null}
+
+        <Card className="overflow-hidden">
+          <div className="grid gap-2 bg-slate-50 p-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 xl:grid-cols-[1fr_0.35fr_0.35fr_0.35fr_0.35fr_0.35fr]">
+            <span>Store</span>
+            <span>Cycle</span>
+            <span>Package</span>
+            <span>Total paid</span>
+            <span>Status</span>
+            <span>Expiry</span>
+          </div>
+          {ownerMetrics.rows.map((row) => (
+            <div className="grid gap-3 border-t border-slate-200 p-4 xl:grid-cols-[1fr_0.35fr_0.35fr_0.35fr_0.35fr_0.35fr] xl:items-center" key={row.shop.id}>
+              <div>
+                <p className="font-semibold text-slate-950">{row.shop.name}</p>
+                <p className="text-sm text-slate-500">{row.shop.email || row.shop.phone || "No contact saved"}</p>
+              </div>
+              <span className="text-sm font-semibold capitalize text-slate-700">{row.shop.billingCycle ?? "monthly"}</span>
+              <span className="text-sm font-semibold text-slate-700">{formatCurrency(row.shop.packagePrice ?? 0, "SAR", locale)}</span>
+              <span className="text-sm font-semibold text-slate-700">{formatCurrency(row.shop.totalPaid ?? 0, "SAR", locale)}</span>
+              <Badge variant={licenseVariant(row.status)}>{row.status}</Badge>
+              <span className="text-sm text-slate-600">{row.license?.expiresAt ? formatDateTime(row.license.expiresAt, locale) : "No expiry"}</span>
+            </div>
+          ))}
+        </Card>
+      </div>
+    );
+  };
+
   const renderReports = () => (
     <div className="grid gap-6">
       <Card className="p-5">
@@ -1017,7 +1461,7 @@ export default function OwnerPage() {
           { label: "Net processed", value: formatCurrency(reportMetrics.netSales, "SAR", locale) },
           { label: "Open dues", value: formatCurrency(reportMetrics.due, "SAR", locale) },
           { label: "Active users", value: reportMetrics.activeUsers },
-          { label: "Connected devices", value: state.deviceActivations.length },
+          { label: "Connected devices", value: reportMetrics.connectedDevices },
           { label: "Expiring soon", value: reportMetrics.expiringSoon },
           { label: "Locked stores", value: ownerMetrics.counts.locked }
         ].map((item) => (
@@ -1311,7 +1755,7 @@ export default function OwnerPage() {
       {message ? <div className="rounded-3xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-900">{message}</div> : null}
 
       <Card className="p-3 sm:p-4">
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-9">
           {ownerSections.map((section) => (
             <SectionButton active={activeSection === section.id} description={section.description} icon={section.icon} key={section.id} label={section.label} onClick={() => setActiveSection(section.id)} />
           ))}
@@ -1322,6 +1766,7 @@ export default function OwnerPage() {
       {activeSection === "create" ? renderCreateShop() : null}
       {activeSection === "stores" ? renderStores() : null}
       {activeSection === "keys" ? renderKeys() : null}
+      {activeSection === "billing" ? renderBilling() : null}
       {activeSection === "reports" ? renderReports() : null}
       {activeSection === "branding" ? renderBranding() : null}
       {activeSection === "access" ? renderAccess() : null}

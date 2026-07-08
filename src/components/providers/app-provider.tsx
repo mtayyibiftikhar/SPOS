@@ -103,6 +103,9 @@ type OwnerCreateShopInput = {
   setupPassword: string;
   address?: string;
   planName: string;
+  billingCycle?: Shop["billingCycle"];
+  packagePrice?: number;
+  totalPaid?: number;
   licenseStatus: LicenseStatus;
   expiresAt?: string;
   allowedDevices: number;
@@ -151,9 +154,22 @@ type OwnerLicenseInput = {
   status: LicenseStatus;
   expiresAt?: string;
   planName?: string;
+  billingCycle?: Shop["billingCycle"];
+  packagePrice?: number;
+  totalPaid?: number;
   allowedDevices?: number;
   autoLockDaysAfterExpiry?: number;
   lockReason?: string;
+};
+
+type OwnerShopProfileInput = {
+  shopId: string;
+  shopName: string;
+  email?: string;
+  setupEmail?: string;
+  setupPassword?: string;
+  phone?: string;
+  address?: string;
 };
 
 type SettingsSection = keyof ShopSettingsBundle;
@@ -388,6 +404,7 @@ interface AppContextValue {
     shopId: string;
     confirmName: string;
   }) => { ok: boolean; message?: string };
+  ownerUpdateShopProfile: (payload: OwnerShopProfileInput) => { ok: boolean; message?: string };
   ownerGenerateProductKey: (payload: {
     shopId: string;
     allowedDevices: number;
@@ -511,6 +528,7 @@ interface AppContextValue {
   createRefund: (payload: CreateRefundInput) => { ok: boolean; refundId?: string; message?: string };
   startBusinessDay: (payload: { businessDate?: string; openingNote?: string }) => { ok: boolean; message?: string };
   closeBusinessDay: (payload: { countedCash: number; note?: string }) => { ok: boolean; message?: string };
+  autoCloseAndStartNextBusinessDay: (payload?: { note?: string; startShift?: boolean }) => { ok: boolean; message?: string };
   startShift: (payload: { openingCash: number }) => { ok: boolean; message?: string };
   endShift: (payload: { countedCash: number; note?: string }) => { ok: boolean; message?: string };
   addCashMovement: (payload: { type: "cash_in" | "cash_out"; amount: number; reason: string }) => { ok: boolean; message?: string };
@@ -551,7 +569,8 @@ function mergeSettingsByShop(storedSettings: DemoAppState["settingsByShop"] | un
       },
       receipt: {
         ...(defaultBundle?.receipt ?? {}),
-        ...(storedBundle?.receipt ?? {})
+        ...(storedBundle?.receipt ?? {}),
+        showVatNumber: storedBundle?.receipt?.showVatNumber ?? defaultBundle?.receipt?.showVatNumber ?? true
       },
       tax: {
         ...(defaultBundle?.tax ?? {}),
@@ -632,6 +651,9 @@ function normalizeStoredState(stored: DemoAppState, ownerBootstrap: OwnerBootstr
 
       return {
         ...shop,
+        billingCycle: shop.billingCycle ?? "monthly",
+        packagePrice: Number.isFinite(shop.packagePrice) ? shop.packagePrice ?? 0 : 0,
+        totalPaid: Number.isFinite(shop.totalPaid) ? shop.totalPaid ?? 0 : 0,
         licenseStatus: getEffectiveLicenseStatus(license)
       };
     }),
@@ -1772,6 +1794,7 @@ export function AppProvider({
                   showTax: true,
                   showCustomer: true,
                   showCashier: true,
+                  showVatNumber: true,
                   receiptSize: "80mm" as const
                 },
                 tax: {
@@ -1808,6 +1831,9 @@ export function AppProvider({
         setupPassword,
         address,
         planName,
+        billingCycle,
+        packagePrice,
+        totalPaid,
         licenseStatus,
         expiresAt,
         allowedDevices,
@@ -1881,6 +1907,10 @@ export function AppProvider({
             currency: "SAR",
             timezone: "Asia/Riyadh",
             planName: planName.trim() || "Starter",
+            billingCycle: billingCycle ?? "monthly",
+            packagePrice: Math.max(0, Number(packagePrice || 0)),
+            totalPaid: Math.max(0, Number(totalPaid || 0)),
+            lastOwnerPaymentAt: Number(totalPaid || 0) > 0 ? createdAt : undefined,
             licenseStatus,
             createdAt
           };
@@ -1955,6 +1985,7 @@ export function AppProvider({
                   showTax: true,
                   showCustomer: true,
                   showCashier: true,
+                  showVatNumber: true,
                   receiptSize: "80mm" as const
                 },
                 tax: {
@@ -1975,6 +2006,100 @@ export function AppProvider({
                 targetId: shopId,
                 detail: `Prepared shop ${normalizedShopName} with product key ${maskKey(productKey)}. Store admin will be created during installation.`,
                 createdAt
+              },
+              ...current.auditLogs
+            ]
+          };
+
+          persistLocalOwnerStateSnapshot(nextState);
+
+          return nextState;
+        });
+
+        return result;
+      },
+      ownerUpdateShopProfile: ({ shopId, shopName, email, setupEmail, setupPassword, phone, address }) => {
+        if (!session || session.role !== "super_admin") {
+          return { ok: false, message: "Only the POS owner can update store access." };
+        }
+
+        const normalizedShopName = shopName.trim();
+        const normalizedSetupEmail = setupEmail?.trim().toLowerCase() ?? "";
+        const normalizedSetupPassword = setupPassword?.trim() ?? "";
+
+        if (!normalizedShopName) {
+          return { ok: false, message: "Store name is required." };
+        }
+
+        if (normalizedSetupPassword) {
+          const passwordError = validatePasswordLength(normalizedSetupPassword, "Setup password");
+
+          if (passwordError) {
+            return { ok: false, message: passwordError };
+          }
+        }
+
+        let result: { ok: boolean; message?: string } = {
+          ok: false,
+          message: "Unable to update store."
+        };
+
+        setState((current) => {
+          const shop = current.shops.find((entry) => entry.id === shopId);
+
+          if (!shop) {
+            result = { ok: false, message: "Store not found." };
+            return current;
+          }
+
+          if (
+            normalizedSetupEmail &&
+            current.shops.some((entry) => entry.id !== shopId && entry.setupEmail?.trim().toLowerCase() === normalizedSetupEmail)
+          ) {
+            result = { ok: false, message: "Another store already uses this setup email." };
+            return current;
+          }
+
+          const updatedAt = new Date().toISOString();
+          result = { ok: true, message: "Store profile and setup access saved." };
+
+          const nextState = {
+            ...current,
+            shops: current.shops.map((entry) =>
+              entry.id === shopId
+                ? {
+                    ...entry,
+                    name: normalizedShopName,
+                    email: email?.trim() || undefined,
+                    setupEmail: normalizedSetupEmail || entry.setupEmail,
+                    setupPasswordHash: normalizedSetupPassword ? hashSecret(normalizedSetupPassword) : entry.setupPasswordHash,
+                    phone: phone?.trim() ?? entry.phone,
+                    address: address?.trim() ?? entry.address
+                  }
+                : entry
+            ),
+            settingsByShop: {
+              ...current.settingsByShop,
+              [shopId]: {
+                ...current.settingsByShop[shopId],
+                pos: {
+                  ...current.settingsByShop[shopId]?.pos,
+                  shopName: normalizedShopName,
+                  email: email?.trim() || undefined,
+                  phone: phone?.trim() ?? current.settingsByShop[shopId]?.pos.phone ?? "",
+                  address: address?.trim() ?? current.settingsByShop[shopId]?.pos.address ?? ""
+                }
+              }
+            },
+            auditLogs: [
+              {
+                id: createId("audit"),
+                shopId,
+                actorId: session.id,
+                action: "owner.shop_profile.update",
+                targetId: shopId,
+                detail: `Updated store profile and setup access for ${normalizedShopName}.`,
+                createdAt: updatedAt
               },
               ...current.auditLogs
             ]
@@ -2104,6 +2229,7 @@ export function AppProvider({
 
           const createdAt = new Date().toISOString();
           const productKey = generateProductKeyCode(current.productKeys);
+          const oldKeys = current.productKeys.filter((entry) => entry.shopId === shopId);
 
           result = { ok: true, productKey };
 
@@ -2119,8 +2245,9 @@ export function AppProvider({
                 createdAt,
                 expiresAt: toDateTime(expiresAt)
               },
-              ...current.productKeys
+              ...current.productKeys.filter((entry) => entry.shopId !== shopId)
             ],
+            deviceActivations: current.deviceActivations.filter((entry) => entry.shopId !== shopId),
             auditLogs: [
               {
                 id: createId("audit"),
@@ -2128,7 +2255,7 @@ export function AppProvider({
                 actorId: session.id,
                 action: "owner.product_key.generate",
                 targetId: shopId,
-                detail: `Generated ${maskKey(productKey)} for ${shop.name}.`,
+                detail: `Replaced existing activation key with ${maskKey(productKey)} for ${shop.name}. Old devices must reactivate.`,
                 createdAt
               },
               ...current.auditLogs
@@ -2136,6 +2263,7 @@ export function AppProvider({
           };
 
           persistLocalOwnerStateSnapshot(nextState);
+          oldKeys.forEach((oldKey) => deleteOwnerProductKeyFromCloud(oldKey.key, session.email));
 
           return nextState;
         });
@@ -2353,7 +2481,7 @@ export function AppProvider({
       mergeCloudActivationState: (payload) => {
         setState((current) => mergeCloudActivationStatePatch(current, payload));
       },
-      ownerSetLicense: ({ shopId, status, expiresAt, planName, allowedDevices, autoLockDaysAfterExpiry, lockReason }) => {
+      ownerSetLicense: ({ shopId, status, expiresAt, planName, billingCycle, packagePrice, totalPaid, allowedDevices, autoLockDaysAfterExpiry, lockReason }) => {
         if (!session || session.role !== "super_admin") {
           return { ok: false, message: "Only the POS owner can update licenses." };
         }
@@ -2375,6 +2503,8 @@ export function AppProvider({
           const existingLicense = current.licenses.find((entry) => entry.shopId === shopId);
           const normalizedAllowedDevices =
             allowedDevices === undefined ? undefined : Math.max(1, Math.round(allowedDevices));
+          const normalizedTotalPaid = totalPaid === undefined ? shop.totalPaid ?? 0 : Math.max(0, Number(totalPaid || 0));
+          const totalPaidChanged = totalPaid !== undefined && normalizedTotalPaid !== (shop.totalPaid ?? 0);
           const nextLicense = {
             id: existingLicense?.id ?? createId("lic"),
             shopId,
@@ -2401,6 +2531,10 @@ export function AppProvider({
                 ? {
                     ...entry,
                     planName: planName?.trim() || entry.planName,
+                    billingCycle: billingCycle ?? entry.billingCycle ?? "monthly",
+                    packagePrice: packagePrice === undefined ? entry.packagePrice ?? 0 : Math.max(0, Number(packagePrice || 0)),
+                    totalPaid: normalizedTotalPaid,
+                    lastOwnerPaymentAt: totalPaidChanged ? updatedAt : entry.lastOwnerPaymentAt,
                     licenseStatus: status
                   }
                 : entry
@@ -4309,6 +4443,144 @@ export function AppProvider({
                 countedCash,
                 cashDifference: Math.round((countedCash - summary.expectedCash) * 100) / 100,
                 note: note?.trim() || undefined,
+                closedAt
+              },
+              ...current.dayCloses
+            ]
+          };
+        });
+
+        return result;
+      },
+      autoCloseAndStartNextBusinessDay: (payload) => {
+        if (!currentShopId || !session) {
+          return { ok: false, message: "Session unavailable." };
+        }
+
+        if (session.role !== "shop_admin") {
+          return { ok: false, message: "Only the shop admin can auto close and roll over the business day." };
+        }
+
+        let result: { ok: boolean; message?: string } = {
+          ok: false,
+          message: "Unable to auto close and start the next business day."
+        };
+
+        setState((current) => {
+          const openDay = getActiveBusinessDay(current.businessDays, currentShopId);
+
+          if (!openDay) {
+            result = { ok: false, message: "Start the business day before using auto rollover." };
+            return current;
+          }
+
+          const shop = current.shops.find((entry) => entry.id === currentShopId);
+          const closedAt = new Date().toISOString();
+          const openShifts = current.shifts.filter(
+            (shift) => shift.shopId === currentShopId && shift.businessDate === openDay.businessDate && !shift.endedAt
+          );
+          const shiftSummaries = new Map(
+            openShifts.map((shift) => [
+              shift.id,
+              calculateShiftSummary({
+                shift,
+                bills: current.bills,
+                cashMovements: current.cashMovements,
+                refunds: current.refunds
+              })
+            ])
+          );
+          const shifts = current.shifts.map((shift) => {
+            const summary = shiftSummaries.get(shift.id);
+
+            if (!summary) {
+              return shift;
+            }
+
+            return {
+              ...shift,
+              countedCash: summary.expectedCash,
+              expectedCash: summary.expectedCash,
+              difference: 0,
+              note: payload?.note?.trim() || "Auto closed by shop admin.",
+              endedAt: closedAt
+            };
+          });
+          const summary = calculateBusinessDaySummary({
+            businessDate: openDay.businessDate,
+            shopId: currentShopId,
+            timeZone: shop?.timezone ?? "Asia/Riyadh",
+            bills: current.bills,
+            cashMovements: current.cashMovements,
+            expenses: current.expenses,
+            shifts,
+            refunds: current.refunds
+          });
+          const nextDate = new Date(`${openDay.businessDate}T00:00:00`);
+          nextDate.setDate(nextDate.getDate() + 1);
+          const nextBusinessDate = nextDate.toISOString().slice(0, 10);
+          const nextDayId = createId("day");
+          const nextShiftId = createId("shift");
+          const shouldStartShift = payload?.startShift ?? true;
+
+          result = {
+            ok: true,
+            message: shouldStartShift
+              ? "Open shifts and day were auto closed. Next business day and shift are ready."
+              : "Open shifts and day were auto closed. Next business day is ready."
+          };
+
+          return {
+            ...current,
+            businessDays: [
+              {
+                id: nextDayId,
+                shopId: currentShopId,
+                businessDate: nextBusinessDate,
+                openingNote: "Auto opened after day rollover.",
+                startedBy: session.id,
+                startedAt: closedAt
+              },
+              ...current.businessDays.map((day) =>
+                day.id === openDay.id
+                  ? {
+                      ...day,
+                      endedAt: closedAt
+                    }
+                  : day
+              )
+            ],
+            shifts: shouldStartShift
+              ? [
+                  {
+                    id: nextShiftId,
+                    shopId: currentShopId,
+                    businessDayId: nextDayId,
+                    businessDate: nextBusinessDate,
+                    cashierId: session.id,
+                    openingCash: summary.expectedCash,
+                    startedAt: closedAt,
+                    note: "Auto started after day rollover."
+                  },
+                  ...shifts
+                ]
+              : shifts,
+            dayCloses: [
+              {
+                id: createId("day_close"),
+                shopId: currentShopId,
+                businessDate: openDay.businessDate,
+                totalSales: summary.totalSales,
+                cashSales: summary.cashSales,
+                cardSales: summary.cardSales,
+                accountSales: summary.accountSales,
+                refunds: summary.refunds,
+                expenses: summary.expenses,
+                netSales: summary.netSales,
+                expectedCash: summary.expectedCash,
+                countedCash: summary.expectedCash,
+                cashDifference: 0,
+                note: payload?.note?.trim() || "Auto close used expected cash for open shifts.",
                 closedAt
               },
               ...current.dayCloses

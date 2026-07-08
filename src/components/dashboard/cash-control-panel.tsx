@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDownLeft, ArrowUpRight, Clock3, Wallet } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Clock3, RefreshCcw, Wallet } from "lucide-react";
 import {
   calculateBusinessDaySummary,
   calculateShiftSummary,
@@ -53,6 +53,7 @@ function SummaryRow({
 export function CashControlPanel() {
   const {
     addCashMovement,
+    autoCloseAndStartNextBusinessDay,
     closeBusinessDay,
     createExpense,
     currentBusinessDay,
@@ -234,6 +235,24 @@ export function CashControlPanel() {
     if (result.ok) {
       setDayCountedCash("");
       setDayCloseNote("");
+    }
+  };
+
+  const handleAutoRollover = () => {
+    const result = autoCloseAndStartNextBusinessDay({
+      note: dayCloseNote || "Auto rollover from cash control.",
+      startShift: true
+    });
+
+    setDayFeedback({
+      kind: result.ok ? "success" : "error",
+      message: result.message ?? (result.ok ? "Day rolled over." : "Unable to auto close the day.")
+    });
+
+    if (result.ok) {
+      setDayCountedCash("");
+      setDayCloseNote("");
+      setActiveControl("day");
     }
   };
 
@@ -450,6 +469,13 @@ export function CashControlPanel() {
                 {openShiftsForDay.length > 0 ? (
                   <p className="sm:col-span-2 text-sm font-medium text-amber-700">{t("cashControl.closeShiftFirst")}</p>
                 ) : null}
+                <Button className="sm:col-span-2" onClick={handleAutoRollover} variant="secondary">
+                  <RefreshCcw className="mr-2 h-4 w-4" />
+                  Auto close day and open next day
+                </Button>
+                <p className="sm:col-span-2 text-xs leading-5 text-slate-500">
+                  Use this only when staff forgot to close. Open shifts close with expected cash, then the next day and shift start automatically.
+                </p>
                 <FeedbackText feedback={dayFeedback} />
               </div>
             ) : (

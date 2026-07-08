@@ -331,6 +331,7 @@ export async function POST(request: Request) {
                   showTax: true,
                   showCustomer: true,
                   showCashier: true,
+                  showVatNumber: true,
                   receiptSize: "80mm"
                 },
                 tax: settings?.tax_settings ?? {
