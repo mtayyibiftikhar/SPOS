@@ -619,7 +619,10 @@ function mergeSettingsByShop(storedSettings: DemoAppState["settingsByShop"] | un
       receipt: {
         ...(defaultBundle?.receipt ?? {}),
         ...(storedBundle?.receipt ?? {}),
-        showVatNumber: storedBundle?.receipt?.showVatNumber ?? defaultBundle?.receipt?.showVatNumber ?? true
+        showVatNumber: storedBundle?.receipt?.showVatNumber ?? defaultBundle?.receipt?.showVatNumber ?? true,
+        showSecondaryLanguage:
+          storedBundle?.receipt?.showSecondaryLanguage ?? defaultBundle?.receipt?.showSecondaryLanguage ?? false,
+        secondaryLanguage: storedBundle?.receipt?.secondaryLanguage ?? defaultBundle?.receipt?.secondaryLanguage ?? "ar"
       },
       tax: {
         ...(defaultBundle?.tax ?? {}),
@@ -2305,6 +2308,8 @@ export function AppProvider({
                   showCustomer: true,
                   showCashier: true,
                   showVatNumber: true,
+                  showSecondaryLanguage: false,
+                  secondaryLanguage: "ar" as const,
                   receiptSize: "80mm" as const
                 },
                 tax: {
@@ -2497,6 +2502,8 @@ export function AppProvider({
                   showCustomer: true,
                   showCashier: true,
                   showVatNumber: true,
+                  showSecondaryLanguage: false,
+                  secondaryLanguage: "ar" as const,
                   receiptSize: "80mm" as const
                 },
                 tax: {

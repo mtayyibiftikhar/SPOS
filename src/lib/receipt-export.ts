@@ -1,5 +1,6 @@
 import type { Bill, BillItem, BrandProfile, POSSettings, ReceiptSettings, ReceiptSize, Shop, User } from "@/types/pos";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
+import { getReceiptItemNameLines } from "@/lib/receipt-language";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 
 type TextAlign = "left" | "center" | "right";
@@ -449,10 +450,31 @@ export function buildReceiptPdfDocument({
   });
 
   items.forEach((item, index) => {
-    const productName =
-      sanitizePdfText(item.productName.en || item.productName.ar || item.productName.ur || "Item") || "Item";
+    const productNameLines = getReceiptItemNameLines(item.productName, receiptSettings)
+      .map((line) => ({
+        ...line,
+        text: sanitizePdfText(line.text)
+      }))
+      .filter((line) => line.text);
 
-    appendWrappedText(elements, productName, { bold: true, size: 10.2, spacingAfter: 4 }, receiptSize);
+    if (productNameLines.length > 0) {
+      productNameLines.forEach((line, lineIndex) => {
+        appendWrappedText(
+          elements,
+          line.text,
+          {
+            align: line.direction === "rtl" ? "right" : "left",
+            bold: !line.isSecondary,
+            size: line.isSecondary ? 9.4 : 10.2,
+            spacingAfter: lineIndex === productNameLines.length - 1 ? 4 : 2
+          },
+          receiptSize
+        );
+      });
+    } else {
+      appendWrappedText(elements, "Item", { bold: true, size: 10.2, spacingAfter: 4 }, receiptSize);
+    }
+
     appendPair(
       elements,
       `Qty ${item.quantity} x ${formatAmount(item.unitPrice, currency)}`,

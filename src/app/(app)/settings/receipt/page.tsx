@@ -6,6 +6,7 @@ import { SettingsFormShell } from "@/components/settings/settings-form-shell";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import type { ReceiptSecondaryLanguage } from "@/types/pos";
 
 export default function ReceiptSettingsPage() {
   const { currentSettings, t, updateSettings } = usePosApp();
@@ -14,6 +15,10 @@ export default function ReceiptSettingsPage() {
   const [showCustomer, setShowCustomer] = useState(currentSettings?.receipt.showCustomer ?? true);
   const [showCashier, setShowCashier] = useState(currentSettings?.receipt.showCashier ?? true);
   const [showVatNumber, setShowVatNumber] = useState(currentSettings?.receipt.showVatNumber ?? true);
+  const [showSecondaryLanguage, setShowSecondaryLanguage] = useState(currentSettings?.receipt.showSecondaryLanguage ?? false);
+  const [secondaryLanguage, setSecondaryLanguage] = useState<ReceiptSecondaryLanguage>(
+    currentSettings?.receipt.secondaryLanguage ?? "ar"
+  );
   const [receiptSize, setReceiptSize] = useState(currentSettings?.receipt.receiptSize ?? "80mm");
 
   if (!currentSettings) {
@@ -35,6 +40,8 @@ export default function ReceiptSettingsPage() {
             showCustomer,
             showCashier,
             showVatNumber,
+            showSecondaryLanguage,
+            secondaryLanguage,
             receiptSize
           });
         }}
@@ -50,6 +57,18 @@ export default function ReceiptSettingsPage() {
             <option value="80mm">80mm</option>
             <option value="a4">A4</option>
           </Select>
+        </div>
+        <div>
+          <label className="mb-2 block text-sm font-medium text-ink">{t("receipt.secondaryLanguage")}</label>
+          <Select
+            disabled={!showSecondaryLanguage}
+            value={secondaryLanguage}
+            onChange={(event) => setSecondaryLanguage(event.target.value as ReceiptSecondaryLanguage)}
+          >
+            <option value="ar">{t("language.arabic")}</option>
+            <option value="ur">{t("language.urdu")}</option>
+          </Select>
+          <p className="mt-2 text-sm leading-6 text-slate-500">{t("receipt.secondaryLanguageDesc")}</p>
         </div>
         <div className="grid gap-3 rounded-3xl border border-line bg-shell p-4 text-sm text-ink">
           <label className="flex items-center gap-3">
@@ -67,6 +86,15 @@ export default function ReceiptSettingsPage() {
           <label className="flex items-center gap-3">
             <input checked={showVatNumber} className="h-4 w-4" onChange={(event) => setShowVatNumber(event.target.checked)} type="checkbox" />
             {t("common.showVatNumber")}
+          </label>
+          <label className="flex items-center gap-3">
+            <input
+              checked={showSecondaryLanguage}
+              className="h-4 w-4"
+              onChange={(event) => setShowSecondaryLanguage(event.target.checked)}
+              type="checkbox"
+            />
+            {t("receipt.showSecondaryLanguage")}
           </label>
         </div>
         <div className="md:col-span-2">

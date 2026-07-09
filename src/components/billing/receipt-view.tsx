@@ -20,6 +20,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
+import { getReceiptItemNameLines, getReceiptItemNameText } from "@/lib/receipt-language";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 
 export function ReceiptView({ billId }: { billId: string }) {
@@ -121,10 +122,23 @@ export function ReceiptView({ billId }: { billId: string }) {
   const formattedCustomerName = bill.customerName?.trim() || t("billing.walkInCustomer");
   const whatsappTarget = bill.customerWhatsapp || bill.customerPhone;
   const itemSummaryLines = items.map((item) => {
-    const itemName = item.productName[locale] || item.productName.en;
+    const itemName = getReceiptItemNameText(item.productName, receiptSettings);
 
     return `- ${itemName}: ${item.quantity} x ${formatCurrency(item.unitPrice, shop?.currency ?? "SAR", locale)} = ${formatCurrency(item.lineTotal, shop?.currency ?? "SAR", locale)}`;
   });
+  const renderReceiptItemName = (item: (typeof items)[number]) => (
+    <span className="block min-w-0">
+      {getReceiptItemNameLines(item.productName, receiptSettings).map((line) => (
+        <span
+          className={line.isSecondary ? "mt-0.5 block text-sm font-medium leading-5 text-slate-600" : "block font-medium text-ink"}
+          dir={line.direction}
+          key={`${item.id}-${line.text}`}
+        >
+          {line.text}
+        </span>
+      ))}
+    </span>
+  );
   const buildReceiptShareMessage = (contact?: { name?: string }) => {
     const customerName = contact?.name?.trim() || bill.customerName?.trim() || t("billing.walkInCustomer");
 
@@ -430,7 +444,7 @@ export function ReceiptView({ billId }: { billId: string }) {
                 >
                   <div className="sm:hidden">
                     <div className="flex items-start justify-between gap-3">
-                      <span className="font-medium text-ink">{item.productName[locale] || item.productName.en}</span>
+                      {renderReceiptItemName(item)}
                       <span className="font-semibold text-ink">
                         {formatCurrency(item.lineTotal, shop?.currency ?? "SAR", locale)}
                       </span>
@@ -448,7 +462,7 @@ export function ReceiptView({ billId }: { billId: string }) {
 
                   <div className="hidden grid-cols-[minmax(0,1fr)_72px_110px_120px] gap-3 text-sm text-slate-600 sm:grid sm:items-center">
                     <span>
-                      <span className="block font-medium text-ink">{item.productName[locale] || item.productName.en}</span>
+                      {renderReceiptItemName(item)}
                       {item.discountAmount > 0 ? (
                         <span className="mt-1 block text-xs font-medium text-emerald-700">
                           {t("common.itemDiscounts")} -{formatCurrency(item.discountAmount, shop?.currency ?? "SAR", locale)}

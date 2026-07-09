@@ -286,6 +286,8 @@ export async function POST(request: Request) {
               showCustomer: true,
               showCashier: true,
               showVatNumber: true,
+              showSecondaryLanguage: false,
+              secondaryLanguage: "ar",
               receiptSize: "80mm"
             },
             tax_settings: {

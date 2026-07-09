@@ -11,6 +11,7 @@ export type TicketStatus = "open" | "in_progress" | "closed";
 export type Locale = "en" | "ar" | "ur";
 export type TextDirection = "ltr" | "rtl";
 export type ReceiptSize = "58mm" | "80mm" | "a4";
+export type ReceiptSecondaryLanguage = Exclude<Locale, "en">;
 export type TaxMode = "inclusive" | "exclusive";
 export type InventoryAdjustmentType = "add" | "remove" | "sale" | "refund";
 export type PurchaseOrderStatus = "draft" | "ordered" | "partially_received" | "received" | "cancelled";
@@ -451,6 +452,8 @@ export interface ReceiptSettings {
   showCustomer: boolean;
   showCashier: boolean;
   showVatNumber: boolean;
+  showSecondaryLanguage: boolean;
+  secondaryLanguage: ReceiptSecondaryLanguage;
   receiptSize: ReceiptSize;
 }
 

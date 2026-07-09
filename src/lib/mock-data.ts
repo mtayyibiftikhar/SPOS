@@ -291,6 +291,8 @@ export const initialAppState: DemoAppState = {
         showCustomer: true,
         showCashier: true,
         showVatNumber: true,
+        showSecondaryLanguage: false,
+        secondaryLanguage: "ar",
         receiptSize: "80mm"
       },
       tax: {
