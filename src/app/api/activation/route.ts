@@ -320,7 +320,8 @@ export async function POST(request: Request) {
                   website: settings?.website ?? shop.website ?? undefined,
                   currency: settings?.currency ?? shop.currency ?? "SAR",
                   vatNumber: settings?.vat_number ?? undefined,
-                  receiptQrUrl: settings?.receipt_qr_url ?? undefined
+                  receiptQrUrl: settings?.receipt_qr_url ?? undefined,
+                  autoDayRolloverEnabled: false
                 },
                 printer: settings?.printer_settings ?? {
                   receiptSize: "80mm",

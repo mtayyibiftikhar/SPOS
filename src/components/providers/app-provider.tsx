@@ -603,7 +603,9 @@ function mergeSettingsByShop(storedSettings: DemoAppState["settingsByShop"] | un
     accumulator[shopId] = {
       pos: {
         ...(defaultBundle?.pos ?? {}),
-        ...(storedBundle?.pos ?? {})
+        ...(storedBundle?.pos ?? {}),
+        autoDayRolloverEnabled:
+          storedBundle?.pos?.autoDayRolloverEnabled ?? defaultBundle?.pos?.autoDayRolloverEnabled ?? false
       },
       printer: {
         ...(defaultBundle?.printer ?? {}),
@@ -1100,6 +1102,7 @@ export function AppProvider({
   const [isHydrated, setIsHydrated] = useState(false);
   const [cloudLoadAttemptedShopIds, setCloudLoadAttemptedShopIds] = useState<Record<string, boolean>>({});
   const [cloudLoadedShopIds, setCloudLoadedShopIds] = useState<Record<string, boolean>>({});
+  const [autoRolloverTick, setAutoRolloverTick] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -1349,6 +1352,187 @@ export function AppProvider({
 
     return () => window.clearTimeout(timer);
   }, [cloudLoadedShopIds, cloudSyncShopId, isHydrated, session, state]);
+
+  useEffect(() => {
+    if (!isHydrated) {
+      return;
+    }
+
+    const timer = window.setInterval(() => setAutoRolloverTick((current) => current + 1), 60_000);
+
+    return () => window.clearInterval(timer);
+  }, [isHydrated]);
+
+  useEffect(() => {
+    if (
+      !isHydrated ||
+      !currentShopId ||
+      !currentShop ||
+      !currentSettings?.pos.autoDayRolloverEnabled ||
+      (cloudSyncShopId === currentShopId && !cloudLoadAttemptedShopIds[currentShopId]) ||
+      session?.workspace !== "shop" ||
+      !session.shopId ||
+      session.role === "support"
+    ) {
+      return;
+    }
+
+    setState((current) => {
+      const openDay = getActiveBusinessDay(current.businessDays, currentShopId);
+      const shop = current.shops.find((entry) => entry.id === currentShopId);
+      const timeZone = shop?.timezone ?? currentShop.timezone ?? "Asia/Riyadh";
+      const businessDateNow = getBusinessDateInTimezone(timeZone);
+      const shouldCloseOldDay = Boolean(openDay && openDay.businessDate < businessDateNow);
+      const shouldOpenToday = !openDay || shouldCloseOldDay;
+
+      if (!shouldOpenToday) {
+        return current;
+      }
+
+      const automatedAt = new Date().toISOString();
+      let shifts = current.shifts;
+      let dayCloses = current.dayCloses;
+      let businessDays = current.businessDays;
+      let openingCashForNewShift = 0;
+
+      if (openDay && shouldCloseOldDay) {
+        const openShifts = current.shifts.filter(
+          (shift) => shift.shopId === currentShopId && shift.businessDate === openDay.businessDate && !shift.endedAt
+        );
+        const shiftSummaries = new Map(
+          openShifts.map((shift) => [
+            shift.id,
+            calculateShiftSummary({
+              shift,
+              bills: current.bills,
+              cashMovements: current.cashMovements,
+              refunds: current.refunds
+            })
+          ])
+        );
+
+        shifts = current.shifts.map((shift) => {
+          const summary = shiftSummaries.get(shift.id);
+
+          if (!summary) {
+            return shift;
+          }
+
+          return {
+            ...shift,
+            countedCash: summary.expectedCash,
+            expectedCash: summary.expectedCash,
+            difference: 0,
+            note: "Auto closed by rollover setting.",
+            endedAt: automatedAt
+          };
+        });
+
+        const summary = calculateBusinessDaySummary({
+          businessDate: openDay.businessDate,
+          shopId: currentShopId,
+          timeZone,
+          bills: current.bills,
+          cashMovements: current.cashMovements,
+          expenses: current.expenses,
+          shifts,
+          refunds: current.refunds
+        });
+
+        openingCashForNewShift = summary.expectedCash;
+        businessDays = current.businessDays.map((day) =>
+          day.id === openDay.id
+            ? {
+                ...day,
+                endedAt: automatedAt
+              }
+            : day
+        );
+
+        if (!current.dayCloses.some((dayClose) => dayClose.shopId === currentShopId && dayClose.businessDate === openDay.businessDate)) {
+          dayCloses = [
+            {
+              id: createId("day_close"),
+              shopId: currentShopId,
+              businessDate: openDay.businessDate,
+              totalSales: summary.totalSales,
+              cashSales: summary.cashSales,
+              cardSales: summary.cardSales,
+              accountSales: summary.accountSales,
+              refunds: summary.refunds,
+              expenses: summary.expenses,
+              netSales: summary.netSales,
+              expectedCash: summary.expectedCash,
+              countedCash: summary.expectedCash,
+              cashDifference: 0,
+              note: "Auto close used expected cash because rollover setting was enabled.",
+              closedAt: automatedAt
+            },
+            ...current.dayCloses
+          ];
+        }
+      }
+
+      const existingTodayDay = businessDays.find(
+        (day) => day.shopId === currentShopId && day.businessDate === businessDateNow && !day.endedAt
+      );
+      const todayDayId = existingTodayDay?.id ?? createId("day");
+      const businessDaysWithToday = existingTodayDay
+        ? businessDays
+        : [
+            {
+              id: todayDayId,
+              shopId: currentShopId,
+              businessDate: businessDateNow,
+              openingNote: "Auto opened by rollover setting.",
+              startedBy: session.id,
+              startedAt: automatedAt
+            },
+            ...businessDays
+          ];
+      const hasCurrentUserShiftToday = shifts.some(
+        (shift) =>
+          shift.shopId === currentShopId &&
+          shift.businessDate === businessDateNow &&
+          shift.cashierId === session.id &&
+          !shift.endedAt
+      );
+      const shouldStartShift = ["shop_admin", "cashier"].includes(session.role) && !hasCurrentUserShiftToday;
+
+      return {
+        ...current,
+        businessDays: businessDaysWithToday,
+        shifts: shouldStartShift
+          ? [
+              {
+                id: createId("shift"),
+                shopId: currentShopId,
+                businessDayId: todayDayId,
+                businessDate: businessDateNow,
+                cashierId: session.id,
+                openingCash: openingCashForNewShift,
+                startedAt: automatedAt,
+                note: "Auto started by rollover setting."
+              },
+              ...shifts
+            ]
+          : shifts,
+        dayCloses
+      };
+    });
+  }, [
+    autoRolloverTick,
+    cloudLoadAttemptedShopIds,
+    cloudSyncShopId,
+    currentSettings?.pos.autoDayRolloverEnabled,
+    currentShop,
+    currentShopId,
+    isHydrated,
+    session?.id,
+    session?.role,
+    session?.shopId,
+    session?.workspace
+  ]);
 
   useEffect(() => {
     if (!isHydrated || session?.workspace !== "shop" || !session.shopId || session.role === "support") {
@@ -2088,7 +2272,8 @@ export function AppProvider({
                   website: payload.website?.trim() || undefined,
                   currency: payload.currency.trim() || "SAR",
                   vatNumber: payload.vatNumber?.trim() || undefined,
-                  receiptQrUrl: payload.receiptQrUrl?.trim() || undefined
+                  receiptQrUrl: payload.receiptQrUrl?.trim() || undefined,
+                  autoDayRolloverEnabled: working.settingsByShop[shopId]?.pos.autoDayRolloverEnabled ?? false
                 },
                 printer: {
                   receiptSize: "80mm" as const,
@@ -2279,7 +2464,8 @@ export function AppProvider({
                   email: email?.trim() || undefined,
                   currency: "SAR",
                   vatNumber: "",
-                  receiptQrUrl: ""
+                  receiptQrUrl: "",
+                  autoDayRolloverEnabled: false
                 },
                 printer: {
                   receiptSize: "80mm" as const,

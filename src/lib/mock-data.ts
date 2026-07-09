@@ -278,7 +278,8 @@ export const initialAppState: DemoAppState = {
         currency: "SAR",
         logoUrl: defaultShopLogo,
         vatNumber: "300123456700003",
-        receiptQrUrl: "https://simplepos.sa/shops/al-madina-service-snacks"
+        receiptQrUrl: "https://simplepos.sa/shops/al-madina-service-snacks",
+        autoDayRolloverEnabled: false
       },
       printer: {
         receiptSize: "80mm",

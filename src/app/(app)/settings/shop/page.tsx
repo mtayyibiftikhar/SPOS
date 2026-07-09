@@ -20,6 +20,7 @@ export default function ShopSettingsPage() {
   const [logoUrl, setLogoUrl] = useState(currentSettings?.pos.logoUrl ?? "");
   const [vatNumber, setVatNumber] = useState(currentSettings?.pos.vatNumber ?? "");
   const [receiptQrUrl, setReceiptQrUrl] = useState(currentSettings?.pos.receiptQrUrl ?? "");
+  const [autoDayRolloverEnabled, setAutoDayRolloverEnabled] = useState(currentSettings?.pos.autoDayRolloverEnabled ?? false);
   const [logoFeedback, setLogoFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
 
   if (!currentSettings) {
@@ -74,7 +75,8 @@ export default function ShopSettingsPage() {
             currency,
             logoUrl: logoUrl.trim() || undefined,
             vatNumber: vatNumber.trim() || undefined,
-            receiptQrUrl: receiptQrUrl.trim() || undefined
+            receiptQrUrl: receiptQrUrl.trim() || undefined,
+            autoDayRolloverEnabled
           });
         }}
       >
@@ -114,6 +116,26 @@ export default function ShopSettingsPage() {
             onChange={(event) => setReceiptQrUrl(event.target.value)}
           />
           <p className="mt-2 text-sm leading-6 text-slate-600">{t("settings.receiptQrUrlDesc")}</p>
+        </div>
+        <div className="md:col-span-2">
+          <Card className="border-emerald-200 bg-emerald-50/70 p-5">
+            <label className="flex items-start gap-4">
+              <input
+                checked={autoDayRolloverEnabled}
+                className="mt-1 h-5 w-5 accent-emerald-600"
+                type="checkbox"
+                onChange={(event) => setAutoDayRolloverEnabled(event.target.checked)}
+              />
+              <span>
+                <span className="block text-sm font-semibold text-ink">Auto close day and start next day</span>
+                <span className="mt-2 block text-sm leading-6 text-slate-600">
+                  When enabled, if yesterday&apos;s day or shifts are still open, the POS closes them with expected cash,
+                  creates the day closing record, opens today&apos;s business day, and starts the current user&apos;s shift automatically.
+                  This runs when the POS is open or when a staff user signs in.
+                </span>
+              </span>
+            </label>
+          </Card>
         </div>
         <div className="md:col-span-2 grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="space-y-5">

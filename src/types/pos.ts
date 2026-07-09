@@ -437,6 +437,7 @@ export interface POSSettings {
   currency: string;
   vatNumber?: string;
   receiptQrUrl?: string;
+  autoDayRolloverEnabled?: boolean;
 }
 
 export interface PrinterSettings {
