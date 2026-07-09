@@ -310,6 +310,7 @@ export default function OwnerPage() {
     ownerDeleteShop,
     ownerDeleteProductKey,
     ownerGenerateProductKey,
+    ownerRemoveDeviceActivation,
     ownerResetShopUserPassword,
     ownerSetLicense,
     ownerSetProductKeyStatus,
@@ -561,6 +562,27 @@ export default function OwnerPage() {
     }
 
     setMessage(result.message ?? "Action failed.");
+  };
+
+  const removeConnectedDevice = (device: DeviceActivation) => {
+    const result = ownerRemoveDeviceActivation({
+      browserInfo: device.browserInfo,
+      deviceActivationId: device.id,
+      shopId: device.shopId
+    });
+
+    if (result.ok) {
+      setCloudSummary((current) =>
+        current
+          ? {
+              ...current,
+              devices: current.devices.filter((entry) => entry.id !== device.id)
+            }
+          : current
+      );
+    }
+
+    showResult(result);
   };
 
   const getLicenseDraft = (shopId: string) => {
@@ -1115,14 +1137,20 @@ export default function OwnerPage() {
                   {selectedDevices.length > 0 ? (
                     selectedDevices.map((device) => (
                       <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4" key={device.id}>
-                        <div className="flex items-start gap-3">
-                          <span className="rounded-2xl bg-white p-2 text-slate-950">
-                            <MonitorSmartphone className="h-4 w-4" />
-                          </span>
-                          <div>
-                            <p className="text-sm font-semibold text-slate-950">{device.browserInfo}</p>
-                            <p className="mt-1 text-xs text-slate-500">Last seen {formatDateTime(device.lastSeenAt, locale)}</p>
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-start gap-3">
+                            <span className="rounded-2xl bg-white p-2 text-slate-950">
+                              <MonitorSmartphone className="h-4 w-4" />
+                            </span>
+                            <div className="min-w-0">
+                              <p className="break-words text-sm font-semibold text-slate-950">{device.browserInfo}</p>
+                              <p className="mt-1 text-xs text-slate-500">Last seen {formatDateTime(device.lastSeenAt, locale)}</p>
+                            </div>
                           </div>
+                          <Button size="sm" onClick={() => removeConnectedDevice(device)} variant="danger">
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Remove
+                          </Button>
                         </div>
                       </div>
                     ))

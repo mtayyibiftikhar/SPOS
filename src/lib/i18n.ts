@@ -651,7 +651,7 @@ const englishTranslations = {
   "reports.taxPaidByCustomersDesc": "Tax portion already paid by customers based on paid bill amount.",
   "reports.taxCustomerDue": "VAT still in customer dues",
   "reports.taxPaidToAuthority": "VAT paid to authority",
-  "reports.taxPaidToAuthorityDesc": "No tax-payment ledger is connected yet, so authority-paid VAT remains zero until we add tax payment recording.",
+  "reports.taxPaidToAuthorityDesc": "Recorded from VAT/tax cash-out or matching ledger rows in the selected period.",
   "reports.taxRemainingPayable": "Remaining VAT payable",
   "reports.taxPaymentSplit": "VAT by payment method",
   "reports.taxPaymentSplitDesc": "Shows invoice VAT and refund VAT grouped by cash, card, and account sales.",

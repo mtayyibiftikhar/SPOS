@@ -39,6 +39,10 @@ function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
 }
 
+function isTaxAuthorityPaymentText(value: string) {
+  return /\b(vat|tax|zakat|authority|government)\b/i.test(value);
+}
+
 function SummaryRow({
   label,
   value
@@ -503,7 +507,32 @@ export function ReportsOverview() {
       periodRefunds.filter((refund) => refund.paymentMethod === "account").reduce((sum, refund) => sum + refundTaxAmount(refund), 0)
     );
     const netPayableTax = roundMoney(invoiceTax - refundTax);
-    const authorityPaidTax = 0;
+    const taxCashOutPayments = roundMoney(
+      state.cashMovements
+        .filter(
+          (movement) =>
+            movement.shopId === currentShop.id &&
+            movement.type === "cash_out" &&
+            movement.businessDate >= selectedRange.dateFrom &&
+            movement.businessDate <= selectedRange.dateTo &&
+            isTaxAuthorityPaymentText(movement.reason)
+        )
+        .reduce((sum, movement) => sum + movement.amount, 0)
+    );
+    const taxLedgerPayments = roundMoney(
+      state.ledgerEntries
+        .filter(
+          (entry) =>
+            entry.shopId === currentShop.id &&
+            entry.referenceType === "cash_movement" &&
+            entry.debit > 0 &&
+            entry.businessDate >= selectedRange.dateFrom &&
+            entry.businessDate <= selectedRange.dateTo &&
+            isTaxAuthorityPaymentText(`${entry.accountName} ${entry.memo}`)
+        )
+        .reduce((sum, entry) => sum + entry.debit, 0)
+    );
+    const authorityPaidTax = roundMoney(Math.min(netPayableTax, Math.max(taxCashOutPayments, taxLedgerPayments)));
 
     return {
       invoiceTax,
@@ -522,7 +551,16 @@ export function ReportsOverview() {
       billCount: periodBills.length,
       refundCount: periodRefunds.length
     };
-  }, [currentShop, selectedRange.dateFrom, selectedRange.dateTo, state.bills, state.refunds, timeZone]);
+  }, [
+    currentShop,
+    selectedRange.dateFrom,
+    selectedRange.dateTo,
+    state.bills,
+    state.cashMovements,
+    state.ledgerEntries,
+    state.refunds,
+    timeZone
+  ]);
 
   const filteredLedgerEntries = useMemo(
     () =>
@@ -547,6 +585,16 @@ export function ReportsOverview() {
     [filteredLedgerEntries]
   );
 
+  const profitTaxView = useMemo(
+    () => ({
+      grossSalesExcludingTax: roundMoney((financialSummary?.grossSales ?? 0) - taxSummary.invoiceTax),
+      netSalesExcludingTax: roundMoney((financialSummary?.netSales ?? 0) - taxSummary.netPayableTax),
+      profitBeforeVatPayable: roundMoney(financialSummary?.netProfit ?? 0),
+      profitAfterVatPayable: roundMoney((financialSummary?.netProfit ?? 0) - taxSummary.remainingPayableTax)
+    }),
+    [financialSummary, taxSummary]
+  );
+
   const handleDownloadProfitLoss = async () => {
     if (!financialSummary || !currentShop || !hasSummaryActivity(financialSummary)) {
       setExportFeedback(t("reports.exportUnavailable"));
@@ -569,11 +617,35 @@ export function ReportsOverview() {
             title: "Executive summary",
             rows: [
               { label: "Gross sales", value: formatCurrency(financialSummary.grossSales, currency, "en") },
+              { label: "Gross sales excluding VAT", value: formatCurrency(profitTaxView.grossSalesExcludingTax, currency, "en") },
               { label: "Refunds and returns", value: formatCurrency(-financialSummary.refunds, currency, "en") },
               { label: "Net sales", value: formatCurrency(financialSummary.netSales, currency, "en") },
+              { label: "Net sales excluding VAT", value: formatCurrency(profitTaxView.netSalesExcludingTax, currency, "en") },
               { label: "Gross profit", value: formatCurrency(financialSummary.grossProfit, currency, "en") },
               { label: "Expenses", value: formatCurrency(-financialSummary.expenses, currency, "en") },
-              { label: "Net profit", value: formatCurrency(financialSummary.netProfit, currency, "en") }
+              { label: "Net profit before VAT payable", value: formatCurrency(profitTaxView.profitBeforeVatPayable, currency, "en") },
+              {
+                label: "Net profit after remaining VAT payable",
+                value: formatCurrency(profitTaxView.profitAfterVatPayable, currency, "en")
+              }
+            ]
+          },
+          {
+            title: "VAT payable and profit view",
+            rows: [
+              { label: "Invoice VAT", value: formatCurrency(taxSummary.invoiceTax, currency, "en") },
+              { label: "VAT reversed from refunds", value: formatCurrency(-taxSummary.refundTax, currency, "en") },
+              { label: "Net VAT payable", value: formatCurrency(taxSummary.netPayableTax, currency, "en") },
+              {
+                label: "VAT paid to authority",
+                value: formatCurrency(taxSummary.authorityPaidTax, currency, "en"),
+                detail: "Detected from VAT/tax cash-out or ledger rows in this period."
+              },
+              { label: "Remaining VAT payable", value: formatCurrency(taxSummary.remainingPayableTax, currency, "en") },
+              {
+                label: "Profit after remaining VAT payable",
+                value: formatCurrency(profitTaxView.profitAfterVatPayable, currency, "en")
+              }
             ]
           },
           {
@@ -1116,13 +1188,16 @@ export function ReportsOverview() {
                       value={formatCurrency(-financialSummary.sameDayReturns, currency, locale)}
                     />
                     <SummaryRow label={t("reports.netSalesLabel")} value={formatCurrency(financialSummary.netSales, currency, locale)} />
+                    <SummaryRow label="Net sales excluding VAT" value={formatCurrency(profitTaxView.netSalesExcludingTax, currency, locale)} />
                     <SummaryRow label={t("reports.grossProfit")} value={formatCurrency(financialSummary.grossProfit, currency, locale)} />
                     <SummaryRow
                       label={t("reports.profitAdjustments")}
                       value={formatCurrency(-financialSummary.profitAdjustments, currency, locale)}
                     />
                     <SummaryRow label={t("cashControl.expenses")} value={formatCurrency(-financialSummary.expenses, currency, locale)} />
-                    <SummaryRow label={t("reports.netProfitLabel")} value={formatCurrency(financialSummary.netProfit, currency, locale)} />
+                    <SummaryRow label="Net profit before VAT payable" value={formatCurrency(profitTaxView.profitBeforeVatPayable, currency, locale)} />
+                    <SummaryRow label={t("reports.taxRemainingPayable")} value={formatCurrency(taxSummary.remainingPayableTax, currency, locale)} />
+                    <SummaryRow label="Net profit after VAT payable" value={formatCurrency(profitTaxView.profitAfterVatPayable, currency, locale)} />
                   </div>
                 </div>
               ) : (

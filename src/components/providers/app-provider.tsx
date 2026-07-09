@@ -455,6 +455,11 @@ interface AppContextValue {
   ownerDeleteProductKey: (payload: {
     productKeyId: string;
   }) => { ok: boolean; message?: string };
+  ownerRemoveDeviceActivation: (payload: {
+    browserInfo?: string;
+    deviceActivationId: string;
+    shopId?: string;
+  }) => { ok: boolean; message?: string };
   activateProductKey: (payload: {
     key: string;
     browserInfo?: string;
@@ -904,6 +909,21 @@ function deleteOwnerProductKeyFromCloud(productKey: string, ownerEmail?: string)
       "x-owner-email": ownerEmail
     },
     body: JSON.stringify({ productKey })
+  }).catch(() => undefined);
+}
+
+function deleteOwnerDeviceActivationFromCloud(deviceActivationId: string, ownerEmail?: string) {
+  if (typeof window === "undefined" || !ownerEmail) {
+    return;
+  }
+
+  void fetch("/api/owner/delete-device-activation", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-owner-email": ownerEmail
+    },
+    body: JSON.stringify({ deviceActivationId })
   }).catch(() => undefined);
 }
 
@@ -2803,6 +2823,58 @@ export function AppProvider({
                 targetId: productKeyId,
                 detail: `Deleted ${maskKey(productKey.key)} for ${shop?.name ?? "shop"}.`,
                 createdAt: deletedAt
+              },
+              ...current.auditLogs
+            ]
+          };
+
+          persistLocalOwnerStateSnapshot(nextState);
+
+          return nextState;
+        });
+
+        return result;
+      },
+      ownerRemoveDeviceActivation: ({ browserInfo, deviceActivationId, shopId }) => {
+        if (!session || session.role !== "super_admin") {
+          return { ok: false, message: "Only the POS owner can remove connected devices." };
+        }
+
+        let result: { ok: boolean; message?: string } = {
+          ok: false,
+          message: "Unable to remove connected device."
+        };
+
+        setState((current) => {
+          const device = current.deviceActivations.find((entry) => entry.id === deviceActivationId);
+          const resolvedShopId = device?.shopId ?? shopId;
+          const removedAt = new Date().toISOString();
+          const ownerEmail = current.users.find((user) => user.role === "super_admin" && user.isActive)?.email;
+
+          if (!resolvedShopId) {
+            result = { ok: false, message: "Connected device not found." };
+            return current;
+          }
+
+          result = {
+            ok: true,
+            message: "Connected device removed. That browser must activate again before signing in."
+          };
+
+          deleteOwnerDeviceActivationFromCloud(deviceActivationId, ownerEmail);
+
+          const nextState = {
+            ...current,
+            deviceActivations: current.deviceActivations.filter((entry) => entry.id !== deviceActivationId),
+            auditLogs: [
+              {
+                id: createId("audit"),
+                shopId: resolvedShopId,
+                actorId: session.id,
+                action: "owner.device.remove",
+                targetId: deviceActivationId,
+                detail: `Removed connected device ${device?.browserInfo ?? browserInfo ?? deviceActivationId}.`,
+                createdAt: removedAt
               },
               ...current.auditLogs
             ]

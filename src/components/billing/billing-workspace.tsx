@@ -389,6 +389,7 @@ export function BillingWorkspace() {
       ? t("billing.shiftRequired")
       : null;
   const headerMessage = setupFeedback ?? error ?? blockerMessage ?? setupHint();
+  const shouldShowHeaderMessage = Boolean(setupFeedback || error || blockerMessage);
 
   function setupHint() {
     if (!currentBusinessDay) {
@@ -1080,22 +1081,24 @@ export function BillingWorkspace() {
           </div>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[18px] bg-slate-50 px-3 py-2.5 text-sm">
-          <CircleAlert
-            className={cn(
-              "h-4 w-4",
-              error ? "text-red-600" : setupFeedback ? "text-emerald-600" : "text-amber-600"
-            )}
-          />
-          <span
-            className={cn(
-              "font-medium",
-              error ? "text-red-700" : setupFeedback ? "text-emerald-700" : "text-slate-700"
-            )}
-          >
-            {headerMessage}
-          </span>
-        </div>
+        {shouldShowHeaderMessage ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[18px] bg-slate-50 px-3 py-2.5 text-sm">
+            <CircleAlert
+              className={cn(
+                "h-4 w-4",
+                error ? "text-red-600" : setupFeedback ? "text-emerald-600" : "text-amber-600"
+              )}
+            />
+            <span
+              className={cn(
+                "font-medium",
+                error ? "text-red-700" : setupFeedback ? "text-emerald-700" : "text-slate-700"
+              )}
+            >
+              {headerMessage}
+            </span>
+          </div>
+        ) : null}
       </Card>
 
       <div className="grid flex-1 min-h-0 gap-3 xl:grid-cols-[minmax(0,1.8fr)_320px]">
