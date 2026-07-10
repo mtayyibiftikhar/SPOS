@@ -57,15 +57,20 @@ export function getCustomerAccountMetrics({
 export function applySettlementToBills({
   amount,
   bills,
-  customerId
+  customerId,
+  billIds
 }: {
   amount: number;
   bills: Bill[];
   customerId: string;
+  billIds?: string[];
 }) {
   const updatedBillsById: Record<string, Bill> = {};
   const allocations: Array<{ billId: string; amount: number }> = [];
-  const dueBills = getCustomerOpenBills(bills, customerId);
+  const targetBillIds = new Set((billIds ?? []).filter(Boolean));
+  const dueBills = getCustomerOpenBills(bills, customerId).filter((bill) =>
+    targetBillIds.size > 0 ? targetBillIds.has(bill.id) : true
+  );
   let remaining = roundMoney(amount);
 
   dueBills.forEach((bill) => {

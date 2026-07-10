@@ -95,6 +95,8 @@ function translateCustomerMessage(t: ReturnType<typeof usePosApp>["t"], message?
       return t("customers.invalidSettlement");
     case "This customer does not have any outstanding account balance.":
       return t("customers.noOutstandingBalance");
+    case "Select at least one open account bill.":
+      return t("customers.selectOpenBill");
     case "Start the business day before receiving account payments.":
       return t("billing.dayRequired");
     case "Start your shift before receiving account payments.":
@@ -181,6 +183,7 @@ export function CustomerWorkspace() {
   const [settlementAmount, setSettlementAmount] = useState("");
   const [settlementMethod, setSettlementMethod] = useState<"cash" | "card">("cash");
   const [settlementNote, setSettlementNote] = useState("");
+  const [selectedSettlementBillIds, setSelectedSettlementBillIds] = useState<string[]>([]);
   const [settlementFeedback, setSettlementFeedback] = useState<string | null>(null);
   const [settlementError, setSettlementError] = useState<string | null>(null);
   const requestedView = searchParams.get("view");
@@ -324,6 +327,16 @@ export function CustomerWorkspace() {
     }
   }, [filteredCustomers, isCreating, selectedCustomer]);
 
+  useEffect(() => {
+    if (!selectedMetrics) {
+      setSelectedSettlementBillIds([]);
+      return;
+    }
+
+    const openBillIds = new Set(selectedMetrics.openBills.map((bill) => bill.id));
+    setSelectedSettlementBillIds((current) => current.filter((billId) => openBillIds.has(billId)));
+  }, [selectedMetrics]);
+
   const totals = useMemo(() => {
     const metrics = Object.values(customerMetricsById);
 
@@ -350,11 +363,27 @@ export function CustomerWorkspace() {
   );
 
   const settlementAmountNumber = Number(settlementAmount || 0);
+  const selectedSettlementBills = useMemo(() => {
+    if (!selectedMetrics) {
+      return [];
+    }
+
+    const selectedIds = new Set(selectedSettlementBillIds);
+
+    return selectedMetrics.openBills.filter((bill) => selectedIds.has(bill.id));
+  }, [selectedMetrics, selectedSettlementBillIds]);
+  const selectedSettlementBalance = useMemo(
+    () => Math.round(selectedSettlementBills.reduce((sum, bill) => sum + bill.dueAmount, 0) * 100) / 100,
+    [selectedSettlementBills]
+  );
+  const settlementLimit = selectedSettlementBalance > 0
+    ? selectedSettlementBalance
+    : selectedMetrics?.outstandingBalance ?? 0;
   const settlementTooHigh = Boolean(
     selectedMetrics &&
       Number.isFinite(settlementAmountNumber) &&
-      settlementAmountNumber > selectedMetrics.outstandingBalance &&
-      selectedMetrics.outstandingBalance > 0
+      settlementAmountNumber > settlementLimit &&
+      settlementLimit > 0
   );
 
   const beginCreateCustomer = () => {
@@ -365,6 +394,7 @@ export function CustomerWorkspace() {
     setCustomerFeedback(null);
     setSettlementError(null);
     setSettlementFeedback(null);
+    setSelectedSettlementBillIds([]);
   };
 
   const openCustomer = (customerId: string) => {
@@ -374,6 +404,7 @@ export function CustomerWorkspace() {
     setCustomerFeedback(null);
     setSettlementError(null);
     setSettlementFeedback(null);
+    setSelectedSettlementBillIds([]);
   };
 
   const handleSaveCustomer = () => {
@@ -433,6 +464,7 @@ export function CustomerWorkspace() {
 
     const result = settleCustomerAccount({
       amount: Number(settlementAmount || 0),
+      billIds: selectedSettlementBillIds,
       customerId: selectedCustomer.id,
       method: settlementMethod,
       note: settlementNote
@@ -450,6 +482,27 @@ export function CustomerWorkspace() {
     );
     setSettlementAmount("");
     setSettlementNote("");
+    setSelectedSettlementBillIds([]);
+  };
+
+  const toggleSettlementBill = (billId: string) => {
+    setSelectedSettlementBillIds((current) =>
+      current.includes(billId) ? current.filter((entry) => entry !== billId) : [...current, billId]
+    );
+    setSettlementError(null);
+    setSettlementFeedback(null);
+  };
+
+  const selectAllOpenBills = () => {
+    setSelectedSettlementBillIds(selectedMetrics?.openBills.map((bill) => bill.id) ?? []);
+    setSettlementError(null);
+    setSettlementFeedback(null);
+  };
+
+  const clearSelectedOpenBills = () => {
+    setSelectedSettlementBillIds([]);
+    setSettlementError(null);
+    setSettlementFeedback(null);
   };
 
   const exportCustomersCsv = () => {
@@ -613,8 +666,8 @@ export function CustomerWorkspace() {
             <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{t("customers.directoryTitle")}</h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">{t("customers.directoryDesc")}</p>
           </div>
-          <Button className="h-10 rounded-[16px] bg-slate-950 px-4 text-white hover:bg-slate-900" onClick={beginCreateCustomer}>
-            <span className="inline-flex items-center gap-2">
+          <Button className="h-11 shrink-0 rounded-full bg-slate-950 px-4 text-sm text-white shadow-[0_14px_28px_rgba(15,23,42,0.16)] hover:bg-slate-900" onClick={beginCreateCustomer}>
+            <span className="inline-flex items-center gap-2 whitespace-nowrap">
               <Plus className="h-4 w-4" />
               {t("customers.newCustomer")}
             </span>
@@ -759,46 +812,24 @@ export function CustomerWorkspace() {
         </div>
         <div>
           <SectionEyebrow>{t("common.account")}</SectionEyebrow>
-          <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{t("customers.accountTitle")}</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">{t("customers.accountDesc")}</p>
+          <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{t("customers.receivePaymentTitle")}</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{t("customers.receivePaymentDesc")}</p>
         </div>
       </div>
 
       {selectedCustomer && selectedMetrics ? (
         <div className="mt-5 space-y-4">
-          <div className="rounded-[24px] border border-emerald-200 bg-emerald-50 px-4 py-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">{t("customers.balanceDue")}</p>
-            <p className="mt-1 font-display text-[2rem] font-semibold tracking-[-0.04em] text-slate-950">
-              {formatCurrency(selectedMetrics.outstandingBalance, currentShop?.currency ?? "SAR", locale)}
-            </p>
-          </div>
-
-          <Button className="w-full justify-center gap-2" variant="secondary" onClick={() => void exportSelectedStatementPdf()}>
-            <Download className="h-4 w-4" />
-            {t("customers.downloadStatement")}
-          </Button>
-
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{t("customers.totalSales")}</p>
-              <p className="mt-1 text-sm font-semibold text-slate-950">
-                {formatCurrency(selectedMetrics.totalSales, currentShop?.currency ?? "SAR", locale)}
+            <div className="rounded-[24px] border border-emerald-200 bg-emerald-50 px-4 py-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">{t("customers.balanceDue")}</p>
+              <p className="mt-1 font-display text-[2rem] font-semibold tracking-[-0.04em] text-slate-950">
+                {formatCurrency(selectedMetrics.outstandingBalance, currentShop?.currency ?? "SAR", locale)}
               </p>
             </div>
-            <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{t("customers.totalPaid")}</p>
-              <p className="mt-1 text-sm font-semibold text-slate-950">
-                {formatCurrency(selectedMetrics.totalPaid, currentShop?.currency ?? "SAR", locale)}
-              </p>
-            </div>
-            <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{t("customers.totalBills")}</p>
-              <p className="mt-1 text-sm font-semibold text-slate-950">{selectedMetrics.billCount}</p>
-            </div>
-            <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{t("customers.lastBill")}</p>
-              <p className="mt-1 text-sm font-semibold text-slate-950">
-                {selectedMetrics.lastBillAt ? formatDateTime(selectedMetrics.lastBillAt, locale) : t("common.notAvailable")}
+            <div className="rounded-[24px] border border-amber-200 bg-amber-50 px-4 py-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">{t("customers.selectedReceiptBalance")}</p>
+              <p className="mt-1 font-display text-[2rem] font-semibold tracking-[-0.04em] text-slate-950">
+                {formatCurrency(selectedSettlementBalance, currentShop?.currency ?? "SAR", locale)}
               </p>
             </div>
           </div>
@@ -810,7 +841,11 @@ export function CustomerWorkspace() {
               </div>
               <div>
                 <SectionEyebrow>{t("customers.settlementTitle")}</SectionEyebrow>
-                <p className="mt-1 text-sm leading-6 text-slate-600">{t("customers.settlementDesc")}</p>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  {selectedSettlementBillIds.length > 0
+                    ? t("customers.receiveAgainstSelection", { count: selectedSettlementBillIds.length })
+                    : t("customers.autoOldestHint")}
+                </p>
               </div>
             </div>
 
@@ -833,9 +868,9 @@ export function CustomerWorkspace() {
               </div>
 
               <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                {t("customers.balanceDue")}:{" "}
+                {selectedSettlementBillIds.length > 0 ? t("customers.selectedReceiptBalance") : t("customers.balanceDue")}:{" "}
                 <span className="font-semibold text-slate-950">
-                  {formatCurrency(selectedMetrics.outstandingBalance, currentShop?.currency ?? "SAR", locale)}
+                  {formatCurrency(settlementLimit, currentShop?.currency ?? "SAR", locale)}
                 </span>
               </div>
 
@@ -849,23 +884,50 @@ export function CustomerWorkspace() {
               <div className="flex flex-wrap gap-3">
                 <Button
                   className="bg-emerald-600 text-white hover:bg-emerald-700"
-                  disabled={selectedMetrics.outstandingBalance <= 0 || settlementTooHigh}
+                  disabled={settlementLimit <= 0 || settlementTooHigh}
                   onClick={handleSettlement}
                 >
                   {t("customers.applySettlement")}
                 </Button>
                 <Button
                   variant="secondary"
-                  disabled={selectedMetrics.outstandingBalance <= 0}
-                  onClick={() => setSettlementAmount(String(selectedMetrics.outstandingBalance))}
+                  disabled={settlementLimit <= 0}
+                  onClick={() => setSettlementAmount(String(settlementLimit))}
                 >
-                  {t("customers.quickFillBalance")}
+                  {selectedSettlementBillIds.length > 0 ? t("customers.quickFillSelected") : t("customers.quickFillBalance")}
+                </Button>
+                <Button className="gap-2" variant="secondary" onClick={() => void exportSelectedStatementPdf()}>
+                  <Download className="h-4 w-4" />
+                  {t("customers.downloadStatement")}
                 </Button>
               </div>
 
               {settlementTooHigh ? <p className="text-sm font-medium text-red-700">{t("customers.invalidSettlement")}</p> : null}
               {settlementError ? <p className="text-sm font-medium text-red-700">{settlementError}</p> : null}
               {settlementFeedback ? <p className="text-sm font-medium text-emerald-700">{settlementFeedback}</p> : null}
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-4">
+            <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{t("customers.totalSales")}</p>
+              <p className="mt-1 text-sm font-semibold text-slate-950">
+                {formatCurrency(selectedMetrics.totalSales, currentShop?.currency ?? "SAR", locale)}
+              </p>
+            </div>
+            <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{t("customers.totalPaid")}</p>
+              <p className="mt-1 text-sm font-semibold text-slate-950">
+                {formatCurrency(selectedMetrics.totalPaid, currentShop?.currency ?? "SAR", locale)}
+              </p>
+            </div>
+            <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{t("customers.totalBills")}</p>
+              <p className="mt-1 text-sm font-semibold text-slate-950">{selectedMetrics.billCount}</p>
+            </div>
+            <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{t("customers.openBills")}</p>
+              <p className="mt-1 text-sm font-semibold text-slate-950">{selectedMetrics.openBillCount}</p>
             </div>
           </div>
         </div>
@@ -883,37 +945,85 @@ export function CustomerWorkspace() {
         <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">
           <ReceiptText className="h-5 w-5" />
         </div>
-        <div>
+        <div className="min-w-0 flex-1">
           <SectionEyebrow>{t("customers.openBills")}</SectionEyebrow>
-          <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{t("customers.openBills")}</h2>
+          <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{t("customers.selectReceiptTitle")}</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{t("customers.selectReceiptDesc")}</p>
         </div>
       </div>
 
-      <div className="mt-5 max-h-[420px] space-y-3 overflow-y-auto pr-1">
+      {selectedMetrics?.openBills.length ? (
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" onClick={selectAllOpenBills}>
+            {t("customers.selectAllOpenBills")}
+          </Button>
+          <Button size="sm" variant="secondary" onClick={clearSelectedOpenBills}>
+            {t("customers.clearSelectedBills")}
+          </Button>
+        </div>
+      ) : null}
+
+      <div className="mt-5 max-h-[520px] space-y-3 overflow-y-auto pr-1">
         {selectedMetrics?.openBills.length ? (
           selectedMetrics.openBills
             .slice()
             .reverse()
-            .map((bill) => (
-              <div key={bill.id} className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-950">{bill.number}</p>
-                    <p className="mt-1 text-sm text-slate-600">{formatDateTime(bill.createdAt, locale)}</p>
+            .map((bill) => {
+              const isSelected = selectedSettlementBillIds.includes(bill.id);
+
+              return (
+                <div
+                  key={bill.id}
+                  className={`rounded-[22px] border px-4 py-4 transition ${
+                    isSelected
+                      ? "border-emerald-300 bg-emerald-50 shadow-[0_18px_34px_rgba(16,185,129,0.10)]"
+                      : "border-slate-200 bg-slate-50"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <button
+                      className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                      onClick={() => toggleSettlementBill(bill.id)}
+                      type="button"
+                    >
+                      <span
+                        className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
+                          isSelected ? "border-emerald-500 bg-emerald-500 text-white" : "border-slate-300 bg-white"
+                        }`}
+                      >
+                        {isSelected ? <span className="text-[12px] font-bold leading-none">✓</span> : null}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold text-slate-950">{bill.number}</span>
+                        <span className="mt-1 block text-sm text-slate-600">{formatDateTime(bill.createdAt, locale)}</span>
+                      </span>
+                    </button>
+                    <Badge variant={isSelected ? "success" : "warning"}>
+                      {formatCurrency(bill.dueAmount, currentShop?.currency ?? "SAR", locale)}
+                    </Badge>
                   </div>
-                  <Badge variant="warning">
-                    {formatCurrency(bill.dueAmount, currentShop?.currency ?? "SAR", locale)}
-                  </Badge>
+                  <div className="mt-3 grid gap-2 text-sm text-slate-600 sm:grid-cols-2">
+                    <span>{t("common.total")}: {formatCurrency(bill.total, currentShop?.currency ?? "SAR", locale)}</span>
+                    <span>{t("common.paidAmount")}: {formatCurrency(bill.paidAmount, currentShop?.currency ?? "SAR", locale)}</span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant={isSelected ? "secondary" : "primary"}
+                      onClick={() => {
+                        setSelectedSettlementBillIds([bill.id]);
+                        setSettlementAmount(String(bill.dueAmount));
+                      }}
+                    >
+                      {t("customers.receiveThisReceipt")}
+                    </Button>
+                    <Link className="inline-flex h-9 items-center rounded-[13px] border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50" href={`/bills/${bill.id}`}>
+                      {t("bills.viewReceipt")}
+                    </Link>
+                  </div>
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-slate-600">
-                  <span>{t("common.total")}: {formatCurrency(bill.total, currentShop?.currency ?? "SAR", locale)}</span>
-                  <span>{t("common.paidAmount")}: {formatCurrency(bill.paidAmount, currentShop?.currency ?? "SAR", locale)}</span>
-                </div>
-                <Link className="mt-3 inline-flex text-sm font-medium text-emerald-700 hover:text-emerald-800" href={`/bills/${bill.id}`}>
-                  {t("bills.viewReceipt")}
-                </Link>
-              </div>
-            ))
+              );
+            })
         ) : (
           <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center text-sm leading-6 text-slate-600">
             {t("customers.noOpenBills")}

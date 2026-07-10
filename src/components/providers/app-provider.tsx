@@ -503,6 +503,7 @@ interface AppContextValue {
     amount: number;
     method: Extract<CustomerAccountPayment["method"], "cash" | "card">;
     note?: string;
+    billIds?: string[];
   }) => { ok: boolean; message?: string; appliedAmount?: number; paymentId?: string; number?: string };
   addCategory: (payload: Pick<ProductCategory, "name" | "description" | "imageUrl">) => { ok: boolean; message?: string; categoryId?: string };
   updateCategory: (categoryId: string, payload: Partial<ProductCategory>) => { ok: boolean; message?: string };
@@ -3618,7 +3619,7 @@ export function AppProvider({
 
         return result;
       },
-      settleCustomerAccount: ({ customerId, amount, method, note }) => {
+      settleCustomerAccount: ({ customerId, amount, method, note, billIds }) => {
         if (!currentShopId || !session) {
           return {
             ok: false,
@@ -3693,7 +3694,26 @@ export function AppProvider({
             return current;
           }
 
-          if (normalizedAmount > customerMetrics.outstandingBalance) {
+          const selectedBillIds = new Set((billIds ?? []).filter(Boolean));
+          const settlementLimit =
+            selectedBillIds.size > 0
+              ? Math.round(
+                  customerMetrics.openBills
+                    .filter((bill) => selectedBillIds.has(bill.id))
+                    .reduce((sum, bill) => sum + bill.dueAmount, 0) * 100
+                ) / 100
+              : customerMetrics.outstandingBalance;
+
+          if (settlementLimit <= 0) {
+            result = {
+              ok: false,
+              message: "Select at least one open account bill."
+            };
+
+            return current;
+          }
+
+          if (normalizedAmount > settlementLimit) {
             result = {
               ok: false,
               message: "Settlement amount cannot exceed outstanding balance."
@@ -3705,7 +3725,8 @@ export function AppProvider({
           const settlement = applySettlementToBills({
             amount: normalizedAmount,
             bills: current.bills,
-            customerId
+            customerId,
+            billIds
           });
 
           if (settlement.appliedAmount <= 0) {
