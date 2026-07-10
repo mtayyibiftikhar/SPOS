@@ -69,6 +69,27 @@ const SHARED_STATE_ENDPOINT = "/api/local-state";
 const SHOP_CLOUD_STATE_ENDPOINT = "/api/shop-state";
 const MIN_PASSWORD_LENGTH = 8;
 
+function shouldUseSharedStateEndpoint() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const hostname = window.location.hostname;
+
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    /^10\./.test(hostname) ||
+    /^192\.168\./.test(hostname) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
+  );
+}
+
+function isDemoSeedProductKey(productKey: DemoAppState["productKeys"][number] | undefined) {
+  return !productKey || productKey.id === "pk_001" || productKey.key.includes("DEMO");
+}
+
 function validatePasswordLength(password: string, label = "Password") {
   return password.trim().length >= MIN_PASSWORD_LENGTH
     ? null
@@ -1136,6 +1157,18 @@ export function AppProvider({
     const loadState = async () => {
       const localState = loadStoredState(ownerBootstrap);
 
+      if (!shouldUseSharedStateEndpoint()) {
+        if (active && localState) {
+          setState(localState);
+        }
+
+        if (active) {
+          setIsHydrated(true);
+        }
+
+        return;
+      }
+
       try {
         const response = await fetch(SHARED_STATE_ENDPOINT, { cache: "no-store" });
         const payload = (await response.json()) as { state?: DemoAppState | null };
@@ -1177,18 +1210,20 @@ export function AppProvider({
     }
 
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    void fetch(SHARED_STATE_ENDPOINT, {
-      body: JSON.stringify({
-        state: {
-          ...state,
-          session: null
-        }
-      }),
-      headers: {
-        "Content-Type": "application/json"
-      },
-      method: "POST"
-    }).catch(() => undefined);
+    if (shouldUseSharedStateEndpoint()) {
+      void fetch(SHARED_STATE_ENDPOINT, {
+        body: JSON.stringify({
+          state: {
+            ...state,
+            session: null
+          }
+        }),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      }).catch(() => undefined);
+    }
   }, [isHydrated, state]);
 
   useEffect(() => {
@@ -1287,6 +1322,12 @@ export function AppProvider({
   const currentShift = getActiveShift(state.shifts, currentShopId, session?.id ?? null);
   const activatedCloudShopId =
     state.deviceActivations.reduce<DeviceActivation | null>((latest, activation) => {
+      const productKey = state.productKeys.find((key) => key.id === activation.productKeyId);
+
+      if (isDemoSeedProductKey(productKey)) {
+        return latest;
+      }
+
       if (!latest || activation.lastSeenAt.localeCompare(latest.lastSeenAt) > 0) {
         return activation;
       }
