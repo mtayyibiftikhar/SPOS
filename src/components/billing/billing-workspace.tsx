@@ -78,6 +78,8 @@ const paymentOptions: Array<{
   { method: "account", icon: Clock3 }
 ];
 
+const UNCATEGORIZED_QUICK_CATEGORY_ID = "__quick_uncategorized__";
+
 function createEmptyCustomerForm(): CustomerForm {
   return {
     email: "",
@@ -231,12 +233,14 @@ export function BillingWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [setupFeedback, setSetupFeedback] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedQuickCategoryId, setSelectedQuickCategoryId] = useState<string | null>(null);
 
   const deferredCustomerSearch = useDeferredValue(customerSearch);
 
   const shopProducts = state.products.filter(
     (product) => product.shopId === currentShopId && product.status === "active"
   );
+  const shopCategories = state.categories.filter((category) => category.shopId === currentShopId);
   const savedCustomers = state.customers.filter((customer) => customer.shopId === currentShopId);
   const currency = currentShop?.currency ?? "SAR";
   const taxEnabled = currentSettings?.tax.enabled ?? false;
@@ -261,6 +265,42 @@ export function BillingWorkspace() {
         .sort((left, right) => left.name.en.localeCompare(right.name.en)),
     [shopProducts]
   );
+
+  const quickCategories = useMemo(() => {
+    const productsByCategory = favoriteProducts.reduce<Record<string, Product[]>>((accumulator, product) => {
+      const categoryId = product.categoryId || UNCATEGORIZED_QUICK_CATEGORY_ID;
+
+      accumulator[categoryId] = [...(accumulator[categoryId] ?? []), product];
+      return accumulator;
+    }, {});
+
+    const categorized = shopCategories
+      .map((category) => ({
+        id: category.id,
+        imageUrl: category.imageUrl,
+        name: category.name,
+        products: productsByCategory[category.id] ?? []
+      }))
+      .filter((category) => category.products.length > 0);
+    const uncategorizedProducts = productsByCategory[UNCATEGORIZED_QUICK_CATEGORY_ID] ?? [];
+
+    return uncategorizedProducts.length > 0
+      ? [
+          ...categorized,
+          {
+            id: UNCATEGORIZED_QUICK_CATEGORY_ID,
+            imageUrl: undefined,
+            name: t("common.noCategory"),
+            products: uncategorizedProducts
+          }
+        ]
+      : categorized;
+  }, [favoriteProducts, shopCategories, t]);
+
+  const selectedQuickCategory = selectedQuickCategoryId
+    ? quickCategories.find((category) => category.id === selectedQuickCategoryId) ?? null
+    : null;
+  const selectedQuickProducts = selectedQuickCategory?.products ?? [];
 
   const matchedCustomers = useMemo(() => {
     const query = deferredCustomerSearch.trim().toLowerCase();
@@ -418,6 +458,15 @@ export function BillingWorkspace() {
       setDiscountValue(nextDiscountValue);
     }
   }, [discountType, discountValue, totals.subtotal]);
+
+  useEffect(() => {
+    if (
+      selectedQuickCategoryId &&
+      !quickCategories.some((category) => category.id === selectedQuickCategoryId)
+    ) {
+      setSelectedQuickCategoryId(null);
+    }
+  }, [quickCategories, selectedQuickCategoryId]);
 
   const isProductStockBlocked = (product: Product) =>
     product.kind === "product" && (cartQuantityByProductId[product.id] ?? 0) >= product.stockQuantity;
@@ -1231,100 +1280,157 @@ export function BillingWorkspace() {
         <Card className="grid min-h-[560px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:min-h-0">
           <div className="border-b border-slate-200 px-4 py-4">
             <SectionEyebrow>{t("billing.quickProductsTitle")}</SectionEyebrow>
-            <h2 className="mt-1 font-display text-[1.5rem] font-semibold tracking-[-0.04em] text-slate-950">
-              {t("billing.quickLaneTitle")}
-            </h2>
-            <p className="mt-1 text-sm text-slate-600">{t("billing.quickProductsDesc")}</p>
+            <div className="mt-1 flex items-start justify-between gap-3">
+              <div>
+                <h2 className="font-display text-[1.5rem] font-semibold tracking-[-0.04em] text-slate-950">
+                  {selectedQuickCategory ? selectedQuickCategory.name : t("billing.quickCategoriesTitle")}
+                </h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  {selectedQuickCategory ? t("billing.quickProductsDesc") : t("billing.quickCategoriesDesc")}
+                </p>
+              </div>
+              {selectedQuickCategory ? (
+                <button
+                  className="inline-flex h-10 shrink-0 items-center justify-center rounded-[14px] border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                  onClick={() => setSelectedQuickCategoryId(null)}
+                  type="button"
+                >
+                  <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+                  {t("billing.backToCategories")}
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <div className="min-h-0 overflow-y-auto px-4 py-4">
-            {favoriteProducts.length > 0 ? (
-              <div className="space-y-2.5">
-                {favoriteProducts.map((product) => {
-                  const quantityInCart = cartQuantityByProductId[product.id] ?? 0;
-                  const stockBlocked = isProductStockBlocked(product);
-
-                  return (
-                    <div
-                      key={product.id}
-                      className={cn(
-                        "block w-full rounded-[22px] border border-slate-200 bg-white px-4 py-3 text-left shadow-[0_12px_26px_rgba(15,23,42,0.05)] transition",
-                        stockBlocked
-                          ? "opacity-70"
-                          : "hover:-translate-y-0.5 hover:shadow-[0_16px_30px_rgba(15,23,42,0.08)]"
+            {quickCategories.length > 0 && !selectedQuickCategory ? (
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                {quickCategories.map((category) => (
+                  <button
+                    key={category.id}
+                    className="group overflow-hidden rounded-[26px] border border-slate-200 bg-white text-left shadow-[0_14px_34px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_18px_40px_rgba(15,23,42,0.1)]"
+                    onClick={() => setSelectedQuickCategoryId(category.id)}
+                    type="button"
+                  >
+                    <div className="relative h-[7.5rem] overflow-hidden bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.22),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)]">
+                      {category.imageUrl ? (
+                        <img src={category.imageUrl} alt={category.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
+                      ) : (
+                        <div className="flex h-full items-center justify-center">
+                          <span className="font-display text-4xl font-semibold tracking-[-0.04em] text-slate-300">
+                            {category.name.slice(0, 2).toUpperCase()}
+                          </span>
+                        </div>
                       )}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="line-clamp-2 text-sm font-semibold text-slate-950">
-                            {getLocalizedProductName(product, locale)}
-                          </p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            {product.barcode || t("billing.manualSearchOnly")}
-                          </p>
+                      <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-slate-950/55 to-transparent" />
+                      <span className="absolute bottom-3 left-3 rounded-full bg-white/92 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-950 shadow-sm">
+                        {t("billing.quickCategoryItems", { count: category.products.length })}
+                      </span>
+                    </div>
+                    <div className="p-4">
+                      <p className="line-clamp-1 text-base font-semibold text-slate-950">{category.name}</p>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">{t("billing.quickProductsDesc")}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : quickCategories.length > 0 && selectedQuickCategory ? (
+              selectedQuickProducts.length > 0 ? (
+                <div className="space-y-2.5">
+                  {selectedQuickProducts.map((product) => {
+                    const quantityInCart = cartQuantityByProductId[product.id] ?? 0;
+                    const stockBlocked = isProductStockBlocked(product);
+
+                    return (
+                      <div
+                        key={product.id}
+                        className={cn(
+                          "grid w-full grid-cols-[76px_minmax(0,1fr)] gap-3 rounded-[24px] border border-slate-200 bg-white p-3 text-left shadow-[0_12px_26px_rgba(15,23,42,0.05)] transition",
+                          stockBlocked
+                            ? "opacity-70"
+                            : "hover:-translate-y-0.5 hover:shadow-[0_16px_30px_rgba(15,23,42,0.08)]"
+                        )}
+                      >
+                        <div className="flex h-[76px] items-center justify-center overflow-hidden rounded-[20px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.18),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)]">
+                          {product.imageUrl ? (
+                            <img
+                              src={product.imageUrl}
+                              alt={getLocalizedProductName(product, locale)}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <span className="font-display text-2xl font-semibold tracking-[-0.04em] text-slate-300">
+                              {getLocalizedProductName(product, locale).slice(0, 2).toUpperCase()}
+                            </span>
+                          )}
                         </div>
 
-                        {quantityInCart > 0 ? (
-                          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-700 ring-1 ring-emerald-200">
-                            {quantityInCart}
-                          </span>
-                        ) : (
-                          <span
-                            className={cn(
-                              "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]",
-                              stockBlocked ? "bg-red-50 text-red-700 ring-1 ring-red-100" : "bg-slate-100 text-slate-600"
-                            )}
-                          >
-                            {stockBlocked ? t("products.reorderNeeded") : t("billing.quickAddBadge")}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="mt-3 flex items-end justify-between gap-3">
-                        <p className="text-lg font-semibold text-slate-950">
-                          {formatCurrency(product.salePrice, currency, locale)}
-                        </p>
-
-                        {quantityInCart > 0 ? (
-                          <div className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 p-1">
-                            <button
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-emerald-700"
-                              onClick={() => {
-                                updateLineQuantity(product.id, quantityInCart - 1);
-                              }}
-                              type="button"
-                            >
-                              <Minus className="h-4 w-4" />
-                            </button>
-                            <span className="min-w-[1.8rem] text-center text-sm font-semibold text-emerald-800">
-                              {quantityInCart}
-                            </span>
-                            <button
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-emerald-700"
-                              disabled={stockBlocked}
-                              onClick={() => addProductToCart(product)}
-                              type="button"
-                            >
-                              <Plus className="h-4 w-4" />
-                            </button>
+                        <div className="min-w-0">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="line-clamp-2 text-sm font-semibold text-slate-950">
+                                {getLocalizedProductName(product, locale)}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {product.barcode || t("billing.manualSearchOnly")}
+                              </p>
+                            </div>
+                            {quantityInCart > 0 ? (
+                              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-700 ring-1 ring-emerald-200">
+                                {quantityInCart}
+                              </span>
+                            ) : null}
                           </div>
-                        ) : (
-                          <Button
-                            className="h-9 rounded-[14px] bg-emerald-600 px-4 text-xs font-semibold uppercase tracking-[0.18em] text-white hover:bg-emerald-700"
-                            disabled={stockBlocked}
-                            onClick={() => addProductToCart(product)}
-                          >
-                            <span className="inline-flex items-center gap-1.5">
-                              <Star className="h-3.5 w-3.5" />
-                              {t("billing.addToCart")}
-                            </span>
-                          </Button>
-                        )}
+
+                          <div className="mt-3 flex items-end justify-between gap-3">
+                            <p className="text-base font-semibold text-slate-950">
+                              {formatCurrency(product.salePrice, currency, locale)}
+                            </p>
+
+                            {quantityInCart > 0 ? (
+                              <div className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 p-1">
+                                <button
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-emerald-700"
+                                  onClick={() => {
+                                    updateLineQuantity(product.id, quantityInCart - 1);
+                                  }}
+                                  type="button"
+                                >
+                                  <Minus className="h-4 w-4" />
+                                </button>
+                                <span className="min-w-[1.8rem] text-center text-sm font-semibold text-emerald-800">
+                                  {quantityInCart}
+                                </span>
+                                <button
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-emerald-700 disabled:opacity-40"
+                                  disabled={stockBlocked}
+                                  onClick={() => addProductToCart(product)}
+                                  type="button"
+                                >
+                                  <Plus className="h-4 w-4" />
+                                </button>
+                              </div>
+                            ) : (
+                              <Button
+                                className="h-9 rounded-[14px] bg-emerald-600 px-3 text-xs font-semibold uppercase tracking-[0.14em] text-white hover:bg-emerald-700"
+                                disabled={stockBlocked}
+                                onClick={() => addProductToCart(product)}
+                              >
+                                <span className="inline-flex items-center gap-1.5">
+                                  <Star className="h-3.5 w-3.5" />
+                                  {stockBlocked ? t("products.reorderNeeded") : t("billing.addToCart")}
+                                </span>
+                              </Button>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <EmptyState label={t("billing.quickCategoryEmpty")} />
+              )
             ) : (
               <EmptyState label={t("billing.emptyQuickTab")} />
             )}

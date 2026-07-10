@@ -2,9 +2,10 @@
 
 import { startTransition, useDeferredValue, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Edit3, FolderPlus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Edit3, FolderPlus, ImageIcon, RefreshCw, Search, Trash2, UploadCloud, X } from "lucide-react";
 import { generateUniqueBarcode } from "@/lib/catalog";
 import { productKindLabelKeys } from "@/lib/i18n";
+import { resizeImageFileToDataUrl } from "@/lib/image-upload";
 import { usePosApp } from "@/components/providers/app-provider";
 import { ProductQuickTabGrid } from "@/components/products/product-quick-tab-grid";
 import { Badge } from "@/components/ui/badge";
@@ -28,11 +29,11 @@ type ProductFormState = {
   nameEn: string;
   nameAr: string;
   nameUr: string;
+  imageUrl: string;
   salePrice: string;
   costPrice: string;
   stockQuantity: string;
   reorderLevel: string;
-  expiryDate: string;
   taxable: boolean;
   quickTab: boolean;
   status: Product["status"];
@@ -42,6 +43,7 @@ type CategoryFormState = {
   id?: string;
   name: string;
   description: string;
+  imageUrl: string;
 };
 
 const emptyProductForm: ProductFormState = {
@@ -51,11 +53,11 @@ const emptyProductForm: ProductFormState = {
   nameEn: "",
   nameAr: "",
   nameUr: "",
+  imageUrl: "",
   salePrice: "",
   costPrice: "",
   stockQuantity: "0",
   reorderLevel: "0",
-  expiryDate: "",
   taxable: true,
   quickTab: false,
   status: "active"
@@ -63,13 +65,37 @@ const emptyProductForm: ProductFormState = {
 
 const emptyCategoryForm: CategoryFormState = {
   name: "",
-  description: ""
+  description: "",
+  imageUrl: ""
 };
 
 const ITEMS_PER_PAGE = 20;
 
 function getLocalizedName(product: Product, locale: "en" | "ar" | "ur") {
   return product.name[locale] || product.name.en;
+}
+
+function ImagePreview({
+  className,
+  imageUrl,
+  label
+}: {
+  className?: string;
+  imageUrl?: string;
+  label: string;
+}) {
+  return (
+    <div className={cn("flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-[28px] border border-line bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.18),_transparent_42%),linear-gradient(160deg,#f8fafc_0%,#eef4ef_100%)]", className)}>
+      {imageUrl ? (
+        <img src={imageUrl} alt={label} className="h-full w-full object-cover" />
+      ) : (
+        <div className="text-center text-slate-400">
+          <ImageIcon className="mx-auto h-6 w-6" />
+          <p className="mt-2 text-[10px] font-semibold uppercase tracking-[0.18em]">{label}</p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function createProductFormState(product?: Product): ProductFormState {
@@ -85,11 +111,11 @@ function createProductFormState(product?: Product): ProductFormState {
     nameEn: product.name.en,
     nameAr: product.name.ar,
     nameUr: product.name.ur,
+    imageUrl: product.imageUrl ?? "",
     salePrice: String(product.salePrice),
     costPrice: String(product.costPrice),
     stockQuantity: String(product.stockQuantity),
     reorderLevel: String(product.reorderLevel),
-    expiryDate: product.expiryDate ?? "",
     taxable: product.taxable,
     quickTab: product.quickTab,
     status: product.status
@@ -219,11 +245,11 @@ export function ProductWorkspace() {
           ar: productForm.nameAr.trim(),
           ur: productForm.nameUr.trim()
         },
+        imageUrl: productForm.imageUrl.trim() || undefined,
         salePrice: Number(productForm.salePrice),
         costPrice: Number(productForm.costPrice),
         stockQuantity: productForm.kind === "service" ? 0 : Number(productForm.stockQuantity || 0),
         reorderLevel: productForm.kind === "service" ? 0 : Number(productForm.reorderLevel || 0),
-        expiryDate: productForm.kind === "service" ? undefined : productForm.expiryDate || undefined,
         taxable: productForm.taxable,
         quickTab: productForm.quickTab,
         status: productForm.status
@@ -256,11 +282,13 @@ export function ProductWorkspace() {
       const result = categoryForm.id
         ? updateCategory(categoryForm.id, {
           name: categoryForm.name.trim(),
-          description: categoryForm.description.trim()
+          description: categoryForm.description.trim(),
+          imageUrl: categoryForm.imageUrl.trim() || undefined
         })
         : addCategory({
           name: categoryForm.name.trim(),
-          description: categoryForm.description.trim()
+          description: categoryForm.description.trim(),
+          imageUrl: categoryForm.imageUrl.trim() || undefined
         });
 
       if (!result.ok) {
@@ -297,6 +325,56 @@ export function ProductWorkspace() {
 
     if (categoryForm.id === categoryId) {
       setCategoryForm(emptyCategoryForm);
+    }
+  };
+
+  const uploadProductImage = async (file?: File | null) => {
+    if (!file) {
+      return;
+    }
+
+    try {
+      const result = await resizeImageFileToDataUrl(file, {
+        maxWidth: 720,
+        maxHeight: 520,
+        quality: 0.84,
+        outputType: "image/jpeg"
+      });
+      setProductForm((current) => ({ ...current, imageUrl: result.dataUrl }));
+      setCatalogFeedback({
+        tone: "success",
+        message: t("products.imageUploadSuccess")
+      });
+    } catch (error) {
+      setCatalogFeedback({
+        tone: "error",
+        message: error instanceof Error ? error.message : t("products.imageUploadError")
+      });
+    }
+  };
+
+  const uploadCategoryImage = async (file?: File | null) => {
+    if (!file) {
+      return;
+    }
+
+    try {
+      const result = await resizeImageFileToDataUrl(file, {
+        maxWidth: 720,
+        maxHeight: 520,
+        quality: 0.84,
+        outputType: "image/jpeg"
+      });
+      setCategoryForm((current) => ({ ...current, imageUrl: result.dataUrl }));
+      setCategoryFeedback({
+        tone: "success",
+        message: t("products.imageUploadSuccess")
+      });
+    } catch (error) {
+      setCategoryFeedback({
+        tone: "error",
+        message: error instanceof Error ? error.message : t("products.imageUploadError")
+      });
     }
   };
 
@@ -570,6 +648,61 @@ export function ProductWorkspace() {
                 />
               </div>
 
+              <div className="md:col-span-2 rounded-[30px] border border-line bg-shell/70 p-4">
+                <div className="grid gap-4 md:grid-cols-[128px_minmax(0,1fr)] md:items-center">
+                  <ImagePreview className="h-28 w-28" imageUrl={productForm.imageUrl} label={t("products.productImage")} />
+                  <div className="space-y-3">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-ink">{t("products.productImage")}</label>
+                      <Input
+                        disabled={!isAdmin}
+                        placeholder={t("products.imageUrlPlaceholder")}
+                        value={productForm.imageUrl}
+                        onChange={(event) =>
+                          setProductForm((current) => ({
+                            ...current,
+                            imageUrl: event.target.value
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      <label className={cn(
+                        "inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-[16px] border border-line bg-white px-4 text-sm font-semibold text-ink transition hover:bg-slate-50",
+                        !isAdmin && "pointer-events-none opacity-60"
+                      )}>
+                        <UploadCloud className="h-4 w-4" />
+                        {t("products.uploadImage")}
+                        <input
+                          accept="image/*"
+                          className="hidden"
+                          disabled={!isAdmin}
+                          type="file"
+                          onChange={(event) => {
+                            void uploadProductImage(event.target.files?.[0]);
+                            event.currentTarget.value = "";
+                          }}
+                        />
+                      </label>
+                      {productForm.imageUrl ? (
+                        <Button
+                          disabled={!isAdmin}
+                          type="button"
+                          variant="secondary"
+                          onClick={() => setProductForm((current) => ({ ...current, imageUrl: "" }))}
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            <X className="h-4 w-4" />
+                            {t("products.removeImage")}
+                          </span>
+                        </Button>
+                      ) : null}
+                    </div>
+                    <p className="text-xs leading-5 text-slate-500">{t("products.imageHelp")}</p>
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <label className="mb-2 block text-sm font-medium text-ink">{t("common.salePrice")}</label>
                 <Input
@@ -628,21 +761,6 @@ export function ProductWorkspace() {
                     }))
                   }
                 />
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-medium text-ink">{t("products.expiryDate")}</label>
-                <Input
-                  disabled={!isAdmin || productForm.kind === "service"}
-                  type="date"
-                  value={productForm.kind === "service" ? "" : productForm.expiryDate}
-                  onChange={(event) =>
-                    setProductForm((current) => ({
-                      ...current,
-                      expiryDate: event.target.value
-                    }))
-                  }
-                />
-                <p className="mt-2 text-xs leading-5 text-slate-500">{t("products.expiryDateDesc")}</p>
               </div>
 
               <div className="rounded-3xl border border-line bg-shell p-4">
@@ -787,6 +905,60 @@ export function ProductWorkspace() {
                   }
                 />
               </div>
+              <div className="rounded-[30px] border border-line bg-shell/70 p-4">
+                <div className="grid gap-4 md:grid-cols-[128px_minmax(0,1fr)] md:items-center">
+                  <ImagePreview className="h-28 w-28" imageUrl={categoryForm.imageUrl} label={t("products.categoryImage")} />
+                  <div className="space-y-3">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-ink">{t("products.categoryImage")}</label>
+                      <Input
+                        disabled={!isAdmin}
+                        placeholder={t("products.imageUrlPlaceholder")}
+                        value={categoryForm.imageUrl}
+                        onChange={(event) =>
+                          setCategoryForm((current) => ({
+                            ...current,
+                            imageUrl: event.target.value
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      <label className={cn(
+                        "inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-[16px] border border-line bg-white px-4 text-sm font-semibold text-ink transition hover:bg-slate-50",
+                        !isAdmin && "pointer-events-none opacity-60"
+                      )}>
+                        <UploadCloud className="h-4 w-4" />
+                        {t("products.uploadImage")}
+                        <input
+                          accept="image/*"
+                          className="hidden"
+                          disabled={!isAdmin}
+                          type="file"
+                          onChange={(event) => {
+                            void uploadCategoryImage(event.target.files?.[0]);
+                            event.currentTarget.value = "";
+                          }}
+                        />
+                      </label>
+                      {categoryForm.imageUrl ? (
+                        <Button
+                          disabled={!isAdmin}
+                          type="button"
+                          variant="secondary"
+                          onClick={() => setCategoryForm((current) => ({ ...current, imageUrl: "" }))}
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            <X className="h-4 w-4" />
+                            {t("products.removeImage")}
+                          </span>
+                        </Button>
+                      ) : null}
+                    </div>
+                    <p className="text-xs leading-5 text-slate-500">{t("products.categoryImageHelp")}</p>
+                  </div>
+                </div>
+              </div>
               <div className="flex flex-wrap gap-3">
                 <Button disabled={!isAdmin || !categoryForm.name.trim()} type="submit">
                   {categoryForm.id ? t("products.updateCategory") : t("products.addCategoryAction")}
@@ -813,8 +985,13 @@ export function ProductWorkspace() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-ink">{category.name}</p>
-                      <p className="mt-1 text-sm text-slate-600">{category.description || t("common.noDescriptionYet")}</p>
+                      <div className="flex items-center gap-3">
+                        <ImagePreview className="h-16 w-16 rounded-[20px]" imageUrl={category.imageUrl} label={category.name.slice(0, 2).toUpperCase()} />
+                        <div>
+                          <p className="text-sm font-semibold text-ink">{category.name}</p>
+                          <p className="mt-1 text-sm text-slate-600">{category.description || t("common.noDescriptionYet")}</p>
+                        </div>
+                      </div>
                     </div>
                     <Badge variant="neutral">
                       {t("products.categoryItems", {
@@ -831,7 +1008,8 @@ export function ProductWorkspace() {
                         setCategoryForm({
                           id: category.id,
                           name: category.name,
-                          description: category.description ?? ""
+                          description: category.description ?? "",
+                          imageUrl: category.imageUrl ?? ""
                         });
                       }}
                     >
@@ -936,18 +1114,24 @@ export function ProductWorkspace() {
                 return (
                   <Card key={product.id} className="p-5">
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-lg font-semibold text-ink">{getLocalizedName(product, locale)}</p>
-                          <Badge variant={product.kind === "service" ? "warning" : "neutral"}>
-                            {t(productKindLabelKeys[product.kind])}
-                          </Badge>
-                          {product.quickTab ? <Badge variant="success">{t("products.quickTabBadge")}</Badge> : null}
-                          <Badge variant={product.taxable ? "success" : "warning"}>
-                            {product.taxable ? t("products.taxApplied") : t("products.taxExempt")}
-                          </Badge>
-                          {category ? <Badge variant="neutral">{category.name}</Badge> : null}
-                        </div>
+                      <div className="flex min-w-0 gap-4">
+                        <ImagePreview
+                          className="hidden h-20 w-20 rounded-[22px] sm:flex"
+                          imageUrl={product.imageUrl}
+                          label={getLocalizedName(product, locale).slice(0, 2).toUpperCase()}
+                        />
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-lg font-semibold text-ink">{getLocalizedName(product, locale)}</p>
+                            <Badge variant={product.kind === "service" ? "warning" : "neutral"}>
+                              {t(productKindLabelKeys[product.kind])}
+                            </Badge>
+                            {product.quickTab ? <Badge variant="success">{t("products.quickTabBadge")}</Badge> : null}
+                            <Badge variant={product.taxable ? "success" : "warning"}>
+                              {product.taxable ? t("products.taxApplied") : t("products.taxExempt")}
+                            </Badge>
+                            {category ? <Badge variant="neutral">{category.name}</Badge> : null}
+                          </div>
                         <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-3">
                           <p>
                             <span className="font-medium text-ink">{t("products.localizedEn")}:</span> {product.name.en}
@@ -981,6 +1165,7 @@ export function ProductWorkspace() {
                             <span className="font-medium text-ink">{t("products.inventoryShort")}:</span>{" "}
                             {product.stockQuantity}
                           </p>
+                        </div>
                         </div>
                       </div>
 

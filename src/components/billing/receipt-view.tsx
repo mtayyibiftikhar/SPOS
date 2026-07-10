@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, ArrowRight, Download, Mail, MessageCircle, Printer, ReceiptText, Share2 } from "lucide-react";
 import { billStatusLabelKeys, paymentMethodLabelKeys } from "@/lib/i18n";
 import {
@@ -24,12 +24,14 @@ import { getReceiptItemNameLines, getReceiptItemNameText } from "@/lib/receipt-l
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 
 export function ReceiptView({ billId }: { billId: string }) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { locale, state, t, updateBillCustomerContact } = usePosApp();
   const [busyAction, setBusyAction] = useState<"download" | "share" | "email" | "whatsapp" | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [pendingShareAction, setPendingShareAction] = useState<"email" | "whatsapp" | null>(null);
   const [isSavingContact, setIsSavingContact] = useState(false);
+  const [returnCountdown, setReturnCountdown] = useState<number | null>(null);
   const [contactForm, setContactForm] = useState({
     name: "",
     phone: "",
@@ -37,6 +39,7 @@ export function ReceiptView({ billId }: { billId: string }) {
     whatsapp: ""
   });
   const hasAutoPrinted = useRef(false);
+  const isFreshReceipt = searchParams.get("fresh") === "1";
   const bill = state.bills.find((entry) => entry.id === billId);
   const shop = bill ? state.shops.find((entry) => entry.id === bill.shopId) ?? null : null;
   const cashier = bill ? state.users.find((entry) => entry.id === bill.cashierId) ?? null : null;
@@ -61,7 +64,7 @@ export function ReceiptView({ billId }: { billId: string }) {
   useEffect(() => {
     if (
       !bill ||
-      searchParams.get("fresh") !== "1" ||
+      !isFreshReceipt ||
       !printerSettings?.autoPrintAfterSale ||
       hasAutoPrinted.current
     ) {
@@ -76,7 +79,28 @@ export function ReceiptView({ billId }: { billId: string }) {
     }, 320);
 
     return () => window.clearTimeout(timer);
-  }, [bill, printerSettings?.autoPrintAfterSale, searchParams, t]);
+  }, [bill, isFreshReceipt, printerSettings?.autoPrintAfterSale, t]);
+
+  useEffect(() => {
+    if (!bill || !isFreshReceipt) {
+      setReturnCountdown(null);
+      return;
+    }
+
+    setReturnCountdown(10);
+
+    const interval = window.setInterval(() => {
+      setReturnCountdown((current) => (current === null ? null : Math.max(0, current - 1)));
+    }, 1000);
+    const timer = window.setTimeout(() => {
+      router.push("/billing");
+    }, 10000);
+
+    return () => {
+      window.clearInterval(interval);
+      window.clearTimeout(timer);
+    };
+  }, [bill, isFreshReceipt, router]);
 
   if (!bill) {
     return (
@@ -354,6 +378,12 @@ export function ReceiptView({ billId }: { billId: string }) {
           </Link>
         </Button>
       </div>
+
+      {returnCountdown !== null ? (
+        <div className="rounded-[22px] border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-medium text-emerald-800 print:hidden">
+          {t("receipt.returnCountdown", { seconds: returnCountdown })}
+        </div>
+      ) : null}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px] print:block">
         <Card className="receipt-paper mx-auto w-full max-w-3xl p-6 sm:p-8 print:mx-0 print:max-w-none print:rounded-none print:border-0 print:bg-white print:p-0 print:shadow-none">

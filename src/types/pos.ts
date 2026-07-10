@@ -99,6 +99,7 @@ export interface ProductCategory {
   shopId: string;
   name: string;
   description?: string;
+  imageUrl?: string;
   createdAt: string;
 }
 
@@ -109,6 +110,7 @@ export interface Product {
   barcode?: string;
   kind: ProductKind;
   name: LocalizedText;
+  imageUrl?: string;
   salePrice: number;
   costPrice: number;
   stockQuantity: number;

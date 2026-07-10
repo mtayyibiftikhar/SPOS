@@ -3,7 +3,7 @@
 import { usePosApp } from "@/components/providers/app-provider";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { formatCurrency } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 import { productKindLabelKeys } from "@/lib/i18n";
 import type { Product } from "@/types/pos";
 
@@ -31,7 +31,26 @@ export function ProductQuickTabGrid({
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {products.map((product) => (
-        <Card key={product.id} className="p-4">
+        <Card key={product.id} className="overflow-hidden p-0">
+          <div
+            className={cn(
+              "flex h-32 items-center justify-center bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.2),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)]",
+              product.imageUrl && "bg-slate-100"
+            )}
+          >
+            {product.imageUrl ? (
+              <img
+                src={product.imageUrl}
+                alt={getLocalizedProductName(product, locale)}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <span className="font-display text-3xl font-semibold tracking-[-0.04em] text-slate-300">
+                {getLocalizedProductName(product, locale).slice(0, 2).toUpperCase()}
+              </span>
+            )}
+          </div>
+          <div className="p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-base font-semibold text-ink">{getLocalizedProductName(product, locale)}</p>
@@ -45,6 +64,7 @@ export function ProductQuickTabGrid({
             <p>{t("products.localizedUr")}: {product.name.ur}</p>
           </div>
           <p className="mt-4 font-medium text-ink">{formatCurrency(product.salePrice, "SAR", locale)}</p>
+          </div>
         </Card>
       ))}
     </div>

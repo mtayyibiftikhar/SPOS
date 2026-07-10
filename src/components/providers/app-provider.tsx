@@ -87,6 +87,7 @@ type ProductInput = {
   categoryId?: string;
   barcode?: string;
   name: Product["name"];
+  imageUrl?: string;
   salePrice: number;
   costPrice: number;
   stockQuantity: number;
@@ -503,7 +504,7 @@ interface AppContextValue {
     method: Extract<CustomerAccountPayment["method"], "cash" | "card">;
     note?: string;
   }) => { ok: boolean; message?: string; appliedAmount?: number; paymentId?: string; number?: string };
-  addCategory: (payload: Pick<ProductCategory, "name" | "description">) => { ok: boolean; message?: string; categoryId?: string };
+  addCategory: (payload: Pick<ProductCategory, "name" | "description" | "imageUrl">) => { ok: boolean; message?: string; categoryId?: string };
   updateCategory: (categoryId: string, payload: Partial<ProductCategory>) => { ok: boolean; message?: string };
   deleteCategory: (categoryId: string) => { ok: boolean; message?: string };
   saveProduct: (payload: ProductInput) => { ok: boolean; message?: string; barcode?: string };
@@ -656,6 +657,7 @@ function normalizeStoredProducts(products: DemoAppState["products"]) {
       id: productId,
       barcode,
       expiryDate: product.expiryDate?.trim() || undefined,
+      imageUrl: product.imageUrl?.trim() || undefined,
       reorderLevel: product.reorderLevel ?? 0,
       stockQuantity: product.stockQuantity ?? 0,
       taxable: product.taxable ?? true
@@ -3796,7 +3798,7 @@ export function AppProvider({
 
         return result;
       },
-      addCategory: ({ name, description }) => {
+      addCategory: ({ name, description, imageUrl }) => {
         if (!currentShopId) {
           return { ok: false, message: "Shop unavailable." };
         }
@@ -3830,6 +3832,7 @@ export function AppProvider({
                 shopId: currentShopId,
                 name: normalizedName,
                 description: description?.trim() || undefined,
+                imageUrl: imageUrl?.trim() || undefined,
                 createdAt: new Date().toISOString()
               },
               ...current.categories
@@ -3879,7 +3882,8 @@ export function AppProvider({
                     ...entry,
                     ...payload,
                     name: nextName,
-                    description: payload.description?.trim() ?? entry.description
+                    description: payload.description === undefined ? entry.description : payload.description.trim() || undefined,
+                    imageUrl: payload.imageUrl === undefined ? entry.imageUrl : payload.imageUrl.trim() || undefined
                   }
                 : entry
             )
@@ -3965,7 +3969,8 @@ export function AppProvider({
             ...payload,
             categoryId: payload.categoryId || undefined,
             barcode: resolvedBarcode,
-            expiryDate: payload.kind === "product" ? payload.expiryDate?.trim() || undefined : undefined
+            expiryDate: payload.kind === "product" ? payload.expiryDate?.trim() || undefined : undefined,
+            imageUrl: payload.imageUrl?.trim() || undefined
           };
 
           result = {
