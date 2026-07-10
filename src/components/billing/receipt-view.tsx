@@ -20,6 +20,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
+import { hasNativeDownloadSupport, printElementWithNative, saveBlobWithNative } from "@/lib/native-bridge";
 import { getReceiptItemNameLines, getReceiptItemNameText } from "@/lib/receipt-language";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 
@@ -75,7 +76,13 @@ export function ReceiptView({ billId }: { billId: string }) {
     setFeedback(t("receipt.autoPrintNotice"));
 
     const timer = window.setTimeout(() => {
-      window.print();
+      void printElementWithNative("#receipt-print-area", t("receipt.title", { number: bill.number }))
+        .then((printed) => {
+          if (!printed) {
+            window.print();
+          }
+        })
+        .catch(() => window.print());
     }, 320);
 
     return () => window.clearTimeout(timer);
@@ -203,6 +210,17 @@ export function ReceiptView({ billId }: { billId: string }) {
   };
 
   const createPdf = () => createReceiptPdfBlob(receiptDocument);
+  const savePdf = async (blob: Blob) => {
+    if (hasNativeDownloadSupport()) {
+      const saved = await saveBlobWithNative(blob, receiptDocument.fileName).catch(() => false);
+
+      if (saved) {
+        return;
+      }
+    }
+
+    downloadBlob(blob, receiptDocument.fileName);
+  };
   const createContactAwarePdf = () =>
     createReceiptPdfBlob(
       buildReceiptPdfDocument({
@@ -222,9 +240,14 @@ export function ReceiptView({ billId }: { billId: string }) {
       })
     );
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     setFeedback(null);
-    window.print();
+
+    const printed = await printElementWithNative("#receipt-print-area", receiptTitle).catch(() => false);
+
+    if (!printed) {
+      window.print();
+    }
   };
 
   const handleDownload = async () => {
@@ -232,7 +255,7 @@ export function ReceiptView({ billId }: { billId: string }) {
     setFeedback(null);
 
     try {
-      downloadBlob(await createPdf(), receiptDocument.fileName);
+      await savePdf(await createPdf());
       setFeedback(t("receipt.downloadReady"));
     } finally {
       setBusyAction(null);
@@ -258,7 +281,7 @@ export function ReceiptView({ billId }: { billId: string }) {
         return;
       }
 
-      downloadBlob(pdfBlob, receiptDocument.fileName);
+      await savePdf(pdfBlob);
       setFeedback(t("receipt.shareFallback"));
     } finally {
       setBusyAction(null);
@@ -321,7 +344,7 @@ export function ReceiptView({ billId }: { billId: string }) {
       }
 
       const pdfBlob = await createContactAwarePdf();
-      downloadBlob(pdfBlob, receiptDocument.fileName);
+      await savePdf(pdfBlob);
       const contactAwareMessage = buildReceiptShareMessage({ name: contactForm.name });
 
       if (pendingShareAction === "email") {
@@ -386,7 +409,10 @@ export function ReceiptView({ billId }: { billId: string }) {
       ) : null}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px] print:block">
-        <Card className="receipt-paper mx-auto w-full max-w-3xl p-6 sm:p-8 print:mx-0 print:max-w-none print:rounded-none print:border-0 print:bg-white print:p-0 print:shadow-none">
+        <Card
+          className="receipt-paper mx-auto w-full max-w-3xl p-6 sm:p-8 print:mx-0 print:max-w-none print:rounded-none print:border-0 print:bg-white print:p-0 print:shadow-none"
+          id="receipt-print-area"
+        >
           <div className="border-b border-dashed border-line pb-5 text-center">
             {posSettings?.logoUrl ? (
               <div className="mb-4 flex justify-center">

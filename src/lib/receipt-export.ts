@@ -1,4 +1,5 @@
 import type { Bill, BillItem, BrandProfile, POSSettings, ReceiptSettings, ReceiptSize, Shop, User } from "@/types/pos";
+import { hasNativeDownloadSupport, saveBlobWithNative } from "@/lib/native-bridge";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
 import { getReceiptItemNameLines } from "@/lib/receipt-language";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
@@ -1389,6 +1390,11 @@ export async function createReceiptPdfBlob(document: ReceiptPdfDocument) {
 }
 
 export function downloadBlob(blob: Blob, fileName: string) {
+  if (hasNativeDownloadSupport()) {
+    void saveBlobWithNative(blob, fileName);
+    return;
+  }
+
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
 

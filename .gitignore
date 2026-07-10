@@ -24,6 +24,7 @@ _backups/
 apps/mobile/android/.gradle/
 apps/mobile/android/build/
 apps/mobile/android/app/build/
+_dev/android-build-tools/
 
 # Logs and generated local diagnostics
 *.log

@@ -1,4 +1,5 @@
 import type { SalesReportSummary } from "@/lib/refunds";
+import { hasNativeDownloadSupport, saveBlobWithNative } from "@/lib/native-bridge";
 import { formatCurrency } from "@/lib/utils";
 
 type PdfBinaryPart = string | Uint8Array;
@@ -723,6 +724,11 @@ export async function createStructuredReportPdfBlob({
 }
 
 export function downloadBlob(blob: Blob, fileName: string) {
+  if (hasNativeDownloadSupport()) {
+    void saveBlobWithNative(blob, fileName);
+    return;
+  }
+
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
 
