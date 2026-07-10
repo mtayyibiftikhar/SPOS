@@ -6,11 +6,11 @@ import { Card } from "@/components/ui/card";
 import { SettingsFormShell } from "@/components/settings/settings-form-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { resizeImageFileToDataUrl } from "@/lib/image-upload";
+import { resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
 
 export default function ShopSettingsPage() {
-  const { currentSettings, t, updateSettings } = usePosApp();
+  const { currentSettings, currentShopId, session, state, t, updateSettings } = usePosApp();
   const [shopName, setShopName] = useState(currentSettings?.pos.shopName ?? "");
   const [address, setAddress] = useState(currentSettings?.pos.address ?? "");
   const [phone, setPhone] = useState(currentSettings?.pos.phone ?? "");
@@ -28,6 +28,9 @@ export default function ShopSettingsPage() {
   }
 
   const receiptQrPreviewUrl = buildQrCodeImageUrl(receiptQrUrl, 180);
+  const activeProductKey = state.productKeys.find(
+    (productKey) => productKey.shopId === currentShopId && productKey.key.trim().length >= 30
+  )?.key;
 
   const handleLogoFileChange = async (file: File | null) => {
     if (!file) {
@@ -43,11 +46,22 @@ export default function ShopSettingsPage() {
         outputType: "image/jpeg",
         quality: 0.9
       });
+      const upload = await uploadImageAssetToCloud({
+        dataUrl: result.dataUrl,
+        fileName: file.name,
+        productKey: activeProductKey,
+        scope: "shop-logo",
+        shopId: currentShopId ?? undefined,
+        userEmail: session?.email,
+        userId: session?.id
+      });
 
-      setLogoUrl(result.dataUrl);
+      setLogoUrl(upload.url);
       setLogoFeedback({
         tone: "success",
-        message: `Logo optimized to ${result.width}x${result.height}. Recommended source: square 512x512 or larger.`
+        message: upload.storedInCloud
+          ? `Logo saved securely in Supabase Storage at ${result.width}x${result.height}.`
+          : `Logo optimized to ${result.width}x${result.height}. Cloud upload fallback was used.`
       });
     } catch (error) {
       setLogoFeedback({

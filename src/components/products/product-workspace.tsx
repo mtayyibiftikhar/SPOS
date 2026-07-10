@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Edit3, FolderPlus, ImageIcon, RefreshCw, Search, Trash2, UploadCloud, X } from "lucide-react";
 import { generateUniqueBarcode } from "@/lib/catalog";
 import { productKindLabelKeys } from "@/lib/i18n";
-import { resizeImageFileToDataUrl } from "@/lib/image-upload";
+import { resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
 import { usePosApp } from "@/components/providers/app-provider";
 import { ProductQuickTabGrid } from "@/components/products/product-quick-tab-grid";
 import { Badge } from "@/components/ui/badge";
@@ -140,6 +140,9 @@ export function ProductWorkspace() {
   const isAdmin = session?.role === "shop_admin";
   const shopProducts = state.products.filter((product) => product.shopId === currentShopId);
   const shopCategories = state.categories.filter((category) => category.shopId === currentShopId);
+  const activeProductKey = state.productKeys.find(
+    (productKey) => productKey.shopId === currentShopId && productKey.key.trim().length >= 30
+  )?.key;
   const quickTabProducts = shopProducts.filter((product) => product.quickTab);
   const buildEmptyProductForm = (): ProductFormState => ({
     ...emptyProductForm,
@@ -340,10 +343,22 @@ export function ProductWorkspace() {
         quality: 0.84,
         outputType: "image/jpeg"
       });
-      setProductForm((current) => ({ ...current, imageUrl: result.dataUrl }));
+      const upload = await uploadImageAssetToCloud({
+        dataUrl: result.dataUrl,
+        fileName: file.name,
+        productKey: activeProductKey,
+        scope: "product",
+        shopId: currentShopId ?? undefined,
+        userEmail: session?.email,
+        userId: session?.id
+      });
+
+      setProductForm((current) => ({ ...current, imageUrl: upload.url }));
       setCatalogFeedback({
         tone: "success",
-        message: t("products.imageUploadSuccess")
+        message: upload.storedInCloud
+          ? "Image saved securely in Supabase Storage."
+          : `${t("products.imageUploadSuccess")} Cloud upload fallback was used.`
       });
     } catch (error) {
       setCatalogFeedback({
@@ -365,10 +380,22 @@ export function ProductWorkspace() {
         quality: 0.84,
         outputType: "image/jpeg"
       });
-      setCategoryForm((current) => ({ ...current, imageUrl: result.dataUrl }));
+      const upload = await uploadImageAssetToCloud({
+        dataUrl: result.dataUrl,
+        fileName: file.name,
+        productKey: activeProductKey,
+        scope: "category",
+        shopId: currentShopId ?? undefined,
+        userEmail: session?.email,
+        userId: session?.id
+      });
+
+      setCategoryForm((current) => ({ ...current, imageUrl: upload.url }));
       setCategoryFeedback({
         tone: "success",
-        message: t("products.imageUploadSuccess")
+        message: upload.storedInCloud
+          ? "Image saved securely in Supabase Storage."
+          : `${t("products.imageUploadSuccess")} Cloud upload fallback was used.`
       });
     } catch (error) {
       setCategoryFeedback({

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { hashProductKey } from "@/lib/cloud-sync";
+import { uploadDataUrlPosAsset } from "@/lib/supabase/storage-assets";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type CompleteInstallationRequest = {
@@ -248,6 +249,10 @@ export async function POST(request: Request) {
     }
 
     const currency = clean(body.currency) || "SAR";
+    const storedLogoUrl = await uploadDataUrlPosAsset(supabase, body.logoUrl, {
+      fileName: "shop-logo.jpg",
+      folder: `shops/${shop.id}/shop-logo`
+    });
 
     const [{ error: updateShopError }, { error: settingsError }, { error: keyUpdateError }, { error: auditError }] =
       await Promise.all([
@@ -268,7 +273,7 @@ export async function POST(request: Request) {
           {
             shop_id: shop.id,
             shop_name: shopName,
-            logo_url: optionalClean(body.logoUrl),
+            logo_url: optionalClean(storedLogoUrl),
             address: clean(body.address),
             phone: clean(body.phone),
             email: optionalClean(body.email),

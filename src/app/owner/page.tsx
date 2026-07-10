@@ -31,7 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { licenseStatusLabelKeys } from "@/lib/i18n";
-import { resizeImageFileToDataUrl } from "@/lib/image-upload";
+import { resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
 import {
   ownerClearShopDataScopeDescriptions,
   ownerClearShopDataScopeLabels,
@@ -762,12 +762,20 @@ export default function OwnerPage() {
         outputType: "image/jpeg",
         quality: 0.9
       });
+      const upload = await uploadImageAssetToCloud({
+        dataUrl: result.dataUrl,
+        fileName: file.name,
+        ownerEmail: ownerUser?.email,
+        scope: "owner-logo"
+      });
 
-      setCompanyLogoUrl(result.dataUrl);
+      setCompanyLogoUrl(upload.url);
       setBrandingSavedAt(null);
       setBrandingAssetMessage({
         tone: "success",
-        message: `Company logo optimized to ${result.width}x${result.height}.`
+        message: upload.storedInCloud
+          ? `Company logo saved securely in Supabase Storage at ${result.width}x${result.height}.`
+          : `Company logo optimized to ${result.width}x${result.height}. Cloud upload fallback was used.`
       });
     } catch (error) {
       setBrandingAssetMessage({
@@ -791,12 +799,20 @@ export default function OwnerPage() {
         outputType: "image/jpeg",
         quality: 0.86
       });
+      const upload = await uploadImageAssetToCloud({
+        dataUrl: result.dataUrl,
+        fileName: file.name,
+        ownerEmail: ownerUser?.email,
+        scope: "owner-ad"
+      });
 
-      setLoginAdImageUrl(result.dataUrl);
+      setLoginAdImageUrl(upload.url);
       setBrandingSavedAt(null);
       setBrandingAssetMessage({
         tone: "success",
-        message: `Login ad optimized to ${result.width}x${result.height}. Recommended source: 1600x900.`
+        message: upload.storedInCloud
+          ? `Login ad saved securely in Supabase Storage at ${result.width}x${result.height}.`
+          : `Login ad optimized to ${result.width}x${result.height}. Cloud upload fallback was used.`
       });
     } catch (error) {
       setBrandingAssetMessage({
