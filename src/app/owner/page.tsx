@@ -373,6 +373,7 @@ export default function OwnerPage() {
   const [supportReasons, setSupportReasons] = useState<Record<string, string>>({});
   const [selectedResetUserId, setSelectedResetUserId] = useState("");
   const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [reportRange, setReportRange] = useState<ReportRange>("month");
   const [customStart, setCustomStart] = useState("");
@@ -1688,57 +1689,84 @@ export default function OwnerPage() {
     </Card>
   );
 
-  const renderAccess = () => (
-    <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
-      {renderStorePicker()}
-      <div className="grid gap-5">
-        <Card className="p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Professional support access</p>
-          <h2 className="mt-2 font-display text-3xl font-semibold text-slate-950">{selectedShop?.name ?? "No store selected"}</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">No hidden master password. Use timed impersonation or reset a store user password with audit logs.</p>
+  const renderAccess = () => {
+    const selectedResetUser = selectedUsers.find((user) => user.id === selectedResetUserId);
 
-          {selectedShop ? (
-            <div className="mt-6 grid gap-5 lg:grid-cols-2">
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                <h3 className="font-display text-2xl font-semibold text-slate-950">Timed support session</h3>
-                <Textarea className="mt-4" placeholder="Reason for support access" value={supportReasons[selectedShop.id] ?? ""} onChange={(event) => setSupportReasons((current) => ({ ...current, [selectedShop.id]: event.target.value }))} />
-                <Button className="mt-4" onClick={() => showResult(ownerStartSupportSession({ shopId: selectedShop.id, reason: supportReasons[selectedShop.id] ?? "", minutes: 60 }))}>
-                  Start 60 minute session
-                </Button>
-              </div>
+    return (
+      <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
+        {renderStorePicker()}
+        <div className="grid gap-5">
+          <Card className="p-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Professional support access</p>
+            <h2 className="mt-2 font-display text-3xl font-semibold text-slate-950">{selectedShop?.name ?? "No store selected"}</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              No hidden master password. Use timed impersonation or reset a store user password with audit logs. The old password is never shown.
+            </p>
 
-              <div className="rounded-3xl border border-slate-200 bg-white p-5">
-                <h3 className="font-display text-2xl font-semibold text-slate-950">Reset store user password</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-600">Use this when a store owner forgets access. The action is audited.</p>
-                <div className="mt-4 grid gap-3">
-                  <Select value={selectedResetUserId} onChange={(event) => setSelectedResetUserId(event.target.value)}>
-                    <option value="">Select store user</option>
-                    {selectedUsers.map((user) => (
-                      <option key={user.id} value={user.id}>{user.name} - {user.email}</option>
-                    ))}
-                  </Select>
-                  <Input minLength={8} placeholder="Temporary password" type="password" value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} />
-                  <Button
-                    disabled={!selectedResetUserId}
-                    onClick={() => {
-                      const result = ownerResetShopUserPassword({ userId: selectedResetUserId, password: temporaryPassword });
-                      showResult(result);
-                      if (result.ok) {
-                        setTemporaryPassword("");
-                      }
-                    }}
-                    variant="secondary"
-                  >
-                    Save temporary password
+            {selectedShop ? (
+              <div className="mt-6 grid gap-5 lg:grid-cols-2">
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                  <h3 className="font-display text-2xl font-semibold text-slate-950">Timed support session</h3>
+                  <Textarea className="mt-4" placeholder="Reason for support access" value={supportReasons[selectedShop.id] ?? ""} onChange={(event) => setSupportReasons((current) => ({ ...current, [selectedShop.id]: event.target.value }))} />
+                  <Button className="mt-4" onClick={() => showResult(ownerStartSupportSession({ shopId: selectedShop.id, reason: supportReasons[selectedShop.id] ?? "", minutes: 60 }))}>
+                    Start 60 minute session
                   </Button>
                 </div>
+
+                <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                  <h3 className="font-display text-2xl font-semibold text-slate-950">Reset store user password</h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    Use this when a cashier or shop admin forgets the POS sign-in password. For live users, this updates Supabase Auth.
+                  </p>
+                  <div className="mt-4 grid gap-3">
+                    <Select value={selectedResetUserId} onChange={(event) => setSelectedResetUserId(event.target.value)}>
+                      <option value="">Select store user</option>
+                      {selectedUsers.map((user) => (
+                        <option key={user.id} value={user.id}>{user.name} - {user.email}</option>
+                      ))}
+                    </Select>
+                    <Input minLength={8} placeholder="New temporary password" type="password" value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} />
+                    <Button
+                      disabled={!selectedResetUser || isResettingPassword}
+                      onClick={async () => {
+                        if (!selectedShop || !selectedResetUser) {
+                          return;
+                        }
+
+                        setIsResettingPassword(true);
+                        try {
+                          const result = await ownerResetShopUserPassword({
+                            email: selectedResetUser.email,
+                            password: temporaryPassword,
+                            shopId: selectedShop.id,
+                            userId: selectedResetUser.id
+                          });
+                          showResult(result);
+                          if (result.ok) {
+                            setTemporaryPassword("");
+                          }
+                        } finally {
+                          setIsResettingPassword(false);
+                        }
+                      }}
+                      variant="secondary"
+                    >
+                      {isResettingPassword ? "Resetting password..." : "Save temporary password"}
+                    </Button>
+                    {selectedResetUser ? (
+                      <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-xs font-medium leading-5 text-emerald-900">
+                        Selected: {selectedResetUser.name} ({selectedResetUser.role}). Give the new password to the user securely.
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
               </div>
-            </div>
-          ) : null}
-        </Card>
+            ) : null}
+          </Card>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderAudit = () => (
     <Card className="p-6">

@@ -498,9 +498,11 @@ interface AppContextValue {
     minutes: number;
   }) => { ok: boolean; message?: string };
   ownerResetShopUserPassword: (payload: {
+    email?: string;
+    shopId?: string;
     userId: string;
     password: string;
-  }) => { ok: boolean; message?: string };
+  }) => Promise<{ ok: boolean; message?: string }>;
   endSupportSession: () => void;
   updateSettings: <TSection extends SettingsSection>(
     section: TSection,
@@ -952,6 +954,41 @@ function deleteOwnerDeviceActivationFromCloud(deviceActivationId: string, ownerE
     },
     body: JSON.stringify({ deviceActivationId })
   }).catch(() => undefined);
+}
+
+function isLikelyCloudUserId(userId: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId);
+}
+
+async function resetOwnerShopUserPasswordInCloud(
+  payload: {
+    email?: string;
+    password: string;
+    shopId?: string;
+    userId: string;
+  },
+  ownerEmail?: string
+) {
+  if (typeof window === "undefined" || !ownerEmail) {
+    return { ok: false, message: "Owner cloud session is not available." };
+  }
+
+  const response = await fetch("/api/owner/reset-shop-user-password", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-owner-email": ownerEmail
+    },
+    body: JSON.stringify({
+      password: payload.password,
+      shopId: payload.shopId,
+      userEmail: payload.email,
+      userId: payload.userId
+    })
+  });
+  const result = (await response.json()) as { ok: boolean; message?: string; user?: User };
+
+  return result;
 }
 
 function mergeCloudActivationStatePatch(current: DemoAppState, patch: CloudActivationStatePatch) {
@@ -3320,7 +3357,7 @@ export function AppProvider({
 
         return result;
       },
-      ownerResetShopUserPassword: ({ userId, password }) => {
+      ownerResetShopUserPassword: async ({ email, shopId, userId, password }) => {
         if (!session || session.role !== "super_admin") {
           return { ok: false, message: "Only the POS owner can reset store user access." };
         }
@@ -3332,13 +3369,56 @@ export function AppProvider({
           return { ok: false, message: passwordError };
         }
 
+        const ownerEmail = state.users.find((user) => user.role === "super_admin" && user.isActive)?.email;
+        const localTarget = state.users.find((user) => user.id === userId && user.role !== "super_admin");
+        const shouldResetCloud = isLikelyCloudUserId(userId) || !localTarget;
+        let cloudUser: User | undefined;
+
+        if (shouldResetCloud) {
+          try {
+            const cloudResult = await resetOwnerShopUserPasswordInCloud(
+              {
+                email,
+                password: normalizedPassword,
+                shopId: shopId ?? localTarget?.shopId,
+                userId
+              },
+              ownerEmail
+            );
+
+            if (!cloudResult.ok) {
+              return {
+                ok: false,
+                message: cloudResult.message ?? "Unable to reset this cloud POS user password."
+              };
+            }
+
+            cloudUser = cloudResult.user;
+          } catch {
+            return { ok: false, message: "Unable to reach cloud auth for this password reset." };
+          }
+        }
+
         let result: { ok: boolean; message?: string } = {
           ok: false,
           message: "Unable to reset password."
         };
 
         setState((current) => {
-          const targetUser = current.users.find((user) => user.id === userId && user.role !== "super_admin");
+          const targetUser =
+            current.users.find((user) => user.id === userId && user.role !== "super_admin") ??
+            cloudUser ??
+            (email && shopId
+              ? {
+                  id: userId,
+                  shopId,
+                  name: email,
+                  email,
+                  role: "cashier" as const,
+                  isActive: true,
+                  createdAt: new Date().toISOString()
+                }
+              : null);
 
           if (!targetUser) {
             result = { ok: false, message: "Store user not found." };
@@ -3346,26 +3426,33 @@ export function AppProvider({
           }
 
           const updatedAt = new Date().toISOString();
-          result = { ok: true, message: "Temporary password saved. Share it with the store owner securely." };
+          const updatedUser = {
+            ...targetUser,
+            ...(cloudUser ?? {}),
+            passwordHash: hashSecret(normalizedPassword)
+          };
+          const hasExistingUser = current.users.some((user) => user.id === updatedUser.id);
+
+          result = {
+            ok: true,
+            message: cloudUser
+              ? "Temporary password saved in cloud auth. Share it securely with the store user."
+              : "Temporary password saved locally. Share it securely with the store user."
+          };
 
           return {
             ...current,
-            users: current.users.map((user) =>
-              user.id === userId
-                ? {
-                    ...user,
-                    passwordHash: hashSecret(normalizedPassword)
-                  }
-                : user
-            ),
+            users: hasExistingUser
+              ? current.users.map((user) => (user.id === updatedUser.id ? updatedUser : user))
+              : [updatedUser, ...current.users],
             auditLogs: [
               {
                 id: createId("audit"),
-                shopId: targetUser.shopId,
+                shopId: updatedUser.shopId,
                 actorId: session.id,
                 action: "owner.user_password.reset",
-                targetId: targetUser.id,
-                detail: `Reset temporary password for ${targetUser.email}.`,
+                targetId: updatedUser.id,
+                detail: `Reset temporary POS sign-in password for ${updatedUser.email}.`,
                 createdAt: updatedAt
               },
               ...current.auditLogs
