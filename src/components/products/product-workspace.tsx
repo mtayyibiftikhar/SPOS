@@ -537,11 +537,11 @@ export function ProductWorkspace() {
         >
           <div className={cn("space-y-6", activeView === "catalog" && "hidden")}>
             {activeView === "editor" ? (
-              <Card className="p-6 scroll-mt-24" id="products-editor">
-            <div className="flex items-center justify-between gap-4">
+              <Card className="scroll-mt-24 p-4 xl:max-h-[calc(100dvh-230px)] xl:overflow-y-auto" id="products-editor">
+            <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-olive">{t("products.catalogEditor")}</p>
-                <h2 className="mt-2 font-display text-2xl font-semibold text-ink">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-olive">{t("products.catalogEditor")}</p>
+                <h2 className="mt-1 font-display text-xl font-semibold text-ink">
                   {productForm.id ? t("products.editProduct") : t("products.addProductOrService")}
                 </h2>
               </div>
@@ -564,7 +564,7 @@ export function ProductWorkspace() {
               </div>
             ) : null}
 
-            <form className="mt-6 grid gap-4 md:grid-cols-2" onSubmit={saveProductForm}>
+            <form className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6" onSubmit={saveProductForm}>
               <div>
                 <label className="mb-2 block text-sm font-medium text-ink">{t("common.type")}</label>
                 <Select
@@ -602,7 +602,7 @@ export function ProductWorkspace() {
                 </Select>
               </div>
 
-              <div>
+              <div className="md:col-span-2 xl:col-span-2">
                 <label className="mb-2 block text-sm font-medium text-ink">{t("common.barcode")}</label>
                 <div className="flex gap-3">
                   <Input
@@ -627,7 +627,7 @@ export function ProductWorkspace() {
                     </span>
                   </Button>
                 </div>
-                <p className="mt-2 text-sm text-slate-600">{t("products.autoBarcodeHelp")}</p>
+                <p className="mt-1 text-xs text-slate-500">{t("products.autoBarcodeHelp")}</p>
               </div>
               <div>
                 <label className="mb-2 block text-sm font-medium text-ink">{t("common.nameEnglish")}</label>
@@ -659,7 +659,7 @@ export function ProductWorkspace() {
                 />
               </div>
 
-              <div className="md:col-span-2">
+              <div>
                 <label className="mb-2 block text-sm font-medium text-ink">{t("common.nameUrdu")}</label>
                 <Input
                   dir="rtl"
@@ -675,10 +675,10 @@ export function ProductWorkspace() {
                 />
               </div>
 
-              <div className="md:col-span-2 rounded-[30px] border border-line bg-shell/70 p-4">
-                <div className="grid gap-4 md:grid-cols-[128px_minmax(0,1fr)] md:items-center">
-                  <ImagePreview className="h-28 w-28" imageUrl={productForm.imageUrl} label={t("products.productImage")} />
-                  <div className="space-y-3">
+              <div className="md:col-span-3 xl:col-span-3 rounded-[24px] border border-line bg-shell/70 p-3">
+                <div className="grid gap-3 md:grid-cols-[88px_minmax(0,1fr)] md:items-center">
+                  <ImagePreview className="h-20 w-20 rounded-[22px]" imageUrl={productForm.imageUrl} label={t("products.productImage")} />
+                  <div className="space-y-2">
                     <div>
                       <label className="mb-2 block text-sm font-medium text-ink">{t("products.productImage")}</label>
                       <Input
@@ -693,9 +693,9 @@ export function ProductWorkspace() {
                         }
                       />
                     </div>
-                    <div className="flex flex-wrap gap-3">
+                    <div className="flex flex-wrap gap-2">
                       <label className={cn(
-                        "inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-[16px] border border-line bg-white px-4 text-sm font-semibold text-ink transition hover:bg-slate-50",
+                        "inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-[14px] border border-line bg-white px-3 text-sm font-semibold text-ink transition hover:bg-slate-50",
                         !isAdmin && "pointer-events-none opacity-60"
                       )}>
                         <UploadCloud className="h-4 w-4" />
@@ -725,7 +725,6 @@ export function ProductWorkspace() {
                         </Button>
                       ) : null}
                     </div>
-                    <p className="text-xs leading-5 text-slate-500">{t("products.imageHelp")}</p>
                   </div>
                 </div>
               </div>
@@ -790,7 +789,7 @@ export function ProductWorkspace() {
                 />
               </div>
 
-              <div className="rounded-3xl border border-line bg-shell p-4">
+              <div className="rounded-[22px] border border-line bg-shell p-3">
                 <label className="flex items-center gap-3 text-sm font-medium text-ink">
                   <input
                     checked={productForm.quickTab}
@@ -806,7 +805,7 @@ export function ProductWorkspace() {
                   />
                   {t("products.showOnQuickTab")}
                 </label>
-                <p className="mt-3 text-sm leading-6 text-slate-600">
+                <p className="mt-2 text-xs leading-5 text-slate-600">
                   {t("products.currentProfitPreview", {
                     amount: formatCurrency(
                       Number(productForm.salePrice || 0) - Number(productForm.costPrice || 0),
@@ -817,7 +816,7 @@ export function ProductWorkspace() {
                 </p>
               </div>
 
-              <div className="rounded-3xl border border-line bg-shell p-4">
+              <div className="rounded-[22px] border border-line bg-shell p-3">
                 <label className="flex items-center gap-3 text-sm font-medium text-ink">
                   <input
                     checked={productForm.taxable}
@@ -833,7 +832,7 @@ export function ProductWorkspace() {
                   />
                   {t("products.applyTaxToItem")}
                 </label>
-                <p className="mt-3 text-sm leading-6 text-slate-600">{t("products.applyTaxToItemDesc")}</p>
+                <p className="mt-2 text-xs leading-5 text-slate-600">{t("products.applyTaxToItemDesc")}</p>
               </div>
 
               <div>
@@ -853,7 +852,7 @@ export function ProductWorkspace() {
                 </Select>
               </div>
 
-              <div className="md:col-span-2 flex flex-wrap gap-3">
+              <div className="flex flex-wrap gap-3 md:col-span-3 xl:col-span-6">
                 <Button
                   disabled={
                     !isAdmin ||
