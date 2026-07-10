@@ -1064,7 +1064,7 @@ export function BillingWorkspace() {
   };
 
   const buildView = (
-    <div className="mx-auto flex w-full max-w-[1650px] flex-col gap-3 xl:h-[90dvh] xl:overflow-hidden">
+    <div className="mx-auto flex w-full max-w-[1920px] flex-col gap-3 xl:h-[90dvh] xl:overflow-hidden">
       <Card className="rounded-[28px] border-white/70 bg-white/92 px-4 py-3 shadow-[0_18px_44px_rgba(15,23,42,0.06)]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2.5">
@@ -1300,15 +1300,15 @@ export function BillingWorkspace() {
 
           <div className="min-h-0 overflow-y-auto px-4 py-4">
             {quickCategories.length > 0 && !selectedQuickCategory ? (
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+              <div className="grid grid-cols-2 gap-3">
                 {quickCategories.map((category) => (
                   <button
                     key={category.id}
-                    className="group overflow-hidden rounded-[28px] border border-slate-200 bg-white p-2 text-left shadow-[0_14px_34px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_18px_40px_rgba(15,23,42,0.1)]"
+                    className="group overflow-hidden rounded-[22px] border border-slate-200 bg-white p-1.5 text-left shadow-[0_12px_26px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_16px_32px_rgba(15,23,42,0.08)]"
                     onClick={() => setSelectedQuickCategoryId(category.id)}
                     type="button"
                   >
-                    <div className="relative h-[8.75rem] overflow-hidden rounded-[22px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.22),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)]">
+                    <div className="relative h-[6.8rem] overflow-hidden rounded-[17px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.22),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)]">
                       {category.imageUrl ? (
                         <img src={category.imageUrl} alt={category.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
                       ) : (
@@ -1319,8 +1319,8 @@ export function BillingWorkspace() {
                         </div>
                       )}
                     </div>
-                    <div className="px-2 pb-2 pt-3">
-                      <p className="line-clamp-1 text-center text-base font-semibold text-slate-950">{category.name}</p>
+                    <div className="px-1.5 pb-2 pt-2">
+                      <p className="line-clamp-1 text-center text-sm font-semibold text-slate-950">{category.name}</p>
                     </div>
                   </button>
                 ))}
@@ -1336,13 +1336,13 @@ export function BillingWorkspace() {
                       <div
                         key={product.id}
                         className={cn(
-                          "grid w-full grid-cols-[76px_minmax(0,1fr)] gap-3 rounded-[24px] border border-slate-200 bg-white p-3 text-left shadow-[0_12px_26px_rgba(15,23,42,0.05)] transition",
+                          "grid w-full grid-cols-[68px_minmax(0,1fr)] gap-3 rounded-[22px] border border-slate-200 bg-white p-3 text-left shadow-[0_12px_26px_rgba(15,23,42,0.05)] transition",
                           stockBlocked
                             ? "opacity-70"
                             : "hover:-translate-y-0.5 hover:shadow-[0_16px_30px_rgba(15,23,42,0.08)]"
                         )}
                       >
-                        <div className="flex h-[76px] items-center justify-center overflow-hidden rounded-[20px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.18),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)]">
+                        <div className="flex h-[68px] items-center justify-center overflow-hidden rounded-[18px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.18),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)]">
                           {product.imageUrl ? (
                             <img
                               src={product.imageUrl}
@@ -1373,37 +1373,37 @@ export function BillingWorkspace() {
                             ) : null}
                           </div>
 
-                          <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
-                            <p className="text-base font-semibold text-slate-950">
+                          <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                            <p className="self-start pt-1 text-[0.95rem] font-semibold leading-none text-slate-950">
                               {formatCurrency(product.salePrice, currency, locale)}
                             </p>
 
                             {quantityInCart > 0 ? (
-                              <div className="inline-flex h-9 w-[116px] items-center justify-between rounded-full border border-emerald-200 bg-emerald-50 px-1 shadow-inner shadow-emerald-100/60">
+                              <div className="inline-flex h-8 w-[96px] items-center justify-between rounded-full border border-emerald-200 bg-emerald-50 px-1 shadow-inner shadow-emerald-100/60">
                                 <button
-                                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-emerald-700 transition hover:bg-white"
+                                  className="inline-flex h-6 w-6 items-center justify-center rounded-full text-emerald-700 transition hover:bg-white"
                                   onClick={() => {
                                     updateLineQuantity(product.id, quantityInCart - 1);
                                   }}
                                   type="button"
                                 >
-                                  <Minus className="h-4 w-4" />
+                                  <Minus className="h-3.5 w-3.5" />
                                 </button>
-                                <span className="min-w-[1.8rem] text-center text-sm font-semibold text-emerald-900">
+                                <span className="min-w-[1.4rem] text-center text-sm font-semibold text-emerald-900">
                                   {quantityInCart}
                                 </span>
                                 <button
-                                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-emerald-700 transition hover:bg-white disabled:opacity-40"
+                                  className="inline-flex h-6 w-6 items-center justify-center rounded-full text-emerald-700 transition hover:bg-white disabled:opacity-40"
                                   disabled={stockBlocked}
                                   onClick={() => addProductToCart(product)}
                                   type="button"
                                 >
-                                  <Plus className="h-4 w-4" />
+                                  <Plus className="h-3.5 w-3.5" />
                                 </button>
                               </div>
                             ) : (
                               <Button
-                                className="h-9 min-w-[88px] rounded-full bg-emerald-600 px-3 text-xs font-semibold text-white shadow-[0_10px_20px_rgba(5,150,105,0.2)] hover:bg-emerald-700"
+                                className="h-8 min-w-[78px] rounded-full bg-emerald-600 px-3 text-xs font-semibold text-white shadow-[0_10px_20px_rgba(5,150,105,0.2)] hover:bg-emerald-700"
                                 disabled={stockBlocked}
                                 onClick={() => addProductToCart(product)}
                               >
@@ -1432,7 +1432,7 @@ export function BillingWorkspace() {
   );
 
   const customerView = (
-    <div className="mx-auto flex w-full max-w-[1650px] flex-col gap-3 xl:h-[90dvh] xl:overflow-hidden">
+    <div className="mx-auto flex w-full max-w-[1920px] flex-col gap-3 xl:h-[90dvh] xl:overflow-hidden">
       {renderStepHeader({
         backAction: () => setWorkflowStep("build"),
         backLabel: t("billing.backToSale"),
@@ -1682,7 +1682,7 @@ export function BillingWorkspace() {
   );
 
   const paymentView = (
-    <div className="mx-auto flex w-full max-w-[1650px] flex-col gap-3 xl:h-[90dvh] xl:overflow-hidden">
+    <div className="mx-auto flex w-full max-w-[1920px] flex-col gap-3 xl:h-[90dvh] xl:overflow-hidden">
       {renderStepHeader({
         backAction: () => setWorkflowStep("customer"),
         backLabel: t("billing.backToCustomer"),
