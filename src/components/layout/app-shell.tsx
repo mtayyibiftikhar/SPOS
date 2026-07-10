@@ -53,7 +53,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               />
               <div
                 className={cn(
-                  "absolute inset-y-0 left-0 w-[min(86vw,320px)] border-r border-white/80 bg-white/96 p-4 shadow-[30px_0_80px_rgba(15,23,42,0.22)] backdrop-blur transition-transform duration-300 ease-out",
+                  "absolute inset-y-0 left-0 w-[min(86vw,320px)] overflow-y-auto overscroll-contain border-r border-white/80 bg-white/96 p-4 shadow-[30px_0_80px_rgba(15,23,42,0.22)] backdrop-blur transition-transform duration-300 ease-out",
                   drawerOpen ? "translate-x-0" : "-translate-x-[calc(100%+2rem)]"
                 )}
               >

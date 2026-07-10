@@ -4,7 +4,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { CircleDollarSign, Download, Plus, ReceiptText, Search, Trash2, Upload, UserRound, Wallet } from "lucide-react";
+import { ArrowLeft, CircleDollarSign, Download, Plus, ReceiptText, Search, Trash2, Upload, UserRound, Wallet } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -115,7 +115,7 @@ function SectionEyebrow({ children }: { children: ReactNode }) {
 function SummaryMetricCard({
   label,
   value,
-  description
+  description: _description
 }: {
   description: string;
   label: string;
@@ -125,7 +125,6 @@ function SummaryMetricCard({
     <Card className="p-5">
       <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">{label}</p>
       <p className="mt-3 font-display text-4xl font-semibold tracking-[-0.04em] text-slate-950">{value}</p>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
     </Card>
   );
 }
@@ -324,13 +323,8 @@ export function CustomerWorkspace() {
 
     if (selectedCustomer) {
       setCustomerForm(createCustomerForm(selectedCustomer));
-      return;
     }
-
-    if (filteredCustomers.length > 0) {
-      setSelectedCustomerId(filteredCustomers[0].id);
-    }
-  }, [activeView, filteredCustomers, isCreating, selectedCustomer]);
+  }, [activeView, isCreating, selectedCustomer]);
 
   useEffect(() => {
     if (activeView !== "account") {
@@ -733,14 +727,34 @@ export function CustomerWorkspace() {
           <div>
             <SectionEyebrow>{t("nav.customers")}</SectionEyebrow>
             <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{t("customers.directoryTitle")}</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-600">{t("customers.directoryDesc")}</p>
           </div>
-          <Button className="h-11 shrink-0 rounded-full bg-slate-950 px-4 text-sm text-white shadow-[0_14px_28px_rgba(15,23,42,0.16)] hover:bg-slate-900" onClick={beginCreateCustomer}>
-            <span className="inline-flex items-center gap-2 whitespace-nowrap">
-              <Plus className="h-4 w-4" />
-              {t("customers.newCustomer")}
-            </span>
-          </Button>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button className="h-11 shrink-0 rounded-full bg-slate-950 px-4 text-sm text-white shadow-[0_14px_28px_rgba(15,23,42,0.16)] hover:bg-slate-900" onClick={beginCreateCustomer}>
+              <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                <Plus className="h-4 w-4" />
+                {t("customers.newCustomer")}
+              </span>
+            </Button>
+            <Button className="h-11 rounded-full" variant="secondary" onClick={exportCustomersCsv}>
+              <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                <Download className="h-4 w-4" />
+                {t("customers.exportCustomers")}
+              </span>
+            </Button>
+            <Button className="h-11 rounded-full" variant="secondary" onClick={() => customerImportRef.current?.click()}>
+              <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                <Upload className="h-4 w-4" />
+                {t("customers.importCustomers")}
+              </span>
+            </Button>
+            <Input
+              ref={customerImportRef}
+              accept=".csv,text/csv"
+              className="hidden"
+              type="file"
+              onChange={(event) => void importCustomersCsv(event.target.files?.[0] ?? null)}
+            />
+          </div>
         </div>
 
         <div className="relative mt-4">
@@ -754,7 +768,7 @@ export function CustomerWorkspace() {
         </div>
       </div>
 
-      <div className="flex-1 space-y-2 overflow-y-auto p-4">
+      <div className="grid flex-1 gap-3 overflow-y-auto p-4 md:grid-cols-2 2xl:grid-cols-3">
         {filteredCustomers.length > 0 ? (
           filteredCustomers.map((customer) => {
             const metrics = customerMetricsById[customer.id];
@@ -808,10 +822,27 @@ export function CustomerWorkspace() {
           <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">
             {isCreating ? t("customers.formNewTitle") : t("customers.formTitle")}
           </h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">{t("customers.formDesc")}</p>
         </div>
 
-        {!isCreating && selectedCustomer ? <Badge variant="neutral">{selectedCustomer.name}</Badge> : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {!isCreating && selectedCustomer ? <Badge variant="neutral">{selectedCustomer.name}</Badge> : null}
+          <Button
+            className="rounded-full"
+            variant="secondary"
+            onClick={() => {
+              setIsCreating(false);
+              setSelectedCustomerId(null);
+              setCustomerForm(createEmptyCustomerForm());
+              setCustomerError(null);
+              setCustomerFeedback(null);
+            }}
+          >
+            <span className="inline-flex items-center gap-2">
+              <ArrowLeft className="h-4 w-4" />
+              {t("customers.backToDirectory")}
+            </span>
+          </Button>
+        </div>
       </div>
 
       <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -1670,24 +1701,28 @@ export function CustomerWorkspace() {
           {
             href: "/customers?view=overview",
             active: activeView === "overview",
+            icon: UserRound,
             label: t("customers.sectionsOverview"),
             description: t("customers.sectionsOverviewDesc")
           },
           {
             href: "/customers?view=directory",
             active: activeView === "directory",
+            icon: UserRound,
             label: t("customers.directoryTitle"),
             description: t("customers.formDesc")
           },
           {
             href: "/customers?view=account",
             active: activeView === "account",
+            icon: Wallet,
             label: t("customers.accountTitle"),
             description: t("customers.accountDesc")
           },
           {
             href: "/customers?view=history",
             active: activeView === "history",
+            icon: ReceiptText,
             label: t("customers.paymentHistory"),
             description: t("customers.settlementCountDesc")
           }
@@ -1808,17 +1843,12 @@ export function CustomerWorkspace() {
             </Card>
           </div>
         </div>
+      ) : activeView === "directory" ? (
+        isCreating || selectedCustomer ? profilePanel : directoryPanel
       ) : activeView === "account" ? (
         accountFlowPanel
       ) : (
-        <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
-          {directoryPanel}
-
-          <div className="space-y-6">
-            {activeView === "directory" ? profilePanel : null}
-            {activeView === "history" ? historyPanel : null}
-          </div>
-        </div>
+        historyPanel
       )}
     </div>
   );

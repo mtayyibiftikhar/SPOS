@@ -514,6 +514,7 @@ const englishTranslations = {
   "customers.settlementCountDesc": "Payments applied later to clear customer account balances.",
   "customers.directoryTitle": "Customer directory",
   "customers.directoryDesc": "Search existing customers, open an account view, or create a fresh customer profile.",
+  "customers.backToDirectory": "Back to directory",
   "customers.searchPlaceholder": "Search by customer name, phone, email, or WhatsApp",
   "customers.newCustomer": "New customer",
   "customers.emptyState": "No customers matched the current search.",

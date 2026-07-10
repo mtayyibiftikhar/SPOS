@@ -1192,28 +1192,7 @@ export function BillingWorkspace() {
       <div className="grid flex-1 min-h-0 gap-3 xl:grid-cols-[minmax(0,1.8fr)_320px]">
         <Card className="grid min-h-[560px] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:min-h-0">
           <div className="border-b border-slate-200 px-4 py-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <SectionEyebrow>{t("billing.cartBoardTitle")}</SectionEyebrow>
-                <h2 className="mt-1 font-display text-[1.6rem] font-semibold tracking-[-0.04em] text-slate-950">
-                  {t("billing.cartTitle")}
-                </h2>
-                <p className="mt-1 text-sm text-slate-600">{t("billing.cartBoardDesc")}</p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="rounded-[16px] bg-slate-950 px-3 py-2 text-white shadow-[0_16px_28px_rgba(15,23,42,0.16)]">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/65">
-                    {cartItemCount} {t("common.items")}
-                  </p>
-                  <p className="mt-1 text-lg font-semibold">
-                    {formatCurrency(totals.total, currency, locale)}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="relative mt-4">
+            <div className="relative">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
                 className="h-11 rounded-[16px] border-slate-200 bg-slate-50 pl-11 text-sm text-slate-950"
@@ -1275,28 +1254,17 @@ export function BillingWorkspace() {
 
           <div className="border-t border-slate-200 px-4 py-4">
             <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-center">
-              <div className="grid gap-2 sm:grid-cols-3">
-                <div className="rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    {t("common.subtotal")}
-                  </p>
-                  <p className="mt-1 text-sm font-semibold text-slate-950">
-                    {formatCurrency(totals.subtotal, currency, locale)}
-                  </p>
-                </div>
-                <div className="rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    {taxEnabled ? taxLabel : t("common.items")}
-                  </p>
-                  <p className="mt-1 text-sm font-semibold text-slate-950">
-                    {taxEnabled ? formatCurrency(totals.taxAmount, currency, locale) : cartItemCount}
-                  </p>
-                </div>
-                <div className="rounded-[16px] border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
-                    {t("common.total")}
-                  </p>
-                  <p className="mt-1 text-sm font-semibold text-slate-950">
+              <div className="rounded-[20px] border border-emerald-200 bg-emerald-50 px-4 py-3 shadow-inner shadow-emerald-100">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-700">
+                      {t("common.total")}
+                    </p>
+                    <p className="mt-1 text-xs font-medium text-emerald-700">
+                      {cartItemCount} {t("common.items")}
+                    </p>
+                  </div>
+                  <p className="font-display text-2xl font-semibold tracking-[-0.04em] text-emerald-950">
                     {formatCurrency(totals.total, currency, locale)}
                   </p>
                 </div>
