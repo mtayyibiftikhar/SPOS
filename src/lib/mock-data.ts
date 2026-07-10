@@ -300,7 +300,11 @@ export const initialAppState: DemoAppState = {
         name: "VAT",
         rate: 15,
         mode: "inclusive",
-        showOnReceipt: true
+        showOnReceipt: true,
+        promotionEnabled: false,
+        promotionTarget: "bill",
+        promotionDiscountType: "percentage",
+        promotionDiscountValue: 0
       }
     }
   },

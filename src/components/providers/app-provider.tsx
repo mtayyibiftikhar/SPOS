@@ -659,7 +659,15 @@ function mergeSettingsByShop(storedSettings: DemoAppState["settingsByShop"] | un
       },
       tax: {
         ...(defaultBundle?.tax ?? {}),
-        ...(storedBundle?.tax ?? {})
+        ...(storedBundle?.tax ?? {}),
+        promotionEnabled:
+          storedBundle?.tax?.promotionEnabled ?? defaultBundle?.tax?.promotionEnabled ?? false,
+        promotionTarget:
+          storedBundle?.tax?.promotionTarget ?? defaultBundle?.tax?.promotionTarget ?? "bill",
+        promotionDiscountType:
+          storedBundle?.tax?.promotionDiscountType ?? defaultBundle?.tax?.promotionDiscountType ?? "percentage",
+        promotionDiscountValue:
+          storedBundle?.tax?.promotionDiscountValue ?? defaultBundle?.tax?.promotionDiscountValue ?? 0
       }
     };
 

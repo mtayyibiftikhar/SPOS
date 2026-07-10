@@ -130,6 +130,13 @@ function clampDiscountInput(discountType: DiscountType, value: string, maxFixedA
   return formatEditablePrice(normalizedValue);
 }
 
+function getCartLineDiscountLimit(line: Pick<CartLine, "quantity" | "unitPriceInput">) {
+  const parsedUnitPrice = Number.parseFloat(line.unitPriceInput);
+  const unitPrice = Number.isFinite(parsedUnitPrice) ? Math.max(0, Math.round(parsedUnitPrice * 100) / 100) : 0;
+
+  return Math.round(unitPrice * line.quantity * 100) / 100;
+}
+
 function StatusChip({ icon: Icon, label, tone }: StatusChipProps) {
   return (
     <span
@@ -244,6 +251,10 @@ export function BillingWorkspace() {
   const currency = currentShop?.currency ?? "SAR";
   const taxEnabled = currentSettings?.tax.enabled ?? false;
   const taxLabel = currentSettings?.tax.name ?? t("common.tax");
+  const promotionTarget = currentSettings?.tax.promotionTarget ?? "bill";
+  const promotionDiscountType = currentSettings?.tax.promotionDiscountType ?? "percentage";
+  const promotionDiscountValue = Math.max(0, currentSettings?.tax.promotionDiscountValue ?? 0);
+  const promotionEnabled = Boolean(currentSettings?.tax.promotionEnabled && promotionDiscountValue > 0);
   const checkoutBlocked = !currentBusinessDay || !currentShift;
   const customerSearchHasValue = deferredCustomerSearch.trim().length > 0;
   const productSearchHasValue = productSearch.trim().length > 0;
@@ -443,12 +454,6 @@ export function BillingWorkspace() {
   }
 
   const customerDisplayName = normalizedCustomerName || t("billing.walkInCustomer");
-  const getLineDiscountLimit = (line: CartLine) => {
-    const parsedUnitPrice = Number.parseFloat(line.unitPriceInput);
-    const unitPrice = Number.isFinite(parsedUnitPrice) ? Math.max(0, Math.round(parsedUnitPrice * 100) / 100) : 0;
-
-    return Math.round(unitPrice * line.quantity * 100) / 100;
-  };
 
   useEffect(() => {
     const nextDiscountValue = clampDiscountInput(discountType, discountValue, totals.subtotal);
@@ -457,6 +462,35 @@ export function BillingWorkspace() {
       setDiscountValue(nextDiscountValue);
     }
   }, [discountType, discountValue, totals.subtotal]);
+
+  useEffect(() => {
+    if (!promotionEnabled || promotionTarget !== "bill") {
+      return;
+    }
+
+    setDiscountType(promotionDiscountType);
+    setDiscountValue(
+      formatEditablePrice(
+        normalizeDiscountValue(promotionDiscountType, promotionDiscountValue, totals.subtotal)
+      )
+    );
+  }, [promotionDiscountType, promotionDiscountValue, promotionEnabled, promotionTarget, totals.subtotal]);
+
+  useEffect(() => {
+    if (!promotionEnabled || promotionTarget !== "items") {
+      return;
+    }
+
+    setCart((current) =>
+      current.map((line) => ({
+        ...line,
+        discountType: promotionDiscountType,
+        discountValueInput: formatEditablePrice(
+          normalizeDiscountValue(promotionDiscountType, promotionDiscountValue, getCartLineDiscountLimit(line))
+        )
+      }))
+    );
+  }, [promotionDiscountType, promotionDiscountValue, promotionEnabled, promotionTarget]);
 
   useEffect(() => {
     if (
@@ -489,11 +523,17 @@ export function BillingWorkspace() {
       const existing = current.find((line) => line.productId === product.id);
 
       if (!existing) {
+        const promotionLineDiscountValue =
+          promotionEnabled && promotionTarget === "items"
+            ? normalizeDiscountValue(promotionDiscountType, promotionDiscountValue, product.salePrice)
+            : 0;
+
         return [
           ...current,
           {
-            discountType: "fixed",
-            discountValueInput: "0",
+            discountType:
+              promotionEnabled && promotionTarget === "items" ? promotionDiscountType : "fixed",
+            discountValueInput: formatEditablePrice(promotionLineDiscountValue),
             productId: product.id,
             quantity: 1,
             unitPriceInput: formatEditablePrice(product.salePrice)
@@ -529,7 +569,7 @@ export function BillingWorkspace() {
           discountValueInput: clampDiscountInput(
             nextLine.discountType,
             nextLine.discountValueInput,
-            getLineDiscountLimit(nextLine)
+            getCartLineDiscountLimit(nextLine)
           )
         };
       })
@@ -552,7 +592,7 @@ export function BillingWorkspace() {
           discountValueInput: clampDiscountInput(
             nextLine.discountType,
             nextLine.discountValueInput,
-            getLineDiscountLimit(nextLine)
+            getCartLineDiscountLimit(nextLine)
           )
         };
       })
@@ -582,7 +622,7 @@ export function BillingWorkspace() {
           discountValueInput: clampDiscountInput(
             nextDiscountType,
             nextDiscountValueInput,
-            getLineDiscountLimit(nextLine)
+            getCartLineDiscountLimit(nextLine)
           )
         };
       })
@@ -615,7 +655,7 @@ export function BillingWorkspace() {
             discountValueInput: clampDiscountInput(
               nextLine.discountType,
               nextLine.discountValueInput,
-              getLineDiscountLimit(nextLine)
+              getCartLineDiscountLimit(nextLine)
             )
           };
         }
@@ -630,7 +670,7 @@ export function BillingWorkspace() {
           discountValueInput: clampDiscountInput(
             nextLine.discountType,
             nextLine.discountValueInput,
-            getLineDiscountLimit(nextLine)
+            getCartLineDiscountLimit(nextLine)
           )
         };
       })
@@ -1592,6 +1632,12 @@ export function BillingWorkspace() {
               {t("billing.summaryTitle")}
             </h2>
             <p className="mt-1 text-sm text-slate-600">{t("billing.summaryDesc")}</p>
+            {promotionEnabled ? (
+              <div className="mt-3 rounded-[18px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
+                <span className="font-semibold">{t("billing.promotionActive")}.</span>{" "}
+                {promotionTarget === "bill" ? t("billing.promotionBillHint") : t("billing.promotionItemsHint")}
+              </div>
+            ) : null}
           </div>
 
           <div className="min-h-0 overflow-y-auto px-4 py-4">

@@ -465,6 +465,10 @@ export interface TaxSettings {
   rate: number;
   mode: TaxMode;
   showOnReceipt: boolean;
+  promotionEnabled?: boolean;
+  promotionTarget?: "bill" | "items";
+  promotionDiscountType?: DiscountType;
+  promotionDiscountValue?: number;
 }
 
 export interface ShopSettingsBundle {
