@@ -32,6 +32,11 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { licenseStatusLabelKeys } from "@/lib/i18n";
 import { resizeImageFileToDataUrl } from "@/lib/image-upload";
+import {
+  ownerClearShopDataScopeDescriptions,
+  ownerClearShopDataScopeLabels,
+  type OwnerClearShopDataScope
+} from "@/lib/shop-data-reset";
 import { cn, formatCurrency, formatDateTime } from "@/lib/utils";
 
 const licenseStatuses: LicenseStatus[] = ["trial", "active", "expired", "locked"];
@@ -306,6 +311,7 @@ function StoreFilterButton({
 export default function OwnerPage() {
   const {
     locale,
+    ownerClearShopData,
     ownerCreateShop,
     ownerDeleteShop,
     ownerDeleteProductKey,
@@ -374,6 +380,9 @@ export default function OwnerPage() {
   const [selectedResetUserId, setSelectedResetUserId] = useState("");
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [clearDataConfirmName, setClearDataConfirmName] = useState("");
+  const [clearDataScope, setClearDataScope] = useState<OwnerClearShopDataScope>("bills");
+  const [isClearingShopData, setIsClearingShopData] = useState(false);
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [reportRange, setReportRange] = useState<ReportRange>("month");
   const [customStart, setCustomStart] = useState("");
@@ -713,6 +722,30 @@ export default function OwnerPage() {
   const generateKey = (shopId: string) => {
     const draft = getLicenseDraft(shopId);
     showResult(ownerGenerateProductKey({ shopId, allowedDevices: draft.allowedDevices, expiresAt: draft.expiresAt }), shopId);
+  };
+
+  const clearSelectedShopData = async () => {
+    if (!selectedShop || isClearingShopData) {
+      return;
+    }
+
+    setIsClearingShopData(true);
+
+    try {
+      const result = await ownerClearShopData({
+        confirmName: clearDataConfirmName,
+        scope: clearDataScope,
+        shopId: selectedShop.id
+      });
+
+      showResult(result);
+
+      if (result.ok) {
+        setClearDataConfirmName("");
+      }
+    } finally {
+      setIsClearingShopData(false);
+    }
   };
 
   const loadCompanyLogo = async (file?: File) => {
@@ -1185,6 +1218,52 @@ export default function OwnerPage() {
                 </div>
               </Card>
             </div>
+
+            {selectedShop ? (
+              <Card className="border-amber-200 bg-amber-50/60 p-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-700">Data reset</p>
+                    <h3 className="mt-2 font-display text-2xl font-semibold text-slate-950">Clear selected store data</h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      This keeps the store account, users, license, activation key, devices, and settings. Type the exact store name before clearing:{" "}
+                      <span className="font-semibold">{selectedShop.name}</span>
+                    </p>
+                  </div>
+                  <Badge variant="warning">Cloud reset</Badge>
+                </div>
+                <div className="mt-5 grid gap-4 lg:grid-cols-[0.65fr_1fr_auto] lg:items-end">
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-slate-950">Clear type</span>
+                    <Select value={clearDataScope} onChange={(event) => setClearDataScope(event.target.value as OwnerClearShopDataScope)}>
+                      {(["bills", "products", "all"] as const).map((scope) => (
+                        <option key={scope} value={scope}>
+                          {ownerClearShopDataScopeLabels[scope]}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-slate-950">Confirm store name</span>
+                    <Input
+                      placeholder={selectedShop.name}
+                      value={clearDataConfirmName}
+                      onChange={(event) => setClearDataConfirmName(event.target.value)}
+                    />
+                  </label>
+                  <Button
+                    disabled={clearDataConfirmName !== selectedShop.name || isClearingShopData}
+                    onClick={() => void clearSelectedShopData()}
+                    variant="danger"
+                  >
+                    {isClearingShopData ? "Clearing..." : "Clear data"}
+                  </Button>
+                </div>
+                <p className="mt-3 rounded-3xl border border-amber-200 bg-white/70 p-4 text-sm leading-6 text-slate-700">
+                  {ownerClearShopDataScopeDescriptions[clearDataScope]}
+                </p>
+              </Card>
+            ) : null}
 
             {selectedShop ? (
               <Card className="border-red-100 bg-red-50/50 p-5">

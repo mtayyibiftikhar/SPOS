@@ -62,6 +62,7 @@ import {
   normalizeBarcode
 } from "@/lib/catalog";
 import { calculateBillRefundState } from "@/lib/refunds";
+import { clearShopDataScope, ownerClearShopDataScopeLabels, type OwnerClearShopDataScope } from "@/lib/shop-data-reset";
 import { createId, getDirection, hashSecret } from "@/lib/utils";
 
 const STORAGE_KEY = "simple-pos-demo-state";
@@ -470,6 +471,11 @@ interface AppContextValue {
     shopId: string;
     confirmName: string;
   }) => { ok: boolean; message?: string };
+  ownerClearShopData: (payload: {
+    confirmName: string;
+    scope: OwnerClearShopDataScope;
+    shopId: string;
+  }) => Promise<{ ok: boolean; message?: string }>;
   ownerUpdateShopProfile: (payload: OwnerShopProfileInput) => { ok: boolean; message?: string };
   ownerGenerateProductKey: (payload: {
     shopId: string;
@@ -956,6 +962,31 @@ function deleteOwnerDeviceActivationFromCloud(deviceActivationId: string, ownerE
     },
     body: JSON.stringify({ deviceActivationId })
   }).catch(() => undefined);
+}
+
+async function clearOwnerShopDataInCloud(
+  payload: {
+    scope: OwnerClearShopDataScope;
+    shopId: string;
+    shopName?: string;
+  },
+  ownerEmail?: string
+) {
+  if (typeof window === "undefined" || !ownerEmail) {
+    return { ok: false, message: "Owner cloud session is not available." };
+  }
+
+  const response = await fetch("/api/owner/clear-shop-data", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-owner-email": ownerEmail
+    },
+    body: JSON.stringify(payload)
+  });
+  const result = (await response.json()) as { ok: boolean; message?: string };
+
+  return result;
 }
 
 function isLikelyCloudUserId(userId: string) {
@@ -2830,6 +2861,56 @@ export function AppProvider({
         });
 
         return result;
+      },
+      ownerClearShopData: async ({ shopId, confirmName, scope }) => {
+        if (!session || session.role !== "super_admin") {
+          return { ok: false, message: "Only the POS owner can clear store data." };
+        }
+
+        const shop = state.shops.find((entry) => entry.id === shopId);
+
+        if (!shop) {
+          return { ok: false, message: "Store not found." };
+        }
+
+        if (confirmName.trim() !== shop.name) {
+          return { ok: false, message: "Type the exact store name before clearing data." };
+        }
+
+        const ownerEmail = state.users.find((user) => user.role === "super_admin" && user.isActive)?.email;
+
+        try {
+          const cloudResult = await clearOwnerShopDataInCloud(
+            {
+              scope,
+              shopId,
+              shopName: shop.name
+            },
+            ownerEmail
+          );
+
+          if (!cloudResult.ok) {
+            return { ok: false, message: cloudResult.message ?? "Unable to clear this store data in cloud." };
+          }
+        } catch {
+          return { ok: false, message: "Unable to reach cloud reset service. Try again before asking the store to log in." };
+        }
+
+        const clearedAt = new Date().toISOString();
+
+        setState((current) => {
+          const nextState = clearShopDataScope(current, shopId, scope, {
+            actorId: session.id,
+            createdAt: clearedAt,
+            shopName: shop.name
+          });
+
+          persistLocalOwnerStateSnapshot(nextState);
+
+          return nextState;
+        });
+
+        return { ok: true, message: `${ownerClearShopDataScopeLabels[scope]} cleared for ${shop.name}.` };
       },
       ownerGenerateProductKey: ({ shopId, allowedDevices, expiresAt }) => {
         if (!session || session.role !== "super_admin") {
