@@ -189,6 +189,7 @@ export default function RegisterPage() {
 
     setForm((current) => ({
       ...current,
+      setupEmail: current.setupEmail || shop.setupEmail || settings?.pos.email || shop.email || "",
       shopName: current.shopName || settings?.pos.shopName || shop.name,
       address: current.address || settings?.pos.address || shop.address,
       phone: current.phone || settings?.pos.phone || shop.phone,
