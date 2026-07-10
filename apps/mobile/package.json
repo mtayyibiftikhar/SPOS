@@ -1,0 +1,16 @@
+{
+  "name": "spos-mobile-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Android shell for SPOS Shop",
+  "scripts": {
+    "cap": "cap"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/core": "^8.4.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.1"
+  }
+}

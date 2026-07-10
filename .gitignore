@@ -5,6 +5,7 @@ node_modules/
 .next/
 out/
 dist/
+dist-native/
 
 # TypeScript cache
 *.tsbuildinfo
@@ -18,6 +19,11 @@ dist/
 .local/
 _local_owner_state/
 _backups/
+
+# Native generated build outputs
+apps/mobile/android/.gradle/
+apps/mobile/android/build/
+apps/mobile/android/app/build/
 
 # Logs and generated local diagnostics
 *.log

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SPOS Shop</string>
+    <string name="title_activity_main">SPOS Shop</string>
+    <string name="package_name">com.globalfsms.spos.shop</string>
+    <string name="custom_url_scheme">com.globalfsms.spos.shop</string>
+</resources>

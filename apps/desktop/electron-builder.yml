@@ -1,0 +1,31 @@
+appId: com.globalfsms.spos.shop
+productName: SPOS Shop
+copyright: Copyright © 2026 Global FSMS
+
+directories:
+  output: dist-native/windows
+
+files:
+  - apps/desktop/**/*
+  - apps/native-assets/**/*
+  - package.json
+
+extraMetadata:
+  main: apps/desktop/main.cjs
+
+win:
+  icon: apps/native-assets/app-icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: SPOS-Shop-Setup-${version}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: SPOS Shop
