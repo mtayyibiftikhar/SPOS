@@ -432,6 +432,7 @@ function resolveAccountPaymentSequencesByShop(stored: DemoAppState) {
 
 interface AppContextValue {
   isHydrated: boolean;
+  isShopCloudReady: boolean;
   state: DemoAppState;
   session: SessionUser | null;
   saveFeedback: { savedAt: string } | null;
@@ -1391,6 +1392,12 @@ export function AppProvider({
     }, null)?.shopId ?? null;
   const cloudSyncShopId =
     session?.workspace === "shop" && session.shopId ? session.shopId : activatedCloudShopId;
+  const isShopCloudReady =
+    !session ||
+    session.workspace !== "shop" ||
+    !session.shopId ||
+    shouldUseSharedStateEndpoint() ||
+    Boolean(cloudLoadAttemptedShopIds[session.shopId]);
 
   useEffect(() => {
     if (!isHydrated || !cloudSyncShopId || cloudLoadAttemptedShopIds[cloudSyncShopId]) {
@@ -1750,6 +1757,7 @@ export function AppProvider({
   const value = useMemo<AppContextValue>(
     () => ({
       isHydrated,
+      isShopCloudReady,
       state,
       session,
       saveFeedback,
@@ -6430,6 +6438,7 @@ export function AppProvider({
       currentUsers,
       dictionaryOverrides,
       isHydrated,
+      isShopCloudReady,
       saveFeedback,
       session,
       state

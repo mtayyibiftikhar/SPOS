@@ -318,6 +318,10 @@ export function CustomerWorkspace() {
       return;
     }
 
+    if (activeView === "account") {
+      return;
+    }
+
     if (selectedCustomer) {
       setCustomerForm(createCustomerForm(selectedCustomer));
       return;
@@ -326,7 +330,21 @@ export function CustomerWorkspace() {
     if (filteredCustomers.length > 0) {
       setSelectedCustomerId(filteredCustomers[0].id);
     }
-  }, [filteredCustomers, isCreating, selectedCustomer]);
+  }, [activeView, filteredCustomers, isCreating, selectedCustomer]);
+
+  useEffect(() => {
+    if (activeView !== "account") {
+      return;
+    }
+
+    setIsCreating(false);
+    setSelectedCustomerId(null);
+    setSelectedSettlementBillIds([]);
+    setReceiptSearch("");
+    setSettlementAmount("");
+    setSettlementError(null);
+    setSettlementFeedback(null);
+  }, [activeView]);
 
   useEffect(() => {
     if (!selectedMetrics) {
@@ -354,6 +372,26 @@ export function CustomerWorkspace() {
         .slice(0, 6),
     [customerMetricsById, shopCustomers]
   );
+  const accountCustomers = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    return shopCustomers
+      .filter((customer) => (customerMetricsById[customer.id]?.outstandingBalance ?? 0) > 0)
+      .filter((customer) => {
+        if (!query) {
+          return true;
+        }
+
+        return [customer.name, customer.phone, customer.email, customer.whatsapp]
+          .filter(Boolean)
+          .some((value) => value!.toLowerCase().includes(query));
+      })
+      .sort(
+        (left, right) =>
+          (customerMetricsById[right.id]?.outstandingBalance ?? 0) -
+          (customerMetricsById[left.id]?.outstandingBalance ?? 0)
+      );
+  }, [customerMetricsById, search, shopCustomers]);
   const recentShopSettlements = useMemo(
     () =>
       state.customerAccountPayments
@@ -430,6 +468,12 @@ export function CustomerWorkspace() {
     setSettlementFeedback(null);
     setSelectedSettlementBillIds([]);
     setReceiptSearch("");
+  };
+
+  const openAccountCustomer = (customerId: string) => {
+    openCustomer(customerId);
+    setSelectedSettlementBillIds([]);
+    setSettlementAmount("");
   };
 
   const handleSaveCustomer = () => {
@@ -1283,6 +1327,284 @@ export function CustomerWorkspace() {
     </Card>
   );
 
+  const accountFlowStep = !selectedCustomer
+    ? "customer"
+    : selectedSettlementBillIds.length > 0
+      ? "payment"
+      : "receipt";
+
+  const accountFlowPanel = (
+    <div className="space-y-5">
+      <Card className="overflow-hidden p-0">
+        <div className="border-b border-slate-200 bg-[linear-gradient(135deg,#ffffff_0%,#ecfdf5_54%,#fff7ed_100%)] p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <SectionEyebrow>{t("customers.accountTitle")}</SectionEyebrow>
+              <h2 className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-slate-950">
+                {accountFlowStep === "customer"
+                  ? "Select account customer"
+                  : accountFlowStep === "receipt"
+                    ? "Select due receipt"
+                    : "Receive account payment"}
+              </h2>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                {accountFlowStep === "customer"
+                  ? "Only customers with unpaid account receipts are shown here."
+                  : accountFlowStep === "receipt"
+                    ? "Choose the exact receipt you want to collect against."
+                    : "Confirm the amount and payment method, then save the settlement."}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 rounded-[22px] border border-slate-200 bg-white p-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              <span className={`rounded-2xl px-3 py-2 text-center ${accountFlowStep === "customer" ? "bg-slate-950 text-white" : "bg-slate-50"}`}>
+                1 Customer
+              </span>
+              <span className={`rounded-2xl px-3 py-2 text-center ${accountFlowStep === "receipt" ? "bg-slate-950 text-white" : "bg-slate-50"}`}>
+                2 Receipt
+              </span>
+              <span className={`rounded-2xl px-3 py-2 text-center ${accountFlowStep === "payment" ? "bg-slate-950 text-white" : "bg-slate-50"}`}>
+                3 Payment
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {accountFlowStep === "customer" ? (
+          <div className="p-5">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                className="h-12 rounded-[18px] border-slate-200 bg-slate-50 pl-11 text-slate-950"
+                placeholder={t("customers.searchPlaceholder")}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </div>
+
+            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {accountCustomers.length > 0 ? (
+                accountCustomers.map((customer) => {
+                  const metrics = customerMetricsById[customer.id];
+
+                  return (
+                    <button
+                      className="group rounded-[26px] border border-slate-200 bg-white p-5 text-left shadow-[0_18px_40px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50/50"
+                      key={customer.id}
+                      onClick={() => openAccountCustomer(customer.id)}
+                      type="button"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-base font-semibold text-slate-950">{customer.name}</p>
+                          <p className="mt-1 truncate text-sm text-slate-600">
+                            {customer.phone || customer.email || customer.whatsapp || t("common.notAvailable")}
+                          </p>
+                        </div>
+                        <Badge variant="warning">
+                          {metrics?.openBillCount ?? 0} due
+                        </Badge>
+                      </div>
+
+                      <div className="mt-5 rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-700">{t("customers.balanceDue")}</p>
+                        <p className="mt-1 font-display text-2xl font-semibold tracking-[-0.04em] text-slate-950">
+                          {formatCurrency(metrics?.outstandingBalance ?? 0, currentShop?.currency ?? "SAR", locale)}
+                        </p>
+                      </div>
+
+                      <span className="mt-4 inline-flex text-sm font-semibold text-emerald-700 group-hover:text-emerald-800">
+                        Open due receipts
+                      </span>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center text-sm leading-6 text-slate-600 md:col-span-2 xl:col-span-3">
+                  {search.trim() ? t("customers.emptyState") : t("customers.noOpenBills")}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {accountFlowStep === "receipt" && selectedCustomer && selectedMetrics ? (
+          <div className="p-5">
+            <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-500">{selectedCustomer.name}</p>
+                <h3 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{t("customers.selectReceiptTitle")}</h3>
+              </div>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setSelectedCustomerId(null);
+                  setReceiptSearch("");
+                }}
+              >
+                Back to accounts
+              </Button>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-[1fr_220px]">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  className="h-12 rounded-[18px] border-slate-200 bg-slate-50 pl-11 text-slate-950"
+                  placeholder={t("customers.receiptSearchPlaceholder")}
+                  value={receiptSearch}
+                  onChange={(event) => setReceiptSearch(event.target.value)}
+                />
+              </div>
+              <div className="rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-700">{t("customers.balanceDue")}</p>
+                <p className="text-lg font-semibold text-slate-950">
+                  {formatCurrency(selectedMetrics.outstandingBalance, currentShop?.currency ?? "SAR", locale)}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 max-h-[58dvh] space-y-3 overflow-y-auto pr-1">
+              {filteredOpenBills.length > 0 ? (
+                filteredOpenBills.map((bill) => (
+                  <div key={bill.id} className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <p className="text-lg font-semibold text-slate-950">{bill.number}</p>
+                        <p className="mt-1 text-sm text-slate-600">{formatDateTime(bill.createdAt, locale)}</p>
+                        <p className="mt-2 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">
+                          {t("common.total")} {formatCurrency(bill.total, currentShop?.currency ?? "SAR", locale)} | {t("common.paidAmount")}{" "}
+                          {formatCurrency(bill.paidAmount, currentShop?.currency ?? "SAR", locale)}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                        <Badge variant="warning">
+                          {formatCurrency(bill.dueAmount, currentShop?.currency ?? "SAR", locale)}
+                        </Badge>
+                        <Button
+                          onClick={() => {
+                            setSelectedSettlementBillIds([bill.id]);
+                            setSettlementAmount(String(bill.dueAmount));
+                            setSettlementError(null);
+                            setSettlementFeedback(null);
+                          }}
+                        >
+                          {t("customers.receiveThisReceipt")}
+                        </Button>
+                        <Link className="inline-flex h-10 items-center rounded-[15px] border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50" href={`/bills/${bill.id}`}>
+                          {t("bills.viewReceipt")}
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center text-sm leading-6 text-slate-600">
+                  {receiptSearch.trim() ? t("customers.noReceiptSearchResults") : t("customers.noOpenBills")}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {accountFlowStep === "payment" && selectedCustomer && selectedMetrics ? (
+          <div className="p-5">
+            <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-500">{selectedCustomer.name}</p>
+                <h3 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{t("customers.paymentDetails")}</h3>
+              </div>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setSelectedSettlementBillIds([]);
+                  setSettlementAmount("");
+                }}
+              >
+                Back to due receipts
+              </Button>
+            </div>
+
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+              <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.05)]">
+                <SectionEyebrow>{t("customers.appliedToBills")}</SectionEyebrow>
+                <h3 className="mt-2 text-xl font-semibold tracking-[-0.03em] text-slate-950">
+                  {t("customers.receiveAgainstSelection", { count: selectedSettlementBillIds.length })}
+                </h3>
+                <div className="mt-4 space-y-3">
+                  {selectedSettlementBills.map((bill) => (
+                    <div key={bill.id} className="rounded-[22px] border border-emerald-200 bg-emerald-50 px-4 py-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-slate-950">{bill.number}</p>
+                          <p className="mt-1 text-sm text-slate-600">{formatDateTime(bill.createdAt, locale)}</p>
+                        </div>
+                        <Badge variant="success">
+                          {formatCurrency(bill.dueAmount, currentShop?.currency ?? "SAR", locale)}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <aside className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]">
+                <div className="rounded-[24px] border border-emerald-200 bg-emerald-50 px-4 py-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-700">{t("customers.selectedReceiptBalance")}</p>
+                  <p className="mt-1 font-display text-3xl font-semibold tracking-[-0.04em] text-slate-950">
+                    {formatCurrency(settlementLimit, currentShop?.currency ?? "SAR", locale)}
+                  </p>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  <Input
+                    className="h-12 rounded-[18px] border-slate-200 bg-slate-50"
+                    inputMode="decimal"
+                    placeholder={t("common.amount")}
+                    value={settlementAmount}
+                    onChange={(event) => setSettlementAmount(event.target.value)}
+                  />
+                  <Select
+                    value={settlementMethod}
+                    onChange={(event) => setSettlementMethod(event.target.value as "cash" | "card")}
+                  >
+                    <option value="cash">{t("common.cash")}</option>
+                    <option value="card">{t("common.card")}</option>
+                  </Select>
+                  <Textarea
+                    className="min-h-[92px] rounded-[18px] border-slate-200 bg-slate-50"
+                    placeholder={t("customers.settlementNote")}
+                    value={settlementNote}
+                    onChange={(event) => setSettlementNote(event.target.value)}
+                  />
+                  <Button
+                    className="h-12 w-full rounded-[18px] bg-emerald-600 text-white hover:bg-emerald-700"
+                    disabled={settlementLimit <= 0 || settlementTooHigh}
+                    onClick={handleSettlement}
+                  >
+                    {t("customers.applySettlement")}
+                  </Button>
+                  <Button
+                    className="w-full rounded-[18px]"
+                    variant="secondary"
+                    disabled={settlementLimit <= 0}
+                    onClick={() => setSettlementAmount(String(settlementLimit))}
+                  >
+                    {t("customers.quickFillSelected")}
+                  </Button>
+                  {settlementTooHigh ? <p className="text-sm font-medium text-red-700">{t("customers.invalidSettlement")}</p> : null}
+                  {settlementError ? <p className="text-sm font-medium text-red-700">{settlementError}</p> : null}
+                  {settlementFeedback ? <p className="text-sm font-medium text-emerald-700">{settlementFeedback}</p> : null}
+                </div>
+              </aside>
+            </div>
+          </div>
+        ) : null}
+      </Card>
+    </div>
+  );
+
   const historyPanel = (
     <Card className="p-6">
       <div className="flex items-start gap-3">
@@ -1486,13 +1808,14 @@ export function CustomerWorkspace() {
             </Card>
           </div>
         </div>
+      ) : activeView === "account" ? (
+        accountFlowPanel
       ) : (
         <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
           {directoryPanel}
 
           <div className="space-y-6">
             {activeView === "directory" ? profilePanel : null}
-            {activeView === "account" ? focusedAccountPanel : null}
             {activeView === "history" ? historyPanel : null}
           </div>
         </div>

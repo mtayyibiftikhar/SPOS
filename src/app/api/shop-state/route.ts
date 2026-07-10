@@ -15,7 +15,7 @@ function clean(value: string | null | undefined) {
 }
 
 function isMissingSnapshotTableError(error: { code?: string; message?: string }) {
-  return error.code === "42P01" || /shop_cloud_snapshots/i.test(error.message ?? "");
+  return error.code === "42P01" || error.code === "PGRST205" || /shop_cloud_snapshots/i.test(error.message ?? "");
 }
 
 async function ensureSnapshotBucket(supabase: ReturnType<typeof createSupabaseAdminClient>) {
@@ -67,17 +67,16 @@ async function authorizeShopStateAccess(request: Request, shopId: string) {
   const userEmail = clean(request.headers.get("x-user-email")).toLowerCase();
   const productKey = clean(request.headers.get("x-product-key"));
 
-  if (userId || userEmail) {
+  if (userId) {
     let query = supabase
       .from("profiles")
       .select("id, shop_id, email, role, is_active")
       .eq("shop_id", shopId)
+      .eq("id", userId)
       .eq("is_active", true)
       .neq("role", "super_admin");
 
-    if (userId) {
-      query = query.eq("id", userId);
-    } else {
+    if (userEmail) {
       query = query.eq("email", userEmail);
     }
 

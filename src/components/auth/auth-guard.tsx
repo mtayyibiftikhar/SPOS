@@ -14,10 +14,14 @@ export function AuthGuard({
   children: React.ReactNode;
   requiredWorkspace: WorkspaceKind;
 }) {
-  const { isHydrated, session, t } = usePosApp();
+  const { isHydrated, isShopCloudReady, session, t } = usePosApp();
 
   if (!isHydrated) {
     return <BrandedLoadingScreen />;
+  }
+
+  if (requiredWorkspace === "shop" && session?.workspace === "shop" && !isShopCloudReady) {
+    return <BrandedLoadingScreen message="Syncing the latest shop data from cloud..." />;
   }
 
   if (!session || session.workspace !== requiredWorkspace) {
