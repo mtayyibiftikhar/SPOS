@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type {
   BusinessDay,
   CreateRefundInput,
@@ -434,6 +434,7 @@ interface AppContextValue {
   isHydrated: boolean;
   state: DemoAppState;
   session: SessionUser | null;
+  saveFeedback: { savedAt: string } | null;
   currentShopId: string | null;
   currentShop: DemoAppState["shops"][number] | null;
   currentLicense: DemoAppState["licenses"][number] | null;
@@ -1187,6 +1188,8 @@ export function AppProvider({
   const [cloudLoadAttemptedShopIds, setCloudLoadAttemptedShopIds] = useState<Record<string, boolean>>({});
   const [cloudLoadedShopIds, setCloudLoadedShopIds] = useState<Record<string, boolean>>({});
   const [autoRolloverTick, setAutoRolloverTick] = useState(0);
+  const [saveFeedback, setSaveFeedback] = useState<{ savedAt: string } | null>(null);
+  const hasCompletedInitialPersist = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -1247,6 +1250,7 @@ export function AppProvider({
     }
 
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+
     if (shouldUseSharedStateEndpoint()) {
       void fetch(SHARED_STATE_ENDPOINT, {
         body: JSON.stringify({
@@ -1261,6 +1265,20 @@ export function AppProvider({
         method: "POST"
       }).catch(() => undefined);
     }
+
+    if (!hasCompletedInitialPersist.current) {
+      hasCompletedInitialPersist.current = true;
+      return;
+    }
+
+    const savedAt = new Date().toISOString();
+    setSaveFeedback({ savedAt });
+
+    const timer = window.setTimeout(() => {
+      setSaveFeedback((current) => (current?.savedAt === savedAt ? null : current));
+    }, 2200);
+
+    return () => window.clearTimeout(timer);
   }, [isHydrated, state]);
 
   useEffect(() => {
@@ -1734,6 +1752,7 @@ export function AppProvider({
       isHydrated,
       state,
       session,
+      saveFeedback,
       currentShopId,
       currentShop,
       currentLicense,
@@ -6411,6 +6430,7 @@ export function AppProvider({
       currentUsers,
       dictionaryOverrides,
       isHydrated,
+      saveFeedback,
       session,
       state
     ]

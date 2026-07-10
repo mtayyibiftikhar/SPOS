@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { Menu, X } from "lucide-react";
+import { CheckCircle2, Menu, X } from "lucide-react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { usePosApp } from "@/components/providers/app-provider";
@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { endSupportSession, session, state } = usePosApp();
+  const { endSupportSession, saveFeedback, session, state } = usePosApp();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const isBillingRoute = pathname === "/billing";
   const supportSession =
@@ -94,6 +94,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex-1 min-h-0">{children}</div>
         </main>
       </div>
+      {saveFeedback ? (
+        <div
+          aria-live="polite"
+          className="fixed bottom-5 right-5 z-[90] flex items-center gap-2 rounded-full border border-emerald-200 bg-white/96 px-4 py-3 text-sm font-bold text-emerald-800 shadow-[0_20px_55px_rgba(15,23,42,0.16)] backdrop-blur print:hidden"
+          role="status"
+        >
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+            <CheckCircle2 className="h-4 w-4" />
+          </span>
+          <span>Saved</span>
+        </div>
+      ) : null}
     </div>
   );
 }
