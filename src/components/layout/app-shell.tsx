@@ -28,7 +28,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <>
           <button
             aria-label="Open navigation"
-            className="fixed left-3 top-3 z-[70] inline-flex h-11 w-11 items-center justify-center rounded-[16px] border border-slate-200 bg-white/95 text-slate-950 shadow-[0_16px_36px_rgba(15,23,42,0.12)] backdrop-blur transition hover:-translate-y-0.5 hover:bg-white print:hidden"
+            className="fixed right-3 top-3 z-[70] inline-flex h-11 w-11 items-center justify-center rounded-[16px] border border-slate-200 bg-white/95 text-slate-950 shadow-[0_16px_36px_rgba(15,23,42,0.12)] backdrop-blur transition hover:-translate-y-0.5 hover:bg-white print:hidden"
             onClick={() => setDrawerOpen(true)}
             type="button"
           >
@@ -87,7 +87,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main
           className={cn(
             "flex min-w-0 flex-1 flex-col lg:pl-0 print:block print:min-w-0",
-            isBillingRoute ? "gap-3 pl-12 lg:min-h-0" : "gap-6"
+            isBillingRoute ? "gap-3 pr-12 lg:min-h-0" : "gap-6"
           )}
         >
           {!isBillingRoute ? (
