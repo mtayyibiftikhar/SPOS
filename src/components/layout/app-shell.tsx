@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { CheckCircle2, Menu, X } from "lucide-react";
 import { Sidebar } from "@/components/layout/sidebar";
@@ -18,6 +18,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       ? state.supportSessions.find((entry) => entry.id === session.supportSessionId && !entry.endedAt)
       : null;
 
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [pathname]);
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.12),_transparent_34%),radial-gradient(circle_at_top_right,_rgba(245,158,11,0.10),_transparent_28%),linear-gradient(180deg,#f8fbf9_0%,#f2f6f4_100%)]">
       {isBillingRoute ? (
@@ -31,15 +35,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Menu className="h-5 w-5" />
           </button>
 
-          {drawerOpen ? (
-            <div className="fixed inset-0 z-[80] print:hidden">
+          <div
+            aria-hidden={!drawerOpen}
+            className={cn(
+              "fixed inset-0 z-[80] transition print:hidden",
+              drawerOpen ? "pointer-events-auto" : "pointer-events-none"
+            )}
+          >
               <button
                 aria-label="Close navigation"
-                className="absolute inset-0 bg-slate-950/35 backdrop-blur-[2px]"
+                className={cn(
+                  "absolute inset-0 bg-slate-950/35 backdrop-blur-[2px] transition-opacity duration-300",
+                  drawerOpen ? "opacity-100" : "opacity-0"
+                )}
                 onClick={() => setDrawerOpen(false)}
                 type="button"
               />
-              <div className="absolute inset-y-0 left-0 w-[min(86vw,320px)] border-r border-white/80 bg-white/96 p-4 shadow-[30px_0_80px_rgba(15,23,42,0.22)] backdrop-blur">
+              <div
+                className={cn(
+                  "absolute inset-y-0 left-0 w-[min(86vw,320px)] border-r border-white/80 bg-white/96 p-4 shadow-[30px_0_80px_rgba(15,23,42,0.22)] backdrop-blur transition-transform duration-300 ease-out",
+                  drawerOpen ? "translate-x-0" : "-translate-x-[calc(100%+2rem)]"
+                )}
+              >
                 <button
                   aria-label="Close navigation"
                   className="absolute right-4 top-4 z-10 inline-flex h-10 w-10 items-center justify-center rounded-[14px] border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50"
@@ -51,7 +68,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <Sidebar onNavigate={() => setDrawerOpen(false)} />
               </div>
             </div>
-          ) : null}
         </>
       ) : null}
       <div
