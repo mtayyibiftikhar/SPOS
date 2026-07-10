@@ -265,12 +265,12 @@ function getReceiptFontSizes(receiptSize: ReceiptSize) {
 
 function getLogoDisplayBounds(receiptSize: ReceiptSize, contentWidth: number) {
   if (receiptSize === "a4") {
-    return { maxHeight: 86, maxWidth: 170 };
+    return { maxHeight: 76, maxWidth: 190 };
   }
 
   return {
-    maxHeight: 54,
-    maxWidth: Math.min(contentWidth * 0.68, 118)
+    maxHeight: 46,
+    maxWidth: Math.min(contentWidth * 0.82, 150)
   };
 }
 
@@ -669,11 +669,12 @@ function createPdfContent(
   const storeMetaLines = document.headerLines
     .slice(1)
     .flatMap((line) => wrapText(line, getMaxCharsPerLine(document.receiptSize, fontSizes.storeMeta)));
+  const logoGap = assets.logoAsset ? 10 : 0;
   const headerHeight =
-    (assets.logoAsset ? assets.logoAsset.displayHeight + 24 : 0) +
+    (assets.logoAsset ? assets.logoAsset.displayHeight + logoGap : 0) +
     storeNameLines.length * (fontSizes.storeTitle + 4) +
     storeMetaLines.length * (fontSizes.storeMeta + 4) +
-    14;
+    10;
   const sectionHeight = document.elements.reduce((sum, element) => sum + getElementHeight(element), 0);
   const qrHeight = assets.qrAsset ? assets.qrAsset.displayHeight + 26 : 0;
   const ownerImprintLineCount = document.ownerImprintLines?.length ?? 0;
@@ -695,7 +696,7 @@ function createPdfContent(
     commands.push(
       `q ${assets.logoAsset.displayWidth.toFixed(2)} 0 0 ${assets.logoAsset.displayHeight.toFixed(2)} ${logoX.toFixed(2)} ${logoY.toFixed(2)} cm /Im1 Do Q`
     );
-    y = logoY - 24;
+    y = logoY - logoGap;
   }
 
   storeNameLines.forEach((line) => {
@@ -713,7 +714,7 @@ function createPdfContent(
   });
 
   if (document.headerLines.length > 0 || assets.logoAsset) {
-    y -= 6;
+    y -= 4;
   }
 
   for (const element of document.elements) {
@@ -1066,11 +1067,12 @@ async function createImageReceiptPdfBlob(document: ReceiptPdfDocument) {
   const storeMetaHeight = document.headerLines.slice(1).reduce((sum, line) => {
     return sum + getCanvasTextHeight(measureContext, line, fontSizes.storeMeta, contentWidth).height + 4;
   }, 0);
+  const logoGap = logoAsset ? 10 : 0;
   const headerHeight =
-    (logoAsset ? logoAsset.displayHeight + 24 : 0) +
+    (logoAsset ? logoAsset.displayHeight + logoGap : 0) +
     storeNameHeight +
     storeMetaHeight +
-    16;
+    12;
   const sectionHeight = document.elements.reduce(
     (sum, element) => sum + getCanvasElementHeight(measureContext, element, contentWidth),
     0
@@ -1109,7 +1111,7 @@ async function createImageReceiptPdfBlob(document: ReceiptPdfDocument) {
       logoAsset.displayWidth,
       logoAsset.displayHeight
     );
-    y += logoAsset.displayHeight + 24;
+    y += logoAsset.displayHeight + logoGap;
   }
 
   y = drawCanvasTextLines({

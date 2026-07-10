@@ -237,10 +237,12 @@ export default function RegisterPage() {
 
     try {
       const result = await resizeImageFileToDataUrl(file, {
-        maxWidth: 512,
-        maxHeight: 512,
+        maxWidth: 520,
+        maxHeight: 260,
         outputType: "image/jpeg",
-        quality: 0.9
+        paddingRatio: 0.06,
+        quality: 0.86,
+        trimWhitespace: true
       });
 
       updateForm("logoUrl", result.dataUrl);

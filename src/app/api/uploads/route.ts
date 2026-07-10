@@ -7,7 +7,13 @@ type UploadScope = "category" | "owner-ad" | "owner-logo" | "product" | "shop-lo
 
 const shopScopes = new Set<UploadScope>(["category", "product", "shop-logo"]);
 const ownerScopes = new Set<UploadScope>(["owner-ad", "owner-logo"]);
-const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+const uploadLimitsByScope: Record<UploadScope, number> = {
+  category: 350 * 1024,
+  "owner-ad": 900 * 1024,
+  "owner-logo": 220 * 1024,
+  product: 350 * 1024,
+  "shop-logo": 220 * 1024
+};
 
 function clean(value: FormDataEntryValue | string | null | undefined) {
   return typeof value === "string" ? value.trim() : "";
@@ -95,8 +101,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "Only image uploads are allowed." }, { status: 400 });
   }
 
-  if (file.size > MAX_UPLOAD_BYTES) {
-    return NextResponse.json({ ok: false, message: "Image must be 4 MB or smaller after optimization." }, { status: 400 });
+  const maxUploadBytes = uploadLimitsByScope[scope];
+
+  if (file.size > maxUploadBytes) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message: `Image must be ${Math.round(maxUploadBytes / 1024)} KB or smaller after optimization.`
+      },
+      { status: 400 }
+    );
   }
 
   try {

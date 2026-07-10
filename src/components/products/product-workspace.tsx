@@ -338,9 +338,9 @@ export function ProductWorkspace() {
 
     try {
       const result = await resizeImageFileToDataUrl(file, {
-        maxWidth: 720,
-        maxHeight: 520,
-        quality: 0.84,
+        maxWidth: 640,
+        maxHeight: 460,
+        quality: 0.76,
         outputType: "image/jpeg"
       });
       const upload = await uploadImageAssetToCloud({
@@ -375,9 +375,9 @@ export function ProductWorkspace() {
 
     try {
       const result = await resizeImageFileToDataUrl(file, {
-        maxWidth: 720,
-        maxHeight: 520,
-        quality: 0.84,
+        maxWidth: 640,
+        maxHeight: 460,
+        quality: 0.76,
         outputType: "image/jpeg"
       });
       const upload = await uploadImageAssetToCloud({

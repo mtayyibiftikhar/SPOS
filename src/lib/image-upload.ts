@@ -1,8 +1,10 @@
 type ResizeImageOptions = {
   maxWidth: number;
   maxHeight: number;
+  paddingRatio?: number;
   quality?: number;
   outputType?: "image/jpeg" | "image/png" | "image/webp";
+  trimWhitespace?: boolean;
 };
 
 type UploadImageAssetInput = {
@@ -46,9 +48,60 @@ export async function resizeImageFileToDataUrl(file: File, options: ResizeImageO
       throw new Error("This image has invalid dimensions.");
     }
 
-    const scale = Math.min(1, options.maxWidth / naturalWidth, options.maxHeight / naturalHeight);
-    const width = Math.max(1, Math.round(naturalWidth * scale));
-    const height = Math.max(1, Math.round(naturalHeight * scale));
+    let cropX = 0;
+    let cropY = 0;
+    let cropWidth = naturalWidth;
+    let cropHeight = naturalHeight;
+
+    if (options.trimWhitespace) {
+      const sourceCanvas = document.createElement("canvas");
+      const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
+
+      if (sourceContext) {
+        sourceCanvas.width = naturalWidth;
+        sourceCanvas.height = naturalHeight;
+        sourceContext.drawImage(image, 0, 0);
+
+        const pixels = sourceContext.getImageData(0, 0, naturalWidth, naturalHeight).data;
+        let minX = naturalWidth;
+        let minY = naturalHeight;
+        let maxX = -1;
+        let maxY = -1;
+
+        for (let y = 0; y < naturalHeight; y += 1) {
+          for (let x = 0; x < naturalWidth; x += 1) {
+            const index = (y * naturalWidth + x) * 4;
+            const alpha = pixels[index + 3];
+            const red = pixels[index];
+            const green = pixels[index + 1];
+            const blue = pixels[index + 2];
+            const isVisibleInk = alpha > 12 && !(red > 246 && green > 246 && blue > 246);
+
+            if (isVisibleInk) {
+              minX = Math.min(minX, x);
+              minY = Math.min(minY, y);
+              maxX = Math.max(maxX, x);
+              maxY = Math.max(maxY, y);
+            }
+          }
+        }
+
+        if (maxX >= minX && maxY >= minY) {
+          const contentWidth = maxX - minX + 1;
+          const contentHeight = maxY - minY + 1;
+          const padding = Math.round(Math.max(contentWidth, contentHeight) * (options.paddingRatio ?? 0.08));
+
+          cropX = Math.max(0, minX - padding);
+          cropY = Math.max(0, minY - padding);
+          cropWidth = Math.min(naturalWidth - cropX, contentWidth + padding * 2);
+          cropHeight = Math.min(naturalHeight - cropY, contentHeight + padding * 2);
+        }
+      }
+    }
+
+    const scale = Math.min(1, options.maxWidth / cropWidth, options.maxHeight / cropHeight);
+    const width = Math.max(1, Math.round(cropWidth * scale));
+    const height = Math.max(1, Math.round(cropHeight * scale));
     const canvas = document.createElement("canvas");
     const context = canvas.getContext("2d");
 
@@ -64,7 +117,7 @@ export async function resizeImageFileToDataUrl(file: File, options: ResizeImageO
       context.fillRect(0, 0, width, height);
     }
 
-    context.drawImage(image, 0, 0, width, height);
+    context.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, width, height);
 
     return {
       dataUrl: canvas.toDataURL(options.outputType ?? "image/jpeg", options.quality ?? 0.88),

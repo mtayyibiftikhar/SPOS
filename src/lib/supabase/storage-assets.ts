@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const POS_ASSETS_BUCKET = "pos-assets";
 export const SIGNED_IMAGE_URL_TTL_SECONDS = 60 * 60 * 24 * 365 * 5;
+export const MAX_POS_ASSET_BYTES = 900 * 1024;
 
 type UploadPosAssetInput = {
   buffer: Buffer;
@@ -57,6 +58,10 @@ export async function uploadPrivatePosAsset(supabase: SupabaseClient, input: Upl
 
   if (!input.contentType.startsWith("image/")) {
     throw new Error("Only image uploads are allowed.");
+  }
+
+  if (input.buffer.byteLength > MAX_POS_ASSET_BYTES) {
+    throw new Error("Image is too large for POS storage. Compress it and try again.");
   }
 
   const extension = extensionForContentType(input.contentType);

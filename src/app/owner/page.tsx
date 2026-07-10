@@ -384,6 +384,7 @@ export default function OwnerPage() {
   const [clearDataScope, setClearDataScope] = useState<OwnerClearShopDataScope>("bills");
   const [isClearingShopData, setIsClearingShopData] = useState(false);
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
+  const [isDeletingShop, setIsDeletingShop] = useState(false);
   const [reportRange, setReportRange] = useState<ReportRange>("month");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -748,6 +749,29 @@ export default function OwnerPage() {
     }
   };
 
+  const deleteSelectedShop = async () => {
+    if (!selectedShop || isDeletingShop) {
+      return;
+    }
+
+    setIsDeletingShop(true);
+
+    try {
+      const deletedShopId = selectedShop.id;
+      const result = await ownerDeleteShop({ shopId: deletedShopId, confirmName: deleteConfirmName });
+
+      showResult(result);
+
+      if (result.ok) {
+        setDeleteConfirmName("");
+        const remainingShop = state.shops.find((shop) => shop.id !== deletedShopId);
+        setSelectedShopId(remainingShop?.id ?? "");
+      }
+    } finally {
+      setIsDeletingShop(false);
+    }
+  };
+
   const loadCompanyLogo = async (file?: File) => {
     if (!file) {
       return;
@@ -757,10 +781,12 @@ export default function OwnerPage() {
 
     try {
       const result = await resizeImageFileToDataUrl(file, {
-        maxWidth: 512,
-        maxHeight: 512,
+        maxWidth: 520,
+        maxHeight: 260,
         outputType: "image/jpeg",
-        quality: 0.9
+        paddingRatio: 0.06,
+        quality: 0.86,
+        trimWhitespace: true
       });
       const upload = await uploadImageAssetToCloud({
         dataUrl: result.dataUrl,
@@ -794,10 +820,10 @@ export default function OwnerPage() {
 
     try {
       const result = await resizeImageFileToDataUrl(file, {
-        maxWidth: 1600,
-        maxHeight: 900,
+        maxWidth: 1280,
+        maxHeight: 720,
         outputType: "image/jpeg",
-        quality: 0.86
+        quality: 0.78
       });
       const upload = await uploadImageAssetToCloud({
         dataUrl: result.dataUrl,
@@ -1300,19 +1326,11 @@ export default function OwnerPage() {
                     onChange={(event) => setDeleteConfirmName(event.target.value)}
                   />
                   <Button
-                    disabled={deleteConfirmName !== selectedShop.name}
-                    onClick={() => {
-                      const result = ownerDeleteShop({ shopId: selectedShop.id, confirmName: deleteConfirmName });
-                      showResult(result);
-                      if (result.ok) {
-                        setDeleteConfirmName("");
-                        const remainingShop = state.shops.find((shop) => shop.id !== selectedShop.id);
-                        setSelectedShopId(remainingShop?.id ?? "");
-                      }
-                    }}
+                    disabled={deleteConfirmName !== selectedShop.name || isDeletingShop}
+                    onClick={() => void deleteSelectedShop()}
                     variant="danger"
                   >
-                    Delete store
+                    {isDeletingShop ? "Deleting..." : "Delete store"}
                   </Button>
                 </div>
               </Card>

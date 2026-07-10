@@ -470,7 +470,7 @@ interface AppContextValue {
   ownerDeleteShop: (payload: {
     shopId: string;
     confirmName: string;
-  }) => { ok: boolean; message?: string };
+  }) => Promise<{ ok: boolean; message?: string }>;
   ownerClearShopData: (payload: {
     confirmName: string;
     scope: OwnerClearShopDataScope;
@@ -977,6 +977,29 @@ async function clearOwnerShopDataInCloud(
   }
 
   const response = await fetch("/api/owner/clear-shop-data", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-owner-email": ownerEmail
+    },
+    body: JSON.stringify(payload)
+  });
+  const result = (await response.json()) as { ok: boolean; message?: string };
+
+  return result;
+}
+
+async function deleteOwnerShopFromCloud(
+  payload: {
+    shopId: string;
+  },
+  ownerEmail?: string
+) {
+  if (typeof window === "undefined" || !ownerEmail) {
+    return { ok: false, message: "Owner cloud session is not available." };
+  }
+
+  const response = await fetch("/api/owner/delete-shop", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -2769,26 +2792,41 @@ export function AppProvider({
 
         return result;
       },
-      ownerDeleteShop: ({ shopId, confirmName }) => {
+      ownerDeleteShop: async ({ shopId, confirmName }) => {
         if (!session || session.role !== "super_admin") {
           return { ok: false, message: "Only the POS owner can delete stores." };
         }
 
+        const shopToDelete = state.shops.find((entry) => entry.id === shopId);
+        const ownerEmail = state.users.find((user) => user.role === "super_admin" && user.isActive)?.email;
         let result: { ok: boolean; message?: string } = {
           ok: false,
           message: "Unable to delete store."
         };
+
+        if (!shopToDelete) {
+          return { ok: false, message: "Store not found." };
+        }
+
+        if (confirmName.trim() !== shopToDelete.name) {
+          return { ok: false, message: "Type the exact store name before deleting." };
+        }
+
+        try {
+          const cloudResult = await deleteOwnerShopFromCloud({ shopId }, ownerEmail);
+
+          if (!cloudResult.ok) {
+            return { ok: false, message: cloudResult.message ?? "Unable to delete store cloud data." };
+          }
+        } catch {
+          return { ok: false, message: "Unable to reach cloud delete service. Store was not removed." };
+        }
 
         setState((current) => {
           const shop = current.shops.find((entry) => entry.id === shopId);
 
           if (!shop) {
             result = { ok: false, message: "Store not found." };
-            return current;
-          }
-
-          if (confirmName.trim() !== shop.name) {
-            result = { ok: false, message: "Type the exact store name before deleting." };
             return current;
           }
 
@@ -2803,7 +2841,7 @@ export function AppProvider({
           const { [shopId]: _removedSettings, ...settingsByShop } = current.settingsByShop;
           const deletedAt = new Date().toISOString();
 
-          result = { ok: true, message: `${shop.name} and all local store data were deleted.` };
+          result = { ok: true, message: `${shopToDelete.name} and all cloud/local store data were deleted.` };
 
           const nextState = {
             ...current,
@@ -2848,7 +2886,7 @@ export function AppProvider({
                 actorId: session.id,
                 action: "owner.shop.delete",
                 targetId: shopId,
-                detail: `Deleted ${shop.name} and all local store data.`,
+                detail: `Deleted ${shop.name} and all cloud/local store data.`,
                 createdAt: deletedAt
               },
               ...current.auditLogs.filter((entry) => entry.shopId !== shopId)
