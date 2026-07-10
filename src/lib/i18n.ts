@@ -25,6 +25,7 @@ const englishTranslations = {
   "common.shopWorkspace": "Shop workspace",
   "common.ownerWorkspace": "Owner workspace",
   "common.open": "Open",
+  "common.add": "Add",
   "common.currentSection": "Current section",
   "common.language": "Language",
   "language.arabic": "Arabic",

@@ -15,7 +15,6 @@ import {
   Plus,
   Search,
   ShoppingBag,
-  Star,
   Trash2
 } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
@@ -1285,9 +1284,6 @@ export function BillingWorkspace() {
                 <h2 className="font-display text-[1.5rem] font-semibold tracking-[-0.04em] text-slate-950">
                   {selectedQuickCategory ? selectedQuickCategory.name : t("billing.quickCategoriesTitle")}
                 </h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  {selectedQuickCategory ? t("billing.quickProductsDesc") : t("billing.quickCategoriesDesc")}
-                </p>
               </div>
               {selectedQuickCategory ? (
                 <button
@@ -1308,11 +1304,11 @@ export function BillingWorkspace() {
                 {quickCategories.map((category) => (
                   <button
                     key={category.id}
-                    className="group overflow-hidden rounded-[26px] border border-slate-200 bg-white text-left shadow-[0_14px_34px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_18px_40px_rgba(15,23,42,0.1)]"
+                    className="group overflow-hidden rounded-[28px] border border-slate-200 bg-white p-2 text-left shadow-[0_14px_34px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_18px_40px_rgba(15,23,42,0.1)]"
                     onClick={() => setSelectedQuickCategoryId(category.id)}
                     type="button"
                   >
-                    <div className="relative h-[7.5rem] overflow-hidden bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.22),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)]">
+                    <div className="relative h-[8.75rem] overflow-hidden rounded-[22px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.22),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)]">
                       {category.imageUrl ? (
                         <img src={category.imageUrl} alt={category.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
                       ) : (
@@ -1322,14 +1318,9 @@ export function BillingWorkspace() {
                           </span>
                         </div>
                       )}
-                      <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-slate-950/55 to-transparent" />
-                      <span className="absolute bottom-3 left-3 rounded-full bg-white/92 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-950 shadow-sm">
-                        {t("billing.quickCategoryItems", { count: category.products.length })}
-                      </span>
                     </div>
-                    <div className="p-4">
-                      <p className="line-clamp-1 text-base font-semibold text-slate-950">{category.name}</p>
-                      <p className="mt-1 text-xs leading-5 text-slate-500">{t("billing.quickProductsDesc")}</p>
+                    <div className="px-2 pb-2 pt-3">
+                      <p className="line-clamp-1 text-center text-base font-semibold text-slate-950">{category.name}</p>
                     </div>
                   </button>
                 ))}
@@ -1365,7 +1356,7 @@ export function BillingWorkspace() {
                           )}
                         </div>
 
-                        <div className="min-w-0">
+                        <div className="flex min-w-0 flex-col justify-between">
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
                               <p className="line-clamp-2 text-sm font-semibold text-slate-950">
@@ -1382,15 +1373,15 @@ export function BillingWorkspace() {
                             ) : null}
                           </div>
 
-                          <div className="mt-3 flex items-end justify-between gap-3">
+                          <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
                             <p className="text-base font-semibold text-slate-950">
                               {formatCurrency(product.salePrice, currency, locale)}
                             </p>
 
                             {quantityInCart > 0 ? (
-                              <div className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 p-1">
+                              <div className="inline-flex h-9 w-[116px] items-center justify-between rounded-full border border-emerald-200 bg-emerald-50 px-1 shadow-inner shadow-emerald-100/60">
                                 <button
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-emerald-700"
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-emerald-700 transition hover:bg-white"
                                   onClick={() => {
                                     updateLineQuantity(product.id, quantityInCart - 1);
                                   }}
@@ -1398,11 +1389,11 @@ export function BillingWorkspace() {
                                 >
                                   <Minus className="h-4 w-4" />
                                 </button>
-                                <span className="min-w-[1.8rem] text-center text-sm font-semibold text-emerald-800">
+                                <span className="min-w-[1.8rem] text-center text-sm font-semibold text-emerald-900">
                                   {quantityInCart}
                                 </span>
                                 <button
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-emerald-700 disabled:opacity-40"
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-emerald-700 transition hover:bg-white disabled:opacity-40"
                                   disabled={stockBlocked}
                                   onClick={() => addProductToCart(product)}
                                   type="button"
@@ -1412,13 +1403,13 @@ export function BillingWorkspace() {
                               </div>
                             ) : (
                               <Button
-                                className="h-9 rounded-[14px] bg-emerald-600 px-3 text-xs font-semibold uppercase tracking-[0.14em] text-white hover:bg-emerald-700"
+                                className="h-9 min-w-[88px] rounded-full bg-emerald-600 px-3 text-xs font-semibold text-white shadow-[0_10px_20px_rgba(5,150,105,0.2)] hover:bg-emerald-700"
                                 disabled={stockBlocked}
                                 onClick={() => addProductToCart(product)}
                               >
-                                <span className="inline-flex items-center gap-1.5">
-                                  <Star className="h-3.5 w-3.5" />
-                                  {stockBlocked ? t("products.reorderNeeded") : t("billing.addToCart")}
+                                <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                                  <Plus className="h-3.5 w-3.5" />
+                                  {stockBlocked ? t("products.reorderNeeded") : t("common.add")}
                                 </span>
                               </Button>
                             )}
