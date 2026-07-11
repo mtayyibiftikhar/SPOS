@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/card";
 import { SettingsFormShell } from "@/components/settings/settings-form-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
+import { deleteImageAssetFromCloud, resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
 
 export default function ShopSettingsPage() {
@@ -32,6 +32,15 @@ export default function ShopSettingsPage() {
     (productKey) => productKey.shopId === currentShopId && productKey.key.trim().length >= 30
   )?.key;
 
+  const deleteShopLogoAsset = (imageUrl: string) =>
+    deleteImageAssetFromCloud({
+      productKey: activeProductKey,
+      shopId: currentShopId ?? undefined,
+      url: imageUrl,
+      userEmail: session?.email,
+      userId: session?.id
+    });
+
   const handleLogoFileChange = async (file: File | null) => {
     if (!file) {
       return;
@@ -40,9 +49,12 @@ export default function ShopSettingsPage() {
     setLogoFeedback(null);
 
     try {
+      const previousLogoUrl = logoUrl.trim();
       const result = await resizeImageFileToDataUrl(file, {
+        maxBytes: 180 * 1024,
         maxWidth: 520,
         maxHeight: 260,
+        minQuality: 0.6,
         outputType: "image/jpeg",
         paddingRatio: 0.06,
         quality: 0.86,
@@ -59,6 +71,9 @@ export default function ShopSettingsPage() {
       });
 
       setLogoUrl(upload.url);
+      if (previousLogoUrl && previousLogoUrl !== upload.url) {
+        void deleteShopLogoAsset(previousLogoUrl).catch(() => undefined);
+      }
       setLogoFeedback({
         tone: "success",
         message: upload.storedInCloud
@@ -69,6 +84,30 @@ export default function ShopSettingsPage() {
       setLogoFeedback({
         tone: "error",
         message: error instanceof Error ? error.message : "Logo upload failed."
+      });
+    }
+  };
+
+  const removeShopLogo = async () => {
+    const currentLogoUrl = logoUrl.trim();
+
+    setLogoUrl("");
+
+    if (!currentLogoUrl) {
+      return;
+    }
+
+    try {
+      const result = await deleteShopLogoAsset(currentLogoUrl);
+
+      setLogoFeedback({
+        tone: "success",
+        message: result.deleted ? "Logo removed from Supabase Storage. Save changes to publish." : "Logo removed. Save changes to publish."
+      });
+    } catch (error) {
+      setLogoFeedback({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Logo was removed from the form, but cloud cleanup failed."
       });
     }
   };
@@ -191,6 +230,11 @@ export default function ShopSettingsPage() {
                 <p className="text-sm font-medium text-ink">{t("settings.logoPreview")}</p>
                 <p className="text-sm leading-6 text-slate-600">{t("settings.logoPreviewDesc")}</p>
               </div>
+              {logoUrl ? (
+                <Button type="button" variant="secondary" onClick={() => void removeShopLogo()}>
+                  Remove logo
+                </Button>
+              ) : null}
             </Card>
 
             <Card className="flex min-h-[220px] flex-col items-center justify-center gap-4 border-dashed p-5 text-center">

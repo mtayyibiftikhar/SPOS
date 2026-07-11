@@ -161,13 +161,6 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const ownerEmail = request.headers.get("x-owner-email")?.trim().toLowerCase();
-    const expectedOwnerEmail = process.env.POS_OWNER_EMAIL?.trim().toLowerCase();
-
-    if (expectedOwnerEmail && ownerEmail !== expectedOwnerEmail) {
-      return NextResponse.json({ ok: false, message: "Owner delete is not authorized." }, { status: 401 });
-    }
-
     const body = (await request.json()) as { path?: string; url?: string };
     const urlOrPath = clean(body.path ?? body.url ?? "");
     const storagePath = getPrivatePosAssetPathFromUrl(urlOrPath);
@@ -177,7 +170,27 @@ export async function DELETE(request: Request) {
     }
 
     if (!storagePath.startsWith("owner/login-hero/")) {
-      return NextResponse.json({ ok: false, message: "Only owner login hero images can be deleted here." }, { status: 400 });
+      if (!/^shops\/[^/]+\/(categories|products|shop-logo)\//.test(storagePath)) {
+        return NextResponse.json({ ok: false, message: "This image cannot be deleted from this endpoint." }, { status: 400 });
+      }
+
+      const [, storageShopId] = storagePath.split("/");
+      const authorization = await authorizeShopUpload(request, storageShopId);
+
+      if (!authorization.ok || authorization.shopId !== storageShopId) {
+        return NextResponse.json({ ok: false, message: "Shop image delete is not authorized." }, { status: 401 });
+      }
+
+      const deleted = await deletePrivatePosAsset(authorization.supabase, storagePath);
+
+      return NextResponse.json({ ok: true, ...deleted });
+    }
+
+    const ownerEmail = request.headers.get("x-owner-email")?.trim().toLowerCase();
+    const expectedOwnerEmail = process.env.POS_OWNER_EMAIL?.trim().toLowerCase();
+
+    if (expectedOwnerEmail && ownerEmail !== expectedOwnerEmail) {
+      return NextResponse.json({ ok: false, message: "Owner delete is not authorized." }, { status: 401 });
     }
 
     const deleted = await deletePrivatePosAsset(createSupabaseAdminClient(), storagePath);

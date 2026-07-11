@@ -238,8 +238,10 @@ export default function RegisterPage() {
 
     try {
       const result = await resizeImageFileToDataUrl(file, {
+        maxBytes: 180 * 1024,
         maxWidth: 520,
         maxHeight: 260,
+        minQuality: 0.6,
         outputType: "image/jpeg",
         paddingRatio: 0.06,
         quality: 0.86,

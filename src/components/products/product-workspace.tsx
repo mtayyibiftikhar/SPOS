@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Edit3, FolderPlus, ImageIcon, RefreshCw, Search, Trash2, UploadCloud, X } from "lucide-react";
 import { generateUniqueBarcode } from "@/lib/catalog";
 import { productKindLabelKeys } from "@/lib/i18n";
-import { resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
+import { deleteImageAssetFromCloud, resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
 import { usePosApp } from "@/components/providers/app-provider";
 import { ProductQuickTabGrid } from "@/components/products/product-quick-tab-grid";
 import { Badge } from "@/components/ui/badge";
@@ -331,15 +331,27 @@ export function ProductWorkspace() {
     }
   };
 
+  const deleteShopImageAsset = (imageUrl: string) =>
+    deleteImageAssetFromCloud({
+      productKey: activeProductKey,
+      shopId: currentShopId ?? undefined,
+      url: imageUrl,
+      userEmail: session?.email,
+      userId: session?.id
+    });
+
   const uploadProductImage = async (file?: File | null) => {
     if (!file) {
       return;
     }
 
     try {
+      const previousImageUrl = productForm.imageUrl.trim();
       const result = await resizeImageFileToDataUrl(file, {
+        maxBytes: 300 * 1024,
         maxWidth: 640,
         maxHeight: 460,
+        minQuality: 0.58,
         quality: 0.76,
         outputType: "image/jpeg"
       });
@@ -354,6 +366,9 @@ export function ProductWorkspace() {
       });
 
       setProductForm((current) => ({ ...current, imageUrl: upload.url }));
+      if (previousImageUrl && previousImageUrl !== upload.url) {
+        void deleteShopImageAsset(previousImageUrl).catch(() => undefined);
+      }
       setCatalogFeedback({
         tone: "success",
         message: upload.storedInCloud
@@ -368,15 +383,42 @@ export function ProductWorkspace() {
     }
   };
 
+  const removeProductImage = async () => {
+    const imageUrl = productForm.imageUrl.trim();
+
+    setProductForm((current) => ({ ...current, imageUrl: "" }));
+
+    if (!imageUrl) {
+      return;
+    }
+
+    try {
+      const result = await deleteShopImageAsset(imageUrl);
+
+      setCatalogFeedback({
+        tone: "success",
+        message: result.deleted ? "Product image removed from Supabase Storage." : "Product image removed."
+      });
+    } catch (error) {
+      setCatalogFeedback({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Product image was removed from the form, but cloud cleanup failed."
+      });
+    }
+  };
+
   const uploadCategoryImage = async (file?: File | null) => {
     if (!file) {
       return;
     }
 
     try {
+      const previousImageUrl = categoryForm.imageUrl.trim();
       const result = await resizeImageFileToDataUrl(file, {
+        maxBytes: 300 * 1024,
         maxWidth: 640,
         maxHeight: 460,
+        minQuality: 0.58,
         quality: 0.76,
         outputType: "image/jpeg"
       });
@@ -391,6 +433,9 @@ export function ProductWorkspace() {
       });
 
       setCategoryForm((current) => ({ ...current, imageUrl: upload.url }));
+      if (previousImageUrl && previousImageUrl !== upload.url) {
+        void deleteShopImageAsset(previousImageUrl).catch(() => undefined);
+      }
       setCategoryFeedback({
         tone: "success",
         message: upload.storedInCloud
@@ -401,6 +446,30 @@ export function ProductWorkspace() {
       setCategoryFeedback({
         tone: "error",
         message: error instanceof Error ? error.message : t("products.imageUploadError")
+      });
+    }
+  };
+
+  const removeCategoryImage = async () => {
+    const imageUrl = categoryForm.imageUrl.trim();
+
+    setCategoryForm((current) => ({ ...current, imageUrl: "" }));
+
+    if (!imageUrl) {
+      return;
+    }
+
+    try {
+      const result = await deleteShopImageAsset(imageUrl);
+
+      setCategoryFeedback({
+        tone: "success",
+        message: result.deleted ? "Category image removed from Supabase Storage." : "Category image removed."
+      });
+    } catch (error) {
+      setCategoryFeedback({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Category image was removed from the form, but cloud cleanup failed."
       });
     }
   };
@@ -716,7 +785,7 @@ export function ProductWorkspace() {
                           disabled={!isAdmin}
                           type="button"
                           variant="secondary"
-                          onClick={() => setProductForm((current) => ({ ...current, imageUrl: "" }))}
+                          onClick={() => void removeProductImage()}
                         >
                           <span className="inline-flex items-center gap-2">
                             <X className="h-4 w-4" />
@@ -972,7 +1041,7 @@ export function ProductWorkspace() {
                           disabled={!isAdmin}
                           type="button"
                           variant="secondary"
-                          onClick={() => setCategoryForm((current) => ({ ...current, imageUrl: "" }))}
+                          onClick={() => void removeCategoryImage()}
                         >
                           <span className="inline-flex items-center gap-2">
                             <X className="h-4 w-4" />

@@ -817,8 +817,10 @@ export default function OwnerPage() {
 
     try {
       const result = await resizeImageFileToDataUrl(file, {
+        maxBytes: 180 * 1024,
         maxWidth: 520,
         maxHeight: 260,
+        minQuality: 0.6,
         outputType: "image/jpeg",
         paddingRatio: 0.06,
         quality: 0.86,
@@ -856,8 +858,10 @@ export default function OwnerPage() {
 
     try {
       const result = await resizeImageFileToDataUrl(file, {
+        maxBytes: 760 * 1024,
         maxWidth: 1280,
         maxHeight: 720,
+        minQuality: 0.58,
         outputType: "image/jpeg",
         quality: 0.78
       });
@@ -931,8 +935,10 @@ export default function OwnerPage() {
 
       for (const file of imageFiles) {
         const result = await resizeImageFileToDataUrl(file, {
+          maxBytes: 760 * 1024,
           maxWidth: 1600,
           maxHeight: 1100,
+          minQuality: 0.58,
           outputType: "image/jpeg",
           quality: 0.8
         });

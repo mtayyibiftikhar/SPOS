@@ -1,6 +1,8 @@
 type ResizeImageOptions = {
+  maxBytes?: number;
   maxWidth: number;
   maxHeight: number;
+  minQuality?: number;
   paddingRatio?: number;
   quality?: number;
   outputType?: "image/jpeg" | "image/png" | "image/webp";
@@ -24,6 +26,13 @@ type UploadImageAssetResult = {
   storedInCloud: boolean;
   url: string;
 };
+
+function estimateDataUrlBytes(dataUrl: string) {
+  const base64 = dataUrl.split(",")[1] ?? "";
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
 
 export async function resizeImageFileToDataUrl(file: File, options: ResizeImageOptions) {
   if (!file.type.startsWith("image/")) {
@@ -99,32 +108,65 @@ export async function resizeImageFileToDataUrl(file: File, options: ResizeImageO
       }
     }
 
-    const scale = Math.min(1, options.maxWidth / cropWidth, options.maxHeight / cropHeight);
-    const width = Math.max(1, Math.round(cropWidth * scale));
-    const height = Math.max(1, Math.round(cropHeight * scale));
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
+    const outputType = options.outputType ?? "image/jpeg";
+    const initialScale = Math.min(1, options.maxWidth / cropWidth, options.maxHeight / cropHeight);
+    let width = Math.max(1, Math.round(cropWidth * initialScale));
+    let height = Math.max(1, Math.round(cropHeight * initialScale));
+    let quality = options.quality ?? 0.88;
+    const minQuality = options.minQuality ?? (outputType === "image/png" ? 1 : 0.56);
 
-    if (!context) {
-      throw new Error("Image processing is unavailable in this browser.");
+    const render = () => {
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+
+      if (!context) {
+        throw new Error("Image processing is unavailable in this browser.");
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+
+      if (outputType === "image/jpeg") {
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, width, height);
+      }
+
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+      context.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, width, height);
+
+      return canvas.toDataURL(outputType, quality);
+    };
+
+    let dataUrl = render();
+    let sizeBytes = estimateDataUrlBytes(dataUrl);
+    let attempts = 0;
+
+    while (options.maxBytes && sizeBytes > options.maxBytes && attempts < 14) {
+      attempts += 1;
+
+      if (outputType !== "image/png" && quality > minQuality) {
+        quality = Math.max(minQuality, Number((quality - 0.08).toFixed(2)));
+      } else {
+        width = Math.max(1, Math.round(width * 0.86));
+        height = Math.max(1, Math.round(height * 0.86));
+      }
+
+      dataUrl = render();
+      sizeBytes = estimateDataUrlBytes(dataUrl);
     }
 
-    canvas.width = width;
-    canvas.height = height;
-
-    if ((options.outputType ?? "image/jpeg") === "image/jpeg") {
-      context.fillStyle = "#ffffff";
-      context.fillRect(0, 0, width, height);
+    if (options.maxBytes && sizeBytes > options.maxBytes) {
+      throw new Error(`Image is still too large after optimization. Try a simpler image under ${Math.round(options.maxBytes / 1024)} KB.`);
     }
-
-    context.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, width, height);
 
     return {
-      dataUrl: canvas.toDataURL(options.outputType ?? "image/jpeg", options.quality ?? 0.88),
+      dataUrl,
       width,
       height,
       originalWidth: naturalWidth,
-      originalHeight: naturalHeight
+      originalHeight: naturalHeight,
+      sizeBytes
     };
   } finally {
     URL.revokeObjectURL(objectUrl);
@@ -214,13 +256,21 @@ export async function uploadImageAssetToCloud(input: UploadImageAssetInput): Pro
 
 export async function deleteImageAssetFromCloud(input: {
   ownerEmail?: string;
+  productKey?: string;
+  shopId?: string;
   url: string;
+  userEmail?: string;
+  userId?: string;
 }) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json"
   };
 
   if (input.ownerEmail) headers["x-owner-email"] = input.ownerEmail;
+  if (input.productKey) headers["x-product-key"] = input.productKey;
+  if (input.shopId) headers["x-shop-id"] = input.shopId;
+  if (input.userEmail) headers["x-user-email"] = input.userEmail;
+  if (input.userId) headers["x-user-id"] = input.userId;
 
   const response = await fetch("/api/uploads", {
     body: JSON.stringify({ url: input.url }),
