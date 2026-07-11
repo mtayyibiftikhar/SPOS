@@ -882,6 +882,17 @@ export default function OwnerPage() {
 
   const getLoginHeroImages = () => loginHeroImagesText.split("\n").map((entry) => entry.trim()).filter(Boolean);
 
+  const removeLoginHeroImage = (imageUrlToRemove: string) => {
+    setLoginHeroImagesText((current) =>
+      current
+        .split("\n")
+        .map((entry) => entry.trim())
+        .filter((imageUrl) => imageUrl && imageUrl !== imageUrlToRemove)
+        .join("\n")
+    );
+    setBrandingSavedAt(null);
+  };
+
   const loadLoginHeroImages = async (files?: FileList | File[]) => {
     const imageFiles = Array.from(files ?? []).filter((file) => file.type.startsWith("image/"));
 
@@ -1838,18 +1849,38 @@ export default function OwnerPage() {
             />
             {getLoginHeroImages().length > 0 ? (
               <div className="mt-4 rounded-[24px] border border-slate-200 bg-slate-50 p-3">
-                <div className="grid grid-cols-2 gap-2">
-                  {getLoginHeroImages().slice(0, 4).map((imageUrl, index) => (
-                    <img
-                      alt={`Login hero preview ${index + 1}`}
-                      className="aspect-video w-full rounded-2xl object-cover"
-                      key={`${imageUrl}-${index}`}
-                      src={imageUrl}
-                    />
-                  ))}
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Login picture rotation</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {getLoginHeroImages().length} picture{getLoginHeroImages().length === 1 ? "" : "s"} will rotate randomly.
+                    </p>
+                  </div>
+                  <Button onClick={() => { setLoginHeroImagesText(""); setBrandingSavedAt(null); }} size="sm" type="button" variant="secondary">
+                    Clear all
+                  </Button>
                 </div>
-                <div className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  {getLoginHeroImages().length} hero picture{getLoginHeroImages().length === 1 ? "" : "s"} in rotation
+                <div className="mt-3 grid max-h-80 grid-cols-1 gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
+                  {getLoginHeroImages().map((imageUrl, index) => (
+                    <div className="group overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-[0_14px_36px_rgba(15,23,42,0.08)]" key={`${imageUrl}-${index}`}>
+                      <div className="relative">
+                        <img
+                          alt={`Login hero preview ${index + 1}`}
+                          className="aspect-video w-full object-cover"
+                          src={imageUrl}
+                        />
+                        <span className="absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-700">
+                          Image {index + 1}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3 p-3">
+                        <p className="min-w-0 truncate text-xs text-slate-500">{imageUrl}</p>
+                        <Button onClick={() => removeLoginHeroImage(imageUrl)} size="sm" type="button" variant="danger">
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             ) : null}
