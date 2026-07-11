@@ -256,11 +256,13 @@ function buildActivationEmailHref(shop: Shop, key: string) {
 
 function SectionButton({
   active,
+  description,
   icon: Icon,
   label,
   onClick
 }: {
   active: boolean;
+  description: string;
   icon: LucideIcon;
   label: string;
   onClick: () => void;
@@ -268,16 +270,21 @@ function SectionButton({
   return (
     <button
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-2xl border px-3 py-2.5 text-left text-sm font-semibold transition hover:-translate-y-0.5",
-        active ? "border-slate-950 bg-slate-950 text-white shadow-[0_22px_44px_rgba(15,23,42,0.16)]" : "border-slate-200 bg-white hover:border-emerald-200"
+        "group flex w-full items-center gap-3 rounded-[22px] border px-3 py-3 text-left transition hover:-translate-y-0.5",
+        active
+          ? "border-white/10 bg-white text-slate-950 shadow-[0_20px_44px_rgba(0,0,0,0.24)]"
+          : "border-white/10 bg-white/6 text-white/78 hover:border-white/22 hover:bg-white/10"
       )}
       onClick={onClick}
       type="button"
     >
-      <span className={cn("inline-flex rounded-xl p-1.5", active ? "bg-white/15" : "bg-slate-50 text-slate-700")}>
+      <span className={cn("inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[17px]", active ? "bg-slate-950 text-white" : "bg-white/10 text-emerald-100")}>
         <Icon className="h-4 w-4" />
       </span>
-      <span>{label}</span>
+      <span className="min-w-0">
+        <span className={cn("block text-sm font-semibold", active ? "text-slate-950" : "text-white")}>{label}</span>
+        <span className={cn("mt-0.5 block truncate text-xs", active ? "text-slate-500" : "text-white/48")}>{description}</span>
+      </span>
     </button>
   );
 }
@@ -2480,43 +2487,54 @@ export default function OwnerPage() {
   );
 
   return (
-    <div className="space-y-4">
-      {message ? <div className="rounded-3xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-900">{message}</div> : null}
+    <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
+      <aside className="xl:sticky xl:top-4 xl:self-start">
+        <Card className="overflow-hidden border-slate-900/20 bg-slate-950 p-3 text-white shadow-[0_28px_70px_rgba(15,23,42,0.18)]">
+          <div className="rounded-[26px] bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.26),transparent_42%),linear-gradient(135deg,rgba(255,255,255,0.1),rgba(255,255,255,0.03))] p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-emerald-200">Owner menu</p>
+            <h2 className="mt-2 font-display text-2xl font-semibold text-white">Command center</h2>
+            <p className="mt-2 text-sm leading-5 text-white/58">Create shops, control licenses, branding, access, and audit from one rail.</p>
+          </div>
 
-      <Card className="p-2 sm:p-3">
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-9">
-          {ownerSections.map((section) => (
-            <SectionButton
-              active={activeSection === section.id}
-              icon={section.icon}
-              key={section.id}
-              label={section.label}
-              onClick={() => {
-                setActiveSection(section.id);
-                if (section.id === "stores") {
-                  setStoreDetailOpen(false);
-                }
-                if (section.id === "branding") {
-                  setBrandingView("menu");
-                }
-                if (section.id === "access") {
-                  setAccessDetailOpen(false);
-                }
-              }}
-            />
-          ))}
-        </div>
-      </Card>
+          <div className="mt-3 grid max-h-[calc(100dvh-310px)] gap-2 overflow-y-auto pr-1">
+            {ownerSections.map((section) => (
+              <SectionButton
+                active={activeSection === section.id}
+                description={section.description}
+                icon={section.icon}
+                key={section.id}
+                label={section.label}
+                onClick={() => {
+                  setActiveSection(section.id);
+                  if (section.id === "stores") {
+                    setStoreDetailOpen(false);
+                  }
+                  if (section.id === "branding") {
+                    setBrandingView("menu");
+                  }
+                  if (section.id === "access") {
+                    setAccessDetailOpen(false);
+                  }
+                }}
+              />
+            ))}
+          </div>
+        </Card>
+      </aside>
 
-      {activeSection === "overview" ? renderOverview() : null}
-      {activeSection === "create" ? renderCreateShop() : null}
-      {activeSection === "stores" ? renderStores() : null}
-      {activeSection === "keys" ? renderKeys() : null}
-      {activeSection === "billing" ? renderBilling() : null}
-      {activeSection === "reports" ? renderReports() : null}
-      {activeSection === "branding" ? renderBranding() : null}
-      {activeSection === "access" ? renderAccess() : null}
-      {activeSection === "audit" ? renderAudit() : null}
+      <section className="min-w-0 space-y-4">
+        {message ? <div className="rounded-3xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-900">{message}</div> : null}
+
+        {activeSection === "overview" ? renderOverview() : null}
+        {activeSection === "create" ? renderCreateShop() : null}
+        {activeSection === "stores" ? renderStores() : null}
+        {activeSection === "keys" ? renderKeys() : null}
+        {activeSection === "billing" ? renderBilling() : null}
+        {activeSection === "reports" ? renderReports() : null}
+        {activeSection === "branding" ? renderBranding() : null}
+        {activeSection === "access" ? renderAccess() : null}
+        {activeSection === "audit" ? renderAudit() : null}
+      </section>
     </div>
   );
 }

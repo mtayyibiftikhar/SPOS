@@ -9,38 +9,37 @@ import { Button } from "@/components/ui/button";
 export function OwnerShell({ children }: { children: React.ReactNode }) {
   const { state, logout, t } = usePosApp();
   const lockedShops = state.licenses.filter((license) => license.status === "locked").length;
+  const activeLicenses = state.licenses.filter((license) => license.status === "active").length;
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,#f3efe6_0%,#e9eef8_100%)]">
-      <div className="mx-auto max-w-[1500px] px-4 py-4 sm:px-6 lg:px-8">
-        <div className="overflow-hidden rounded-[34px] border border-white/80 bg-white/95 shadow-[0_28px_70px_rgba(15,23,42,0.12)]">
-          <div className="grid gap-0 lg:grid-cols-[1.1fr_1.5fr]">
-            <div className="relative overflow-hidden bg-[radial-gradient(circle_at_15%_20%,rgba(16,185,129,0.28),transparent_34%),linear-gradient(135deg,#020617_0%,#0f2a2a_55%,#111827_100%)] p-5 text-white">
-              <div className="relative z-10 flex items-center gap-4">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.14),transparent_34%),linear-gradient(180deg,#f6f0e5_0%,#e7edf7_46%,#eef4f2_100%)]">
+      <div className="mx-auto max-w-[1560px] px-4 py-4 sm:px-6 lg:px-8">
+        <div className="relative overflow-hidden rounded-[36px] border border-white/15 bg-slate-950 p-4 text-white shadow-[0_30px_90px_rgba(15,23,42,0.22)]">
+          <div className="pointer-events-none absolute -left-24 top-0 h-56 w-56 rounded-full bg-emerald-400/20 blur-3xl" />
+          <div className="pointer-events-none absolute right-0 top-0 h-72 w-72 rounded-full bg-amber-300/12 blur-3xl" />
+          <div className="relative grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+            <div className="flex min-w-0 items-center gap-4">
                 {state.brand.logoUrl ? (
                   <img
                     alt={state.brand.companyName}
-                    className="h-16 w-16 rounded-[22px] border border-white/20 bg-white object-cover p-1"
+                    className="h-16 w-16 rounded-[24px] border border-white/15 bg-white object-cover p-1 shadow-[0_18px_42px_rgba(0,0,0,0.22)]"
                     src={state.brand.logoUrl}
                   />
                 ) : (
-                  <span className="flex h-16 w-16 items-center justify-center rounded-[22px] bg-white/12 font-display text-xl font-semibold text-white ring-1 ring-white/18">
+                  <span className="flex h-16 w-16 items-center justify-center rounded-[24px] bg-white/10 font-display text-xl font-semibold text-white ring-1 ring-white/15">
                     {state.brand.posName.slice(0, 2).toUpperCase()}
                   </span>
                 )}
                 <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-emerald-200">{t("owner.controlLabel")}</p>
-                  <h1 className="mt-1 truncate font-display text-3xl font-semibold sm:text-4xl">{state.brand.posName}</h1>
-                  <p className="mt-1 truncate text-sm text-white/62">{state.brand.companyName}</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-emerald-200">{t("owner.controlLabel")}</p>
+                <h1 className="mt-1 truncate font-display text-3xl font-semibold sm:text-4xl">{state.brand.posName}</h1>
+                <p className="mt-1 truncate text-sm text-white/62">{state.brand.companyName || "POS company workspace"}</p>
                 </div>
               </div>
-              <div className="pointer-events-none absolute -right-16 -top-20 h-44 w-44 rounded-full bg-emerald-300/20 blur-3xl" />
-            </div>
 
-            <div className="p-4 lg:p-5">
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <LocaleSwitcher className="min-w-[170px]" showLabel={false} />
-                <Button asChild className="h-11 rounded-[18px] px-4" variant="secondary">
+            <div className="flex flex-wrap items-center justify-start gap-2 lg:justify-end">
+                <LocaleSwitcher className="min-w-[170px] bg-white text-slate-950" showLabel={false} />
+              <Button asChild className="h-11 rounded-[18px] bg-white text-slate-950 ring-0 hover:bg-emerald-50" variant="secondary">
                   <Link href="/dashboard">
                     <span className="inline-flex items-center gap-2">
                       <ArrowLeft className="h-4 w-4" />
@@ -48,28 +47,29 @@ export function OwnerShell({ children }: { children: React.ReactNode }) {
                     </span>
                   </Link>
                 </Button>
-                <Button className="h-11 rounded-[18px] px-4" variant="secondary" onClick={logout}>
+              <Button className="h-11 rounded-[18px] bg-white/10 px-4 text-white ring-1 ring-white/15 hover:bg-white/15" variant="secondary" onClick={logout}>
                   {t("common.signOut")}
                 </Button>
               </div>
+          </div>
 
-              <div className="mt-4 grid gap-3 md:grid-cols-3">
-                <div className="rounded-[24px] border border-slate-100 bg-slate-50 px-4 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{t("owner.totalShops")}</p>
-                  <p className="mt-2 font-display text-3xl font-semibold text-ink">{state.shops.length}</p>
-                </div>
-                <div className="rounded-[24px] border border-blue-100 bg-blue-50 px-4 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">{t("owner.activeLicenses")}</p>
-                  <p className="mt-2 font-display text-3xl font-semibold text-ink">
-                    {state.licenses.filter((license) => license.status === "active").length}
-                  </p>
-                </div>
-                <div className="rounded-[24px] border border-amber-100 bg-amber-50 px-4 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">Locked stores</p>
-                  <p className="mt-2 font-display text-3xl font-semibold text-ink">{lockedShops}</p>
+          <div className="relative mt-5 grid gap-3 md:grid-cols-3">
+            {[
+              { label: t("owner.totalShops"), value: state.shops.length, tone: "from-white/14 to-white/6" },
+              { label: t("owner.activeLicenses"), value: activeLicenses, tone: "from-emerald-300/22 to-emerald-300/5" },
+              { label: "Locked stores", value: lockedShops, tone: "from-amber-300/24 to-amber-300/5" }
+            ].map((metric) => (
+              <div
+                className={`rounded-[26px] border border-white/10 bg-gradient-to-br ${metric.tone} px-5 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]`}
+                key={metric.label}
+              >
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/58">{metric.label}</p>
+                <div className="mt-2 flex items-end justify-between gap-3">
+                  <p className="font-display text-4xl font-semibold text-white">{metric.value}</p>
+                  <span className="h-2 w-12 rounded-full bg-emerald-300/50" />
                 </div>
               </div>
-            </div>
+            ))}
           </div>
         </div>
 
