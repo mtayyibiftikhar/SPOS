@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { hashProductKey, stableUuid } from "@/lib/cloud-sync";
-import { uploadPrivatePosAsset } from "@/lib/supabase/storage-assets";
+import { deletePrivatePosAsset, getPrivatePosAssetPathFromUrl, uploadPrivatePosAsset } from "@/lib/supabase/storage-assets";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type UploadScope = "category" | "owner-ad" | "owner-login-hero" | "owner-logo" | "product" | "shop-logo";
@@ -154,6 +154,38 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { ok: false, message: error instanceof Error ? error.message : "Unable to upload image." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const ownerEmail = request.headers.get("x-owner-email")?.trim().toLowerCase();
+    const expectedOwnerEmail = process.env.POS_OWNER_EMAIL?.trim().toLowerCase();
+
+    if (expectedOwnerEmail && ownerEmail !== expectedOwnerEmail) {
+      return NextResponse.json({ ok: false, message: "Owner delete is not authorized." }, { status: 401 });
+    }
+
+    const body = (await request.json()) as { path?: string; url?: string };
+    const urlOrPath = clean(body.path ?? body.url ?? "");
+    const storagePath = getPrivatePosAssetPathFromUrl(urlOrPath);
+
+    if (!storagePath) {
+      return NextResponse.json({ ok: true, deleted: false, message: "External image removed from rotation only." });
+    }
+
+    if (!storagePath.startsWith("owner/login-hero/")) {
+      return NextResponse.json({ ok: false, message: "Only owner login hero images can be deleted here." }, { status: 400 });
+    }
+
+    const deleted = await deletePrivatePosAsset(createSupabaseAdminClient(), storagePath);
+
+    return NextResponse.json({ ok: true, ...deleted });
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, message: error instanceof Error ? error.message : "Unable to delete image." },
       { status: 500 }
     );
   }

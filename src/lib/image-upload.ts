@@ -211,3 +211,31 @@ export async function uploadImageAssetToCloud(input: UploadImageAssetInput): Pro
     };
   }
 }
+
+export async function deleteImageAssetFromCloud(input: {
+  ownerEmail?: string;
+  url: string;
+}) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json"
+  };
+
+  if (input.ownerEmail) headers["x-owner-email"] = input.ownerEmail;
+
+  const response = await fetch("/api/uploads", {
+    body: JSON.stringify({ url: input.url }),
+    headers,
+    method: "DELETE"
+  });
+  const result = (await response.json()) as {
+    deleted?: boolean;
+    message?: string;
+    ok: boolean;
+  };
+
+  if (!response.ok || !result.ok) {
+    throw new Error(result.message ?? "Unable to delete this image.");
+  }
+
+  return result;
+}

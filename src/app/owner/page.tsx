@@ -31,7 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { licenseStatusLabelKeys } from "@/lib/i18n";
-import { resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
+import { deleteImageAssetFromCloud, resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
 import {
   ownerClearShopDataScopeDescriptions,
   ownerClearShopDataScopeLabels,
@@ -882,7 +882,7 @@ export default function OwnerPage() {
 
   const getLoginHeroImages = () => loginHeroImagesText.split("\n").map((entry) => entry.trim()).filter(Boolean);
 
-  const removeLoginHeroImage = (imageUrlToRemove: string) => {
+  const removeLoginHeroImage = async (imageUrlToRemove: string) => {
     setLoginHeroImagesText((current) =>
       current
         .split("\n")
@@ -891,6 +891,25 @@ export default function OwnerPage() {
         .join("\n")
     );
     setBrandingSavedAt(null);
+
+    try {
+      const result = await deleteImageAssetFromCloud({
+        ownerEmail: ownerUser?.email,
+        url: imageUrlToRemove
+      });
+
+      setBrandingAssetMessage({
+        tone: "success",
+        message: result.deleted
+          ? "Login hero image removed from rotation and Supabase Storage. Save branding to publish the change."
+          : "External image removed from rotation. Save branding to publish the change."
+      });
+    } catch (error) {
+      setBrandingAssetMessage({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Image removed from rotation, but storage cleanup failed."
+      });
+    }
   };
 
   const loadLoginHeroImages = async (files?: FileList | File[]) => {
@@ -1875,7 +1894,7 @@ export default function OwnerPage() {
                       </div>
                       <div className="flex items-center justify-between gap-3 p-3">
                         <p className="min-w-0 truncate text-xs text-slate-500">{imageUrl}</p>
-                        <Button onClick={() => removeLoginHeroImage(imageUrl)} size="sm" type="button" variant="danger">
+                        <Button onClick={() => void removeLoginHeroImage(imageUrl)} size="sm" type="button" variant="danger">
                           Remove
                         </Button>
                       </div>

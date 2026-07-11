@@ -96,6 +96,48 @@ export async function uploadPrivatePosAsset(supabase: SupabaseClient, input: Upl
   };
 }
 
+export function getPrivatePosAssetPathFromUrl(urlOrPath: string) {
+  const value = urlOrPath.trim();
+
+  if (!value) {
+    return null;
+  }
+
+  if (!/^https?:\/\//i.test(value)) {
+    return value;
+  }
+
+  try {
+    const url = new URL(value);
+    const marker = `/storage/v1/object/sign/${POS_ASSETS_BUCKET}/`;
+    const markerIndex = url.pathname.indexOf(marker);
+
+    if (markerIndex === -1) {
+      return null;
+    }
+
+    return decodeURIComponent(url.pathname.slice(markerIndex + marker.length));
+  } catch {
+    return null;
+  }
+}
+
+export async function deletePrivatePosAsset(supabase: SupabaseClient, urlOrPath: string) {
+  const path = getPrivatePosAssetPathFromUrl(urlOrPath);
+
+  if (!path) {
+    return { deleted: false, path: null };
+  }
+
+  const { error } = await supabase.storage.from(POS_ASSETS_BUCKET).remove([path]);
+
+  if (error) {
+    throw error;
+  }
+
+  return { deleted: true, path };
+}
+
 export async function uploadDataUrlPosAsset(
   supabase: SupabaseClient,
   dataUrl: string | undefined,
