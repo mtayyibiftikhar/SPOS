@@ -12,7 +12,7 @@ type UploadImageAssetInput = {
   fileName?: string;
   ownerEmail?: string;
   productKey?: string;
-  scope: "category" | "owner-ad" | "owner-logo" | "product" | "shop-logo";
+  scope: "category" | "owner-ad" | "owner-login-hero" | "owner-logo" | "product" | "shop-logo";
   shopId?: string;
   userEmail?: string;
   userId?: string;

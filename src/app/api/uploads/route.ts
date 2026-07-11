@@ -3,13 +3,14 @@ import { hashProductKey, stableUuid } from "@/lib/cloud-sync";
 import { uploadPrivatePosAsset } from "@/lib/supabase/storage-assets";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-type UploadScope = "category" | "owner-ad" | "owner-logo" | "product" | "shop-logo";
+type UploadScope = "category" | "owner-ad" | "owner-login-hero" | "owner-logo" | "product" | "shop-logo";
 
 const shopScopes = new Set<UploadScope>(["category", "product", "shop-logo"]);
-const ownerScopes = new Set<UploadScope>(["owner-ad", "owner-logo"]);
+const ownerScopes = new Set<UploadScope>(["owner-ad", "owner-login-hero", "owner-logo"]);
 const uploadLimitsByScope: Record<UploadScope, number> = {
   category: 350 * 1024,
   "owner-ad": 900 * 1024,
+  "owner-login-hero": 900 * 1024,
   "owner-logo": 220 * 1024,
   product: 350 * 1024,
   "shop-logo": 220 * 1024
@@ -26,6 +27,7 @@ function getCandidateShopIds(shopId: string) {
 function folderForScope(scope: UploadScope, shopId?: string) {
   if (scope === "owner-logo") return "owner/branding";
   if (scope === "owner-ad") return "owner/login-ads";
+  if (scope === "owner-login-hero") return "owner/login-hero";
   if (scope === "shop-logo") return `shops/${shopId}/shop-logo`;
   if (scope === "category") return `shops/${shopId}/categories`;
   return `shops/${shopId}/products`;

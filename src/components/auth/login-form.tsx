@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, KeyRound, LockKeyhole, LogOut, ShieldCheck, Sparkles, Store, UserRound } from "lucide-react";
+import { KeyRound, LockKeyhole, LogOut, ShieldCheck, Sparkles, Store, UserRound } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
 import { LocaleSwitcher } from "@/components/shared/locale-switcher";
 import { Button } from "@/components/ui/button";
@@ -106,6 +106,7 @@ export function LoginForm() {
   const [activationMessage, setActivationMessage] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
   const [quoteIndex, setQuoteIndex] = useState(0);
+  const [heroImageIndex, setHeroImageIndex] = useState(0);
   const [storeLogoutOpen, setStoreLogoutOpen] = useState(false);
   const [storeLogoutPassword, setStoreLogoutPassword] = useState("");
   const [storeLogoutMessage, setStoreLogoutMessage] = useState<string | null>(null);
@@ -114,7 +115,8 @@ export function LoginForm() {
     setMode(getPortalMode());
     setBrowserInfo(getBrowserInfo());
     setQuoteIndex(Math.floor(Math.random() * Math.max(1, state.brand.loginQuotes.length)));
-  }, [state.brand.loginQuotes.length]);
+    setHeroImageIndex(Math.floor(Math.random() * Math.max(1, state.brand.loginHeroImages?.length ?? 0)));
+  }, [state.brand.loginHeroImages?.length, state.brand.loginQuotes.length]);
 
   const activatedProductKey = useMemo(() => {
     const activatedDevice = state.deviceActivations
@@ -160,6 +162,11 @@ export function LoginForm() {
   const shopLogo = activatedSettings?.pos.logoUrl;
   const visibleQuotes = state.brand.loginQuotes.filter((quote) => quote.trim());
   const visibleQuote = visibleQuotes[quoteIndex % Math.max(visibleQuotes.length, 1)] ?? "Fast billing. Clean records. Confident closing.";
+  const visibleHeroImages = (state.brand.loginHeroImages ?? []).filter((imageUrl) => imageUrl.trim());
+  const heroImage =
+    visibleHeroImages[heroImageIndex % Math.max(visibleHeroImages.length, 1)] ??
+    state.brand.logoUrl ??
+    shopLogo;
   const registeredShopUsers = useMemo(
     () =>
       activatedShop
@@ -378,28 +385,28 @@ export function LoginForm() {
   };
 
   return (
-    <div className="grid min-h-[calc(100vh-5rem)] gap-5 lg:grid-cols-[1fr_480px]">
-      <Card className="relative overflow-hidden border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_34%),linear-gradient(145deg,#ffffff_0%,#eef8f3_100%)] p-6 sm:p-8 lg:p-10">
+    <div className="grid gap-5 lg:h-[calc(100dvh-5rem)] lg:grid-cols-[minmax(0,1fr)_minmax(380px,460px)] lg:overflow-hidden">
+      <Card className="relative overflow-hidden border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_34%),linear-gradient(145deg,#ffffff_0%,#eef8f3_100%)] p-4 sm:p-6 lg:h-full lg:p-7">
         <div className="absolute right-[-120px] top-[-120px] h-80 w-80 rounded-full bg-emerald-200/35 blur-3xl" />
         <div className="absolute bottom-[-150px] left-[-120px] h-80 w-80 rounded-full bg-amber-200/35 blur-3xl" />
 
-        <div className="relative flex h-full min-h-[520px] flex-col justify-between gap-8">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-center gap-4">
+        <div className="relative flex h-full min-h-[540px] flex-col gap-5 lg:min-h-0">
+          <div className="flex shrink-0 items-start justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-4">
               {shopLogo ? (
-                <img alt={activatedShop?.name ?? state.brand.posName} className="h-16 w-16 rounded-[24px] object-cover shadow-[0_18px_40px_rgba(15,23,42,0.16)]" src={shopLogo} />
+                <img alt={activatedShop?.name ?? state.brand.posName} className="h-14 w-14 rounded-[22px] object-cover shadow-[0_18px_40px_rgba(15,23,42,0.16)]" src={shopLogo} />
               ) : state.brand.logoUrl ? (
-                <img alt={state.brand.companyName} className="h-16 w-16 rounded-[24px] object-cover shadow-[0_18px_40px_rgba(15,23,42,0.16)]" src={state.brand.logoUrl} />
+                <img alt={state.brand.companyName} className="h-14 w-14 rounded-[22px] object-cover shadow-[0_18px_40px_rgba(15,23,42,0.16)]" src={state.brand.logoUrl} />
               ) : (
-                <span className="grid h-16 w-16 place-items-center rounded-[24px] bg-slate-950 text-white shadow-[0_18px_40px_rgba(15,23,42,0.16)]">
+                <span className="grid h-14 w-14 place-items-center rounded-[22px] bg-slate-950 text-white shadow-[0_18px_40px_rgba(15,23,42,0.16)]">
                   <Store className="h-7 w-7" />
                 </span>
               )}
-              <div>
+              <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">
                   {isOwnerMode ? "Owner portal" : activatedShop ? "Store POS" : "POS activation"}
                 </p>
-                <h1 className="mt-2 max-w-xl font-display text-4xl font-semibold leading-tight text-slate-950 sm:text-5xl">
+                <h1 className="mt-1 truncate font-display text-3xl font-semibold leading-tight text-slate-950 sm:text-4xl">
                   {isOwnerMode ? state.brand.posName : activatedShop?.name ?? "Activate this store"}
                 </h1>
               </div>
@@ -407,50 +414,53 @@ export function LoginForm() {
             <LocaleSwitcher className="min-w-[150px]" showLabel={false} />
           </div>
 
-          <div className="max-w-2xl">
-            <div className="rounded-[32px] border border-white/80 bg-white/70 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Counter note</p>
-              <p className="mt-4 font-display text-3xl font-semibold leading-tight text-slate-950">"{visibleQuote}"</p>
-              <p className="mt-4 text-sm leading-6 text-slate-600">
+          <div className="flex min-h-0 flex-1 flex-col gap-4">
+            <div className="relative min-h-[280px] flex-1 overflow-hidden rounded-[36px] border border-white/80 bg-slate-950 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
+              {heroImage ? (
+                <img alt={state.brand.posName} className="h-full w-full object-cover" src={heroImage} />
+              ) : (
+                <div className="grid h-full min-h-[360px] place-items-center bg-[radial-gradient(circle_at_30%_20%,_rgba(16,185,129,0.42),_transparent_32%),radial-gradient(circle_at_80%_10%,_rgba(245,158,11,0.34),_transparent_26%),linear-gradient(135deg,#020617_0%,#064e3b_100%)]">
+                  <div className="text-center text-white">
+                    <Sparkles className="mx-auto h-14 w-14 text-emerald-100" />
+                    <p className="mt-5 text-xs font-semibold uppercase tracking-[0.28em] text-white/60">{state.brand.companyName}</p>
+                    <p className="mt-2 font-display text-5xl font-semibold">{state.brand.posName}</p>
+                  </div>
+                </div>
+              )}
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/85 via-slate-950/24 to-transparent p-6 text-white">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100/80">
+                  {activatedShop ? "Ready for checkout" : "Simple POS workspace"}
+                </p>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-white/80">
+                  {isOwnerMode
+                    ? "Owner controls stay separate from the client POS."
+                    : activatedShop
+                      ? `${activatedShop.address || "Store workspace"} | ${activatedShop.phone || "No phone saved"}`
+                      : "Activate once, then keep the counter fast and clean."}
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-[30px] border border-white/80 bg-white/75 p-5 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Counter quote</p>
+              <p className="mt-3 font-display text-2xl font-semibold leading-tight text-slate-950">"{visibleQuote}"</p>
+              <p className="mt-3 text-sm leading-6 text-slate-600">
                 {isOwnerMode
-                  ? "Manage stores, keys, licenses, branding, and support access from a separate owner workspace."
+                  ? "Manage stores, keys, licenses, branding, and access from a separate owner workspace."
                   : activatedShop
                     ? `${activatedShop.address || "Store workspace"} | ${activatedShop.phone || "No phone saved"}`
                     : "Enter the activation key once. After that, this page becomes the normal user sign-in screen for this store."}
               </p>
             </div>
-
-            {state.brand.loginAdEnabled ? (
-              <div className="mt-5 overflow-hidden rounded-[32px] border border-emerald-200 bg-slate-950 text-white shadow-[0_24px_70px_rgba(15,23,42,0.14)]">
-                {state.brand.loginAdImageUrl ? (
-                  <img alt={state.brand.loginAdTitle} className="h-52 w-full object-cover" src={state.brand.loginAdImageUrl} />
-                ) : (
-                  <div className="grid h-40 place-items-center bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.34),_transparent_38%),linear-gradient(135deg,#020617_0%,#064e3b_100%)]">
-                    <Sparkles className="h-10 w-10 text-emerald-100" />
-                  </div>
-                )}
-                <div className="p-6">
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-200">Owner message</p>
-                  <h2 className="mt-3 font-display text-2xl font-semibold">{state.brand.loginAdTitle}</h2>
-                  <p className="mt-3 text-sm leading-6 text-white/75">{state.brand.loginAdMessage}</p>
-                  {state.brand.loginAdCtaLabel && state.brand.loginAdCtaUrl ? (
-                    <a className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-emerald-950" href={state.brand.loginAdCtaUrl} rel="noreferrer" target="_blank">
-                      {state.brand.loginAdCtaLabel}
-                      <ArrowRight className="h-4 w-4" />
-                    </a>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
           </div>
 
-          <p className="relative text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+          <p className="relative shrink-0 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
             {state.brand.companyName} | {state.brand.supportPhone}
           </p>
         </div>
       </Card>
 
-      <Card className="flex flex-col justify-center border-slate-200 bg-white p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] sm:p-8 lg:p-10">
+      <Card className="flex flex-col justify-center border-slate-200 bg-white p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] sm:p-8 lg:h-full lg:p-8">
         {requiresFirstRunSetup ? (
           <div>
             <span className="inline-flex rounded-2xl bg-emerald-50 p-3 text-emerald-700">

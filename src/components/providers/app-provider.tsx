@@ -731,6 +731,7 @@ function normalizeStoredState(stored: DemoAppState, ownerBootstrap: OwnerBootstr
       ...(stored.brand ?? {}),
       receiptImprintEnabled: stored.brand?.receiptImprintEnabled ?? initialAppState.brand.receiptImprintEnabled,
       receiptImprintText: stored.brand?.receiptImprintText ?? initialAppState.brand.receiptImprintText,
+      loginHeroImages: stored.brand?.loginHeroImages ?? initialAppState.brand.loginHeroImages,
       loginQuotes: stored.brand?.loginQuotes ?? initialAppState.brand.loginQuotes,
       loginAdEnabled: stored.brand?.loginAdEnabled ?? initialAppState.brand.loginAdEnabled,
       loginAdTitle: stored.brand?.loginAdTitle ?? initialAppState.brand.loginAdTitle,

@@ -24,6 +24,7 @@ export const initialAppState: DemoAppState = {
     receiptImprintText: "Powered by Simple POS KSA",
     loadingTitle: "Preparing your POS workspace",
     loadingMessage: "Syncing shop, license, and register data...",
+    loginHeroImages: [],
     loginQuotes: [
       "Fast billing. Clean records. Confident closing.",
       "Sell simply today, understand the business tonight.",

@@ -367,6 +367,7 @@ export default function OwnerPage() {
   const [receiptImprintText, setReceiptImprintText] = useState(state.brand.receiptImprintText);
   const [loadingTitle, setLoadingTitle] = useState(state.brand.loadingTitle);
   const [loadingMessage, setLoadingMessage] = useState(state.brand.loadingMessage);
+  const [loginHeroImagesText, setLoginHeroImagesText] = useState((state.brand.loginHeroImages ?? []).join("\n"));
   const [loginQuotesText, setLoginQuotesText] = useState(state.brand.loginQuotes.join("\n"));
   const [loginAdEnabled, setLoginAdEnabled] = useState(state.brand.loginAdEnabled);
   const [loginAdTitle, setLoginAdTitle] = useState(state.brand.loginAdTitle);
@@ -837,13 +838,52 @@ export default function OwnerPage() {
       setBrandingAssetMessage({
         tone: "success",
         message: upload.storedInCloud
-          ? `Login ad saved securely in Supabase Storage at ${result.width}x${result.height}.`
-          : `Login ad optimized to ${result.width}x${result.height}. Cloud upload fallback was used.`
+          ? `Dashboard announcement image saved securely in Supabase Storage at ${result.width}x${result.height}.`
+          : `Dashboard announcement image optimized to ${result.width}x${result.height}. Cloud upload fallback was used.`
       });
     } catch (error) {
       setBrandingAssetMessage({
         tone: "error",
-        message: error instanceof Error ? error.message : "Login ad image upload failed."
+        message: error instanceof Error ? error.message : "Dashboard announcement image upload failed."
+      });
+    }
+  };
+
+  const loadLoginHeroImage = async (file?: File) => {
+    if (!file) {
+      return;
+    }
+
+    setBrandingAssetMessage(null);
+
+    try {
+      const result = await resizeImageFileToDataUrl(file, {
+        maxWidth: 1600,
+        maxHeight: 1100,
+        outputType: "image/jpeg",
+        quality: 0.8
+      });
+      const upload = await uploadImageAssetToCloud({
+        dataUrl: result.dataUrl,
+        fileName: file.name,
+        ownerEmail: ownerUser?.email,
+        scope: "owner-login-hero"
+      });
+
+      setLoginHeroImagesText((current) =>
+        [...current.split("\n").map((entry) => entry.trim()).filter(Boolean), upload.url].join("\n")
+      );
+      setBrandingSavedAt(null);
+      setBrandingAssetMessage({
+        tone: "success",
+        message: upload.storedInCloud
+          ? `Login hero picture added securely in Supabase Storage at ${result.width}x${result.height}.`
+          : `Login hero picture optimized to ${result.width}x${result.height}. Cloud upload fallback was used.`
+      });
+    } catch (error) {
+      setBrandingAssetMessage({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Login hero image upload failed."
       });
     }
   };
@@ -1660,6 +1700,10 @@ export default function OwnerPage() {
             receiptImprintText,
             loadingTitle,
             loadingMessage,
+            loginHeroImages: loginHeroImagesText
+              .split("\n")
+              .map((imageUrl) => imageUrl.trim())
+              .filter(Boolean),
             loginQuotes: loginQuotesText
               .split("\n")
               .map((quote) => quote.trim())
@@ -1730,11 +1774,34 @@ export default function OwnerPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+        <div className="grid gap-4 xl:grid-cols-3">
+          <div className="rounded-3xl border border-slate-200 bg-white p-5">
+            <p className="text-sm font-semibold text-slate-950">POS login hero pictures</p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Add one image URL per line. Login randomly chooses one big visual each time it opens.
+            </p>
+            <Input accept="image/*" className="mt-4 h-auto py-3" type="file" onChange={(event) => void loadLoginHeroImage(event.target.files?.[0])} />
+            <Textarea
+              className="mt-4 min-h-36"
+              placeholder="One hero image URL per line"
+              value={loginHeroImagesText}
+              onChange={(event) => setLoginHeroImagesText(event.target.value)}
+            />
+            {loginHeroImagesText.split("\n").map((entry) => entry.trim()).filter(Boolean)[0] ? (
+              <div className="mt-4 overflow-hidden rounded-[24px] border border-slate-200 bg-slate-50">
+                <img
+                  alt="Login hero preview"
+                  className="aspect-video w-full object-cover"
+                  src={loginHeroImagesText.split("\n").map((entry) => entry.trim()).filter(Boolean)[0]}
+                />
+                <div className="p-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">First picture preview</div>
+              </div>
+            ) : null}
+          </div>
           <div className="rounded-3xl border border-slate-200 bg-white p-5">
             <p className="text-sm font-semibold text-slate-950">POS login quotes</p>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Add one quote per line. The POS login screen shows the first available quote for now.
+              Add one quote per line. Login randomly chooses one quote each time it opens.
             </p>
             <Textarea
               className="mt-4 min-h-36"
@@ -1750,15 +1817,18 @@ export default function OwnerPage() {
                 onChange={(event) => setLoginAdEnabled(event.target.checked)}
                 type="checkbox"
               />
-              Show ad/announcement box on POS login
+              Show ad/announcement box on POS dashboard
             </label>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              This appears on the dashboard after sign-in. Login only shows the hero picture and quote.
+            </p>
             <div className="mt-4 grid gap-3">
               <Input placeholder="Ad title" value={loginAdTitle} onChange={(event) => setLoginAdTitle(event.target.value)} />
               <label className="space-y-2">
-                <span className="text-sm font-semibold text-slate-950">Login ad picture</span>
+                <span className="text-sm font-semibold text-slate-950">Dashboard announcement picture</span>
                 <Input accept="image/*" className="h-auto py-3" type="file" onChange={(event) => void loadLoginAdImage(event.target.files?.[0])} />
                 <span className="block text-xs leading-5 text-slate-600">
-                  Recommended ad size: 1600x900, 16:9 landscape. It is shown wide on the POS login screen.
+                  Recommended size: 1600x900, 16:9 landscape. It appears wide on the POS dashboard.
                 </span>
               </label>
               {loginAdImageUrl ? (

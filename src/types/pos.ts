@@ -538,6 +538,7 @@ export interface BrandProfile {
   receiptImprintText: string;
   loadingTitle: string;
   loadingMessage: string;
+  loginHeroImages?: string[];
   loginQuotes: string[];
   loginAdEnabled: boolean;
   loginAdTitle: string;
