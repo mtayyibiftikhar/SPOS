@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { hashProductKey, previewProductKey, stableUuid } from "@/lib/cloud-sync";
+import { saveBrandProfileSnapshot } from "@/lib/supabase/brand-assets";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { DemoAppState, ProductKeyStatus, User } from "@/types/pos";
 
 type SyncRequest = {
   state?: Partial<
-    Pick<DemoAppState, "categories" | "licenses" | "productKeys" | "settingsByShop" | "shops">
+    Pick<DemoAppState, "brand" | "categories" | "licenses" | "productKeys" | "settingsByShop" | "shops">
   > & {
     users?: Pick<User, "email" | "isActive" | "role">[];
   };
@@ -63,6 +64,10 @@ export async function POST(request: Request) {
 
   try {
     const supabase = createSupabaseAdminClient();
+
+    if (state.brand) {
+      await saveBrandProfileSnapshot(supabase, state.brand);
+    }
 
     if (shops.length > 0) {
       const shopRows = shops.map((shop) => {
@@ -201,6 +206,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({
+      brandSynced: Boolean(state.brand),
       ok: true,
       productKeysSynced: productKeyRows.length,
       shopsSynced: shops.length

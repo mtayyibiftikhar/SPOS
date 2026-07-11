@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { KeyRound, LockKeyhole, LogOut, ShieldCheck, Sparkles, Store, UserRound } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
@@ -22,7 +22,7 @@ type CloudActivationResponse = {
   cloudState?: Partial<
     Pick<
       DemoAppState,
-      "categories" | "deviceActivations" | "licenses" | "productKeys" | "settingsByShop" | "shops" | "users"
+      "brand" | "categories" | "deviceActivations" | "licenses" | "productKeys" | "settingsByShop" | "shops" | "users"
     >
   > | null;
   hasShopAdmin?: boolean;
@@ -110,6 +110,7 @@ export function LoginForm() {
   const [storeLogoutOpen, setStoreLogoutOpen] = useState(false);
   const [storeLogoutPassword, setStoreLogoutPassword] = useState("");
   const [storeLogoutMessage, setStoreLogoutMessage] = useState<string | null>(null);
+  const hasLoadedPublicBrand = useRef(false);
 
   useEffect(() => {
     setMode(getPortalMode());
@@ -117,6 +118,34 @@ export function LoginForm() {
     setQuoteIndex(Math.floor(Math.random() * Math.max(1, state.brand.loginQuotes.length)));
     setHeroImageIndex(Math.floor(Math.random() * Math.max(1, state.brand.loginHeroImages?.length ?? 0)));
   }, [state.brand.loginHeroImages?.length, state.brand.loginQuotes.length]);
+
+  useEffect(() => {
+    if (hasLoadedPublicBrand.current) {
+      return;
+    }
+
+    hasLoadedPublicBrand.current = true;
+    let active = true;
+
+    const loadPublicBrand = async () => {
+      try {
+        const response = await fetch("/api/brand", { cache: "no-store" });
+        const payload = (await response.json()) as { brand?: DemoAppState["brand"] | null; ok: boolean };
+
+        if (active && payload.ok && payload.brand) {
+          mergeCloudActivationState({ brand: payload.brand });
+        }
+      } catch {
+        // Branding is cosmetic; the login must keep working even if this fetch is offline.
+      }
+    };
+
+    void loadPublicBrand();
+
+    return () => {
+      active = false;
+    };
+  }, [mergeCloudActivationState]);
 
   const activatedProductKey = useMemo(() => {
     const activatedDevice = state.deviceActivations
@@ -386,7 +415,7 @@ export function LoginForm() {
 
   return (
     <div className="grid gap-5 lg:h-[calc(100dvh-5rem)] lg:grid-cols-[minmax(0,1fr)_minmax(380px,460px)] lg:overflow-hidden">
-      <Card className="relative overflow-hidden border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_34%),linear-gradient(145deg,#ffffff_0%,#eef8f3_100%)] p-4 sm:p-6 lg:h-full lg:p-7">
+      <Card className="relative order-2 overflow-hidden border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_34%),linear-gradient(145deg,#ffffff_0%,#eef8f3_100%)] p-4 sm:p-6 lg:order-1 lg:h-full lg:p-7">
         <div className="absolute right-[-120px] top-[-120px] h-80 w-80 rounded-full bg-emerald-200/35 blur-3xl" />
         <div className="absolute bottom-[-150px] left-[-120px] h-80 w-80 rounded-full bg-amber-200/35 blur-3xl" />
 
@@ -460,7 +489,7 @@ export function LoginForm() {
         </div>
       </Card>
 
-      <Card className="flex flex-col justify-center border-slate-200 bg-white p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] sm:p-8 lg:h-full lg:p-8">
+      <Card className="order-1 flex flex-col justify-center border-slate-200 bg-white p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] sm:p-8 lg:order-2 lg:h-full lg:p-8">
         {requiresFirstRunSetup ? (
           <div>
             <span className="inline-flex rounded-2xl bg-emerald-50 p-3 text-emerald-700">

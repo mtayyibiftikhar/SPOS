@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { loadBrandProfileSnapshot } from "@/lib/supabase/brand-assets";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 function isMissingOwnerBillingColumnsError(error: { code?: string; message?: string }) {
@@ -29,12 +30,14 @@ export async function GET(request: Request) {
       { data: productKeys, error: productKeysError },
       { data: profiles, error: profilesError },
       { data: devices, error: devicesError },
-      { data: licenses, error: licensesError }
+      { data: licenses, error: licensesError },
+      brand
     ] = await Promise.all([
       supabase.from("product_keys").select("id, shop_id, key_preview, status, allowed_devices, activated_at, expires_at"),
       supabase.from("profiles").select("id, shop_id, name, email, phone, role, is_active, last_login_at, created_at"),
       supabase.from("device_activations").select("id, shop_id, product_key_id, browser_info, activated_at, last_seen_at"),
-      supabase.from("licenses").select("id, shop_id, status, expires_at, last_payment_at, auto_lock_days_after_expiry, locked_at, lock_reason")
+      supabase.from("licenses").select("id, shop_id, status, expires_at, last_payment_at, auto_lock_days_after_expiry, locked_at, lock_reason"),
+      loadBrandProfileSnapshot(supabase).catch(() => null)
     ]);
 
     if (shops.error) throw shops.error;
@@ -46,6 +49,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ok: true,
       shops: shops.data ?? [],
+      brand,
       productKeys: productKeys ?? [],
       profiles: profiles ?? [],
       devices: devices ?? [],

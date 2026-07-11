@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { hashProductKey } from "@/lib/cloud-sync";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { loadBrandProfileSnapshot } from "@/lib/supabase/brand-assets";
 import type { DemoAppState } from "@/types/pos";
 
 const SNAPSHOT_BUCKET = "shop-cloud-snapshots";
@@ -214,10 +215,14 @@ export async function GET(request: Request) {
     if (error) {
       if (isMissingSnapshotTableError(error)) {
         const state = await loadSnapshotFromStorage(authorization.supabase, shopId);
+        const brand = await loadBrandProfileSnapshot(authorization.supabase).catch(() => null);
 
         return NextResponse.json({
           ok: true,
-          state,
+          state: {
+            ...((state ?? {}) as Partial<DemoAppState>),
+            ...(brand ? { brand } : {})
+          },
           storageFallback: true,
           updatedAt: null
         });
@@ -226,9 +231,14 @@ export async function GET(request: Request) {
       throw error;
     }
 
+    const brand = await loadBrandProfileSnapshot(authorization.supabase).catch(() => null);
+
     return NextResponse.json({
       ok: true,
-      state: (data?.state as Partial<DemoAppState> | null) ?? null,
+      state: {
+        ...(((data?.state as Partial<DemoAppState> | null) ?? {}) as Partial<DemoAppState>),
+        ...(brand ? { brand } : {})
+      },
       updatedAt: data?.updated_at ?? null
     });
   } catch (error) {

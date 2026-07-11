@@ -170,7 +170,7 @@ type RegisterInstalledShopInput = {
 type CloudActivationStatePatch = Partial<
   Pick<
     DemoAppState,
-    "categories" | "deviceActivations" | "licenses" | "productKeys" | "settingsByShop" | "shops" | "users"
+    "brand" | "categories" | "deviceActivations" | "licenses" | "productKeys" | "settingsByShop" | "shops" | "users"
   >
 >;
 
@@ -181,6 +181,7 @@ type ShopCloudStatePatch = Partial<
     | "auditLogs"
     | "billItems"
     | "bills"
+    | "brand"
     | "businessDays"
     | "cashMovements"
     | "categories"
@@ -905,6 +906,7 @@ function persistLocalOwnerStateSnapshot(state: DemoAppState) {
 
 function buildOwnerCloudSyncState(state: DemoAppState) {
   return {
+    brand: state.brand,
     categories: state.categories,
     licenses: state.licenses,
     productKeys: state.productKeys,
@@ -1059,6 +1061,10 @@ async function resetOwnerShopUserPasswordInCloud(
 function mergeCloudActivationStatePatch(current: DemoAppState, patch: CloudActivationStatePatch) {
   return {
     ...current,
+    brand: {
+      ...current.brand,
+      ...(patch.brand ?? {})
+    },
     shops: mergeRowsById(current.shops, patch.shops ?? []),
     licenses: mergeRowsById(current.licenses, patch.licenses ?? []),
     productKeys: mergeRowsById(current.productKeys, patch.productKeys ?? []),
@@ -1145,6 +1151,10 @@ function mergeShopCloudStatePatch(current: DemoAppState, patch: ShopCloudStatePa
 
   return {
     ...current,
+    brand: {
+      ...current.brand,
+      ...(patch.brand ?? {})
+    },
     shops: patch.shops ? [...current.shops.filter((shop) => shop.id !== shopId), ...patch.shops] : current.shops,
     licenses: replaceRowsForShop(current.licenses, patch.licenses, shopId),
     productKeys: replaceRowsForShop(current.productKeys, patch.productKeys, shopId),

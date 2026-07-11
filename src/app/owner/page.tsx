@@ -22,7 +22,7 @@ import {
   UsersRound,
   type LucideIcon
 } from "lucide-react";
-import type { BillingCycle, DeviceActivation, LicenseStatus, ProductKey, ProductKeyStatus, Shop, User } from "@/types/pos";
+import type { BillingCycle, BrandProfile, DeviceActivation, LicenseStatus, ProductKey, ProductKeyStatus, Shop, User } from "@/types/pos";
 import { usePosApp } from "@/components/providers/app-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,6 +59,7 @@ type StoreFilter = "all" | "active" | "trial" | "expiring" | "locked" | "expired
 type ReportRange = "today" | "week" | "month" | "year" | "custom";
 
 type OwnerCloudSummary = {
+  brand?: Partial<BrandProfile> | null;
   devices: Array<{
     activated_at: string | null;
     browser_info: string | null;
@@ -422,11 +423,41 @@ export default function OwnerPage() {
         }
 
         setCloudSummary({
+          brand: payload.brand,
           devices: payload.devices,
           productKeys: payload.productKeys,
           profiles: payload.profiles,
           shops: payload.shops
         });
+
+        if (payload.brand) {
+          const brand = {
+            ...state.brand,
+            ...payload.brand
+          };
+
+          setBrandProfile(brand);
+          setPosName(brand.posName);
+          setCompanyName(brand.companyName);
+          setCompanyLogoUrl(brand.logoUrl ?? "");
+          setCompanyAddress(brand.address ?? "");
+          setCompanyWebsite(brand.website ?? "");
+          setSupportWhatsapp(brand.supportWhatsapp);
+          setSupportEmail(brand.supportEmail);
+          setSupportPhone(brand.supportPhone);
+          setReceiptImprintEnabled(brand.receiptImprintEnabled);
+          setReceiptImprintText(brand.receiptImprintText);
+          setLoadingTitle(brand.loadingTitle);
+          setLoadingMessage(brand.loadingMessage);
+          setLoginHeroImagesText((brand.loginHeroImages ?? []).join("\n"));
+          setLoginQuotesText(brand.loginQuotes.join("\n"));
+          setLoginAdEnabled(brand.loginAdEnabled);
+          setLoginAdTitle(brand.loginAdTitle);
+          setLoginAdMessage(brand.loginAdMessage);
+          setLoginAdImageUrl(brand.loginAdImageUrl ?? "");
+          setLoginAdCtaLabel(brand.loginAdCtaLabel ?? "");
+          setLoginAdCtaUrl(brand.loginAdCtaUrl ?? "");
+        }
         setCloudSummaryStatus(`Cloud summary synced at ${new Date().toLocaleTimeString()}.`);
       } catch {
         if (active) {
@@ -849,36 +880,48 @@ export default function OwnerPage() {
     }
   };
 
-  const loadLoginHeroImage = async (file?: File) => {
-    if (!file) {
+  const getLoginHeroImages = () => loginHeroImagesText.split("\n").map((entry) => entry.trim()).filter(Boolean);
+
+  const loadLoginHeroImages = async (files?: FileList | File[]) => {
+    const imageFiles = Array.from(files ?? []).filter((file) => file.type.startsWith("image/"));
+
+    if (imageFiles.length === 0) {
       return;
     }
 
     setBrandingAssetMessage(null);
 
     try {
-      const result = await resizeImageFileToDataUrl(file, {
-        maxWidth: 1600,
-        maxHeight: 1100,
-        outputType: "image/jpeg",
-        quality: 0.8
-      });
-      const upload = await uploadImageAssetToCloud({
-        dataUrl: result.dataUrl,
-        fileName: file.name,
-        ownerEmail: ownerUser?.email,
-        scope: "owner-login-hero"
-      });
+      const uploadedUrls: string[] = [];
+      let lastSize = "";
 
-      setLoginHeroImagesText((current) =>
-        [...current.split("\n").map((entry) => entry.trim()).filter(Boolean), upload.url].join("\n")
-      );
+      for (const file of imageFiles) {
+        const result = await resizeImageFileToDataUrl(file, {
+          maxWidth: 1600,
+          maxHeight: 1100,
+          outputType: "image/jpeg",
+          quality: 0.8
+        });
+        const upload = await uploadImageAssetToCloud({
+          dataUrl: result.dataUrl,
+          fileName: file.name,
+          ownerEmail: ownerUser?.email,
+          scope: "owner-login-hero"
+        });
+
+        uploadedUrls.push(upload.url);
+        lastSize = `${result.width}x${result.height}`;
+      }
+
+      setLoginHeroImagesText((current) => {
+        const existing = current.split("\n").map((entry) => entry.trim()).filter(Boolean);
+
+        return Array.from(new Set([...existing, ...uploadedUrls])).join("\n");
+      });
       setBrandingSavedAt(null);
       setBrandingAssetMessage({
         tone: "success",
-        message: upload.storedInCloud
-          ? `Login hero picture added securely in Supabase Storage at ${result.width}x${result.height}.`
-          : `Login hero picture optimized to ${result.width}x${result.height}. Cloud upload fallback was used.`
+        message: `${uploadedUrls.length} login hero picture${uploadedUrls.length === 1 ? "" : "s"} added securely at ${lastSize}. Save branding to publish them to every POS login.`
       });
     } catch (error) {
       setBrandingAssetMessage({
@@ -1778,23 +1821,36 @@ export default function OwnerPage() {
           <div className="rounded-3xl border border-slate-200 bg-white p-5">
             <p className="text-sm font-semibold text-slate-950">POS login hero pictures</p>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Add one image URL per line. Login randomly chooses one big visual each time it opens.
+              Upload one or many pictures, or paste image URLs below. Login randomly chooses one visual each time it opens.
             </p>
-            <Input accept="image/*" className="mt-4 h-auto py-3" type="file" onChange={(event) => void loadLoginHeroImage(event.target.files?.[0])} />
+            <Input
+              accept="image/*"
+              className="mt-4 h-auto py-3"
+              multiple
+              type="file"
+              onChange={(event) => void loadLoginHeroImages(event.target.files ?? undefined)}
+            />
             <Textarea
               className="mt-4 min-h-36"
               placeholder="One hero image URL per line"
               value={loginHeroImagesText}
               onChange={(event) => setLoginHeroImagesText(event.target.value)}
             />
-            {loginHeroImagesText.split("\n").map((entry) => entry.trim()).filter(Boolean)[0] ? (
-              <div className="mt-4 overflow-hidden rounded-[24px] border border-slate-200 bg-slate-50">
-                <img
-                  alt="Login hero preview"
-                  className="aspect-video w-full object-cover"
-                  src={loginHeroImagesText.split("\n").map((entry) => entry.trim()).filter(Boolean)[0]}
-                />
-                <div className="p-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">First picture preview</div>
+            {getLoginHeroImages().length > 0 ? (
+              <div className="mt-4 rounded-[24px] border border-slate-200 bg-slate-50 p-3">
+                <div className="grid grid-cols-2 gap-2">
+                  {getLoginHeroImages().slice(0, 4).map((imageUrl, index) => (
+                    <img
+                      alt={`Login hero preview ${index + 1}`}
+                      className="aspect-video w-full rounded-2xl object-cover"
+                      key={`${imageUrl}-${index}`}
+                      src={imageUrl}
+                    />
+                  ))}
+                </div>
+                <div className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  {getLoginHeroImages().length} hero picture{getLoginHeroImages().length === 1 ? "" : "s"} in rotation
+                </div>
               </div>
             ) : null}
           </div>

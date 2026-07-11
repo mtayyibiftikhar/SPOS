@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { hashProductKey } from "@/lib/cloud-sync";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { loadBrandProfileSnapshot } from "@/lib/supabase/brand-assets";
 
 type ActivationRequest = {
   browserInfo?: string;
@@ -198,7 +199,8 @@ export async function POST(request: Request) {
       { data: settings },
       { data: categories },
       { data: activationRow },
-      { data: profiles }
+      { data: profiles },
+      brandProfile
     ] = await Promise.all([
       supabase
         .from("shops")
@@ -228,13 +230,15 @@ export async function POST(request: Request) {
       supabase
         .from("profiles")
         .select("id, shop_id, name, email, phone, role, is_active, last_login_at, created_at")
-        .eq("shop_id", productKeyRow.shop_id)
+        .eq("shop_id", productKeyRow.shop_id),
+      loadBrandProfileSnapshot(supabase).catch(() => null)
     ]);
 
     return NextResponse.json({
       ok: true,
       cloudState: shop
         ? {
+            brand: brandProfile ?? undefined,
             shops: [
               {
                 id: shop.id,
