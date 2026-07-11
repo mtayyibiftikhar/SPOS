@@ -8,7 +8,7 @@ export function PageHeader({
   eyebrow?: string;
 }) {
   return (
-    <header className="border-b border-slate-200/80 pb-4">
+    <header className="rounded-[28px] border border-white/80 bg-white/86 px-5 py-4 shadow-[0_18px_44px_rgba(15,23,42,0.05)]">
       {eyebrow ? (
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">{eyebrow}</p>
       ) : null}

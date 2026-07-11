@@ -1128,7 +1128,129 @@ export default function OwnerPage() {
     );
   };
 
-  const renderOverview = () => null;
+  const renderOverview = () => (
+    <div className="grid gap-5">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {[
+          {
+            icon: Building2,
+            label: "Stores live",
+            value: ownerMetrics.counts.all,
+            tone: "bg-slate-950 text-white"
+          },
+          {
+            icon: ShieldCheck,
+            label: "Active licenses",
+            value: ownerMetrics.counts.active,
+            tone: "bg-emerald-50 text-emerald-800"
+          },
+          {
+            icon: Bell,
+            label: "Expiring soon",
+            value: ownerMetrics.counts.expiring,
+            tone: "bg-amber-50 text-amber-800"
+          },
+          {
+            icon: Lock,
+            label: "Locked stores",
+            value: ownerMetrics.counts.locked,
+            tone: "bg-rose-50 text-rose-800"
+          }
+        ].map((item) => {
+          const Icon = item.icon;
+
+          return (
+            <Card className="overflow-hidden p-5" key={item.label}>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{item.label}</p>
+                  <p className="mt-3 font-display text-4xl font-semibold text-slate-950">{item.value}</p>
+                </div>
+                <span className={cn("inline-flex h-14 w-14 items-center justify-center rounded-[22px]", item.tone)}>
+                  <Icon className="h-6 w-6" />
+                </span>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+        <Card className="overflow-hidden">
+          <div className="bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.16),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fafc_100%)] p-6">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Next owner actions</p>
+                <h2 className="mt-2 font-display text-3xl font-semibold text-slate-950">Run the POS business from one clean flow</h2>
+              </div>
+              <Badge variant="success">{state.brand.posName}</Badge>
+            </div>
+            <div className="mt-6 grid gap-3 md:grid-cols-2">
+              {[
+                { label: "Create a shop", icon: UserRoundPlus, section: "create" as OwnerSectionId },
+                { label: "Control stores", icon: Building2, section: "stores" as OwnerSectionId },
+                { label: "Generate keys", icon: KeyRound, section: "keys" as OwnerSectionId },
+                { label: "Brand the POS", icon: Palette, section: "branding" as OwnerSectionId }
+              ].map((action) => {
+                const Icon = action.icon;
+
+                return (
+                  <button
+                    className="group rounded-[26px] border border-slate-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-slate-950 hover:shadow-[0_18px_38px_rgba(15,23,42,0.08)]"
+                    key={action.label}
+                    onClick={() => {
+                      setActiveSection(action.section);
+                      if (action.section === "branding") {
+                        setBrandingView("menu");
+                      }
+                    }}
+                    type="button"
+                  >
+                    <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-950 text-white">
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <p className="mt-4 font-display text-xl font-semibold text-slate-950">{action.label}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Latest stores</p>
+          <h2 className="mt-2 font-display text-2xl font-semibold text-slate-950">Quick status</h2>
+          <div className="mt-5 grid gap-3">
+            {ownerMetrics.rows.slice(0, 5).map((row) => (
+              <button
+                className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-slate-950 hover:bg-white"
+                key={row.shop.id}
+                onClick={() => {
+                  setSelectedShopId(row.shop.id);
+                  setStoreDetailOpen(true);
+                  setActiveSection("stores");
+                }}
+                type="button"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-slate-950">{row.shop.name}</p>
+                    <p className="mt-1 text-xs text-slate-500">{row.users.length} users | {row.devices.length} devices</p>
+                  </div>
+                  <Badge variant={licenseVariant(row.status)}>{row.status}</Badge>
+                </div>
+              </button>
+            ))}
+            {ownerMetrics.rows.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-600">
+                No stores yet. Create the first shop to issue an activation key.
+              </div>
+            ) : null}
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
 
   const renderCreateShop = () => (
     <Card className="p-6">

@@ -152,6 +152,7 @@ export function ProductWorkspace() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [productForm, setProductForm] = useState<ProductFormState>(() => buildEmptyProductForm());
   const [categoryForm, setCategoryForm] = useState<CategoryFormState>(emptyCategoryForm);
+  const [categoryMode, setCategoryMode] = useState<"list" | "create" | "edit">("list");
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
   const [productPage, setProductPage] = useState(1);
@@ -307,6 +308,7 @@ export function ProductWorkspace() {
         message: categoryForm.id ? t("products.categoryUpdateSuccess") : t("products.categorySaveSuccess")
       });
       setCategoryForm(emptyCategoryForm);
+      setCategoryMode("list");
     });
   };
 
@@ -328,6 +330,7 @@ export function ProductWorkspace() {
 
     if (categoryForm.id === categoryId) {
       setCategoryForm(emptyCategoryForm);
+      setCategoryMode("list");
     }
   };
 
@@ -606,7 +609,7 @@ export function ProductWorkspace() {
         >
           <div className={cn("space-y-6", activeView === "catalog" && "hidden")}>
             {activeView === "editor" ? (
-              <Card className="scroll-mt-24 p-4 xl:max-h-[calc(100dvh-230px)] xl:overflow-y-auto" id="products-editor">
+              <Card className="scroll-mt-24 p-5" id="products-editor">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-olive">{t("products.catalogEditor")}</p>
@@ -744,7 +747,7 @@ export function ProductWorkspace() {
                 />
               </div>
 
-              <div className="md:col-span-3 xl:col-span-3 rounded-[24px] border border-line bg-shell/70 p-3">
+              <div className="rounded-[24px] border border-line bg-shell/70 p-3 md:col-span-3 xl:col-span-2">
                 <div className="grid gap-3 md:grid-cols-[88px_minmax(0,1fr)] md:items-center">
                   <ImagePreview className="h-20 w-20 rounded-[22px]" imageUrl={productForm.imageUrl} label={t("products.productImage")} />
                   <div className="space-y-2">
@@ -950,216 +953,250 @@ export function ProductWorkspace() {
             ) : null}
 
             {activeView === "categories" ? (
-              <Card className="p-6 scroll-mt-24" id="products-categories">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-olive">{t("products.categoryManager")}</p>
-                <h2 className="mt-2 font-display text-2xl font-semibold text-ink">
-                  {categoryForm.id ? t("products.editCategory") : t("products.addCategory")}
-                </h2>
-              </div>
-              <FolderPlus className="h-5 w-5 text-ink" />
-            </div>
-
-            {categoryFeedback ? (
-              <div
-                className={`mt-4 rounded-2xl px-4 py-3 text-sm font-medium ${
-                  categoryFeedback.tone === "success"
-                    ? "border border-emerald-200 bg-emerald-50 text-emerald-800"
-                    : "border border-rose-200 bg-rose-50 text-rose-800"
-                }`}
-              >
-                {categoryFeedback.message}
-              </div>
-            ) : null}
-
-            <form className="mt-6 space-y-4" onSubmit={saveCategoryForm}>
-              <div>
-                <label className="mb-2 block text-sm font-medium text-ink">{t("products.categoryName")}</label>
-                <Input
-                  disabled={!isAdmin}
-                  value={categoryForm.name}
-                  onChange={(event) =>
-                    setCategoryForm((current) => ({
-                      ...current,
-                      name: event.target.value
-                    }))
-                  }
-                />
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-medium text-ink">{t("common.description")}</label>
-                <Textarea
-                  disabled={!isAdmin}
-                  value={categoryForm.description}
-                  onChange={(event) =>
-                    setCategoryForm((current) => ({
-                      ...current,
-                      description: event.target.value
-                    }))
-                  }
-                />
-              </div>
-              <div className="rounded-[30px] border border-line bg-shell/70 p-4">
-                <div className="grid gap-4 md:grid-cols-[128px_minmax(0,1fr)] md:items-center">
-                  <ImagePreview className="h-28 w-28" imageUrl={categoryForm.imageUrl} label={t("products.categoryImage")} />
-                  <div className="space-y-3">
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-ink">{t("products.categoryImage")}</label>
-                      <Input
-                        disabled={!isAdmin}
-                        placeholder={t("products.imageUrlPlaceholder")}
-                        value={categoryForm.imageUrl}
-                        onChange={(event) =>
-                          setCategoryForm((current) => ({
-                            ...current,
-                            imageUrl: event.target.value
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className="flex flex-wrap gap-3">
-                      <label className={cn(
-                        "inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-[16px] border border-line bg-white px-4 text-sm font-semibold text-ink transition hover:bg-slate-50",
-                        !isAdmin && "pointer-events-none opacity-60"
-                      )}>
-                        <UploadCloud className="h-4 w-4" />
-                        {t("products.uploadImage")}
-                        <input
-                          accept="image/*"
-                          className="hidden"
-                          disabled={!isAdmin}
-                          type="file"
-                          onChange={(event) => {
-                            void uploadCategoryImage(event.target.files?.[0]);
-                            event.currentTarget.value = "";
-                          }}
-                        />
-                      </label>
-                      {categoryForm.imageUrl ? (
-                        <Button
-                          disabled={!isAdmin}
-                          type="button"
-                          variant="secondary"
-                          onClick={() => void removeCategoryImage()}
-                        >
-                          <span className="inline-flex items-center gap-2">
-                            <X className="h-4 w-4" />
-                            {t("products.removeImage")}
-                          </span>
-                        </Button>
-                      ) : null}
-                    </div>
-                    <p className="text-xs leading-5 text-slate-500">{t("products.categoryImageHelp")}</p>
+              <Card className="scroll-mt-24 p-5" id="products-categories">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-olive">{t("products.categoryManager")}</p>
+                    <h2 className="mt-2 font-display text-2xl font-semibold text-ink">
+                      {categoryMode === "edit" ? t("products.editCategory") : categoryMode === "create" ? t("products.addCategory") : "Category list"}
+                    </h2>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Button
+                      type="button"
+                      variant={categoryMode === "list" ? "primary" : "secondary"}
+                      onClick={() => {
+                        setCategoryMode("list");
+                        setCategoryForm(emptyCategoryForm);
+                        setCategoryFeedback(null);
+                      }}
+                    >
+                      Category list
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={categoryMode === "create" ? "primary" : "secondary"}
+                      onClick={() => {
+                        setCategoryMode("create");
+                        setCategoryForm(emptyCategoryForm);
+                        setCategoryFeedback(null);
+                      }}
+                    >
+                      <FolderPlus className="mr-2 h-4 w-4" />
+                      {t("products.addCategory")}
+                    </Button>
                   </div>
                 </div>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <Button disabled={!isAdmin || !categoryForm.name.trim()} type="submit">
-                  {categoryForm.id ? t("products.updateCategory") : t("products.addCategoryAction")}
-                </Button>
-                <Button
-                  disabled={!isAdmin}
-                  type="button"
-                  variant="secondary"
-                  onClick={() => {
-                    setCategoryFeedback(null);
-                    setCategoryForm(emptyCategoryForm);
-                  }}
-                >
-                  {t("common.clearForm")}
-                </Button>
-              </div>
-            </form>
 
-            <div className="mt-6 space-y-3">
-              {paginatedCategories.map((category) => (
-                <div
-                  key={category.id}
-                  className="rounded-3xl border border-line bg-shell p-4 transition hover:shadow-card"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-3">
-                        <ImagePreview className="h-16 w-16 rounded-[20px]" imageUrl={category.imageUrl} label={category.name.slice(0, 2).toUpperCase()} />
-                        <div>
-                          <p className="text-sm font-semibold text-ink">{category.name}</p>
-                          <p className="mt-1 text-sm text-slate-600">{category.description || t("common.noDescriptionYet")}</p>
+                {categoryFeedback ? (
+                  <div
+                    className={`mt-4 rounded-2xl px-4 py-3 text-sm font-medium ${
+                      categoryFeedback.tone === "success"
+                        ? "border border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : "border border-rose-200 bg-rose-50 text-rose-800"
+                    }`}
+                  >
+                    {categoryFeedback.message}
+                  </div>
+                ) : null}
+
+                {categoryMode === "create" || categoryMode === "edit" ? (
+                  <form className="mt-5 grid gap-4 xl:grid-cols-[1fr_1.1fr]" onSubmit={saveCategoryForm}>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-ink">{t("products.categoryName")}</label>
+                        <Input
+                          disabled={!isAdmin}
+                          value={categoryForm.name}
+                          onChange={(event) =>
+                            setCategoryForm((current) => ({
+                              ...current,
+                              name: event.target.value
+                            }))
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-ink">{t("common.description")}</label>
+                        <Textarea
+                          className="min-h-[130px]"
+                          disabled={!isAdmin}
+                          value={categoryForm.description}
+                          onChange={(event) =>
+                            setCategoryForm((current) => ({
+                              ...current,
+                              description: event.target.value
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="rounded-[28px] border border-line bg-shell/70 p-4">
+                      <div className="grid gap-4 md:grid-cols-[112px_minmax(0,1fr)] md:items-center">
+                        <ImagePreview className="h-24 w-24" imageUrl={categoryForm.imageUrl} label={t("products.categoryImage")} />
+                        <div className="space-y-3">
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-ink">{t("products.categoryImage")}</label>
+                            <Input
+                              disabled={!isAdmin}
+                              placeholder={t("products.imageUrlPlaceholder")}
+                              value={categoryForm.imageUrl}
+                              onChange={(event) =>
+                                setCategoryForm((current) => ({
+                                  ...current,
+                                  imageUrl: event.target.value
+                                }))
+                              }
+                            />
+                          </div>
+                          <div className="flex flex-wrap gap-3">
+                            <label className={cn(
+                              "inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-[16px] border border-line bg-white px-4 text-sm font-semibold text-ink transition hover:bg-slate-50",
+                              !isAdmin && "pointer-events-none opacity-60"
+                            )}>
+                              <UploadCloud className="h-4 w-4" />
+                              {t("products.uploadImage")}
+                              <input
+                                accept="image/*"
+                                className="hidden"
+                                disabled={!isAdmin}
+                                type="file"
+                                onChange={(event) => {
+                                  void uploadCategoryImage(event.target.files?.[0]);
+                                  event.currentTarget.value = "";
+                                }}
+                              />
+                            </label>
+                            {categoryForm.imageUrl ? (
+                              <Button
+                                disabled={!isAdmin}
+                                type="button"
+                                variant="secondary"
+                                onClick={() => void removeCategoryImage()}
+                              >
+                                <span className="inline-flex items-center gap-2">
+                                  <X className="h-4 w-4" />
+                                  {t("products.removeImage")}
+                                </span>
+                              </Button>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                     </div>
-                    <Badge variant="neutral">
-                      {t("products.categoryItems", {
-                        count: shopProducts.filter((product) => product.categoryId === category.id).length
-                      })}
-                    </Badge>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-3">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => {
-                        setCategoryFeedback(null);
-                        setCategoryForm({
-                          id: category.id,
-                          name: category.name,
-                          description: category.description ?? "",
-                          imageUrl: category.imageUrl ?? ""
-                        });
-                      }}
-                    >
-                      <span className="inline-flex items-center gap-2">
-                        <Edit3 className="h-4 w-4" />
-                        {t("common.edit")}
-                      </span>
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      onClick={() => removeCategory(category.id)}
-                    >
-                      <span className="inline-flex items-center gap-2">
-                        <Trash2 className="h-4 w-4" />
-                        {t("products.removeCategory")}
-                      </span>
-                    </Button>
-                  </div>
-                </div>
-              ))}
 
-              {shopCategories.length > 0 ? (
-                <div className="flex flex-col gap-3 rounded-3xl border border-line bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="text-sm text-slate-600">
-                    {t("common.showingItemsRange", {
-                      from: String(categoryRangeStart),
-                      to: String(categoryRangeEnd),
-                      total: String(shopCategories.length)
-                    })}
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={currentCategoryPage <= 1}
-                      onClick={() => setCategoryPage((current) => Math.max(1, current - 1))}
-                    >
-                      {t("common.previous")}
-                    </Button>
-                    <span className="text-sm font-medium text-ink">
-                      {t("common.page")} {currentCategoryPage} {t("common.of")} {totalCategoryPages}
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={currentCategoryPage >= totalCategoryPages}
-                      onClick={() => setCategoryPage((current) => Math.min(totalCategoryPages, current + 1))}
-                    >
-                      {t("common.next")}
-                    </Button>
+                    <div className="flex flex-wrap gap-3 xl:col-span-2">
+                      <Button disabled={!isAdmin || !categoryForm.name.trim()} type="submit">
+                        {categoryForm.id ? t("products.updateCategory") : t("products.addCategoryAction")}
+                      </Button>
+                      <Button
+                        disabled={!isAdmin}
+                        type="button"
+                        variant="secondary"
+                        onClick={() => {
+                          setCategoryFeedback(null);
+                          setCategoryForm(emptyCategoryForm);
+                          setCategoryMode("list");
+                        }}
+                      >
+                        {t("common.cancel")}
+                      </Button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="mt-5 space-y-3">
+                    {paginatedCategories.map((category) => (
+                      <div
+                        key={category.id}
+                        className="rounded-3xl border border-line bg-shell p-4 transition hover:shadow-card"
+                      >
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex items-center gap-3">
+                            <ImagePreview className="h-14 w-14 rounded-[18px]" imageUrl={category.imageUrl} label={category.name.slice(0, 2).toUpperCase()} />
+                            <div>
+                              <p className="text-base font-semibold text-ink">{category.name}</p>
+                              <p className="mt-1 text-sm text-slate-600">{category.description || t("common.noDescriptionYet")}</p>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Badge variant="neutral">
+                              {t("products.categoryItems", {
+                                count: shopProducts.filter((product) => product.categoryId === category.id).length
+                              })}
+                            </Badge>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => {
+                                setCategoryFeedback(null);
+                                setCategoryForm({
+                                  id: category.id,
+                                  name: category.name,
+                                  description: category.description ?? "",
+                                  imageUrl: category.imageUrl ?? ""
+                                });
+                                setCategoryMode("edit");
+                              }}
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <Edit3 className="h-4 w-4" />
+                                {t("common.edit")}
+                              </span>
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              onClick={() => removeCategory(category.id)}
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <Trash2 className="h-4 w-4" />
+                                {t("products.removeCategory")}
+                              </span>
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+
+                    {shopCategories.length > 0 ? (
+                      <div className="flex flex-col gap-3 rounded-3xl border border-line bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-sm text-slate-600">
+                          {t("common.showingItemsRange", {
+                            from: String(categoryRangeStart),
+                            to: String(categoryRangeEnd),
+                            total: String(shopCategories.length)
+                          })}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={currentCategoryPage <= 1}
+                            onClick={() => setCategoryPage((current) => Math.max(1, current - 1))}
+                          >
+                            {t("common.previous")}
+                          </Button>
+                          <span className="text-sm font-medium text-ink">
+                            {t("common.page")} {currentCategoryPage} {t("common.of")} {totalCategoryPages}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={currentCategoryPage >= totalCategoryPages}
+                            onClick={() => setCategoryPage((current) => Math.min(totalCategoryPages, current + 1))}
+                          >
+                            {t("common.next")}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-3xl border border-dashed border-line bg-shell/70 p-6 text-sm text-slate-600">
+                        No categories yet. Use Create category to add the first one.
+                      </div>
+                    )}
                   </div>
-                </div>
-              ) : null}
-            </div>
+                )}
               </Card>
             ) : null}
           </div>
