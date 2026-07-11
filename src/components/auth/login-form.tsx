@@ -414,62 +414,61 @@ export function LoginForm() {
   };
 
   return (
-    <div className="grid gap-5 lg:h-[calc(100dvh-5rem)] lg:grid-cols-[minmax(0,1fr)_minmax(380px,460px)] lg:overflow-hidden">
-      <Card className="relative order-2 overflow-hidden border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(15,23,42,0.08),_transparent_34%),linear-gradient(145deg,#ffffff_0%,#f6f1e8_100%)] p-4 sm:p-6 lg:order-1 lg:h-full lg:p-7">
-        <div className="absolute right-[-120px] top-[-120px] h-80 w-80 rounded-full bg-slate-200/40 blur-3xl" />
-        <div className="absolute bottom-[-150px] left-[-120px] h-80 w-80 rounded-full bg-amber-200/35 blur-3xl" />
-
-        <div className="relative flex h-full min-h-[540px] flex-col gap-5 lg:min-h-0">
-          <div className="flex shrink-0 items-start justify-between gap-4">
-            <div className="flex min-w-0 items-center gap-4">
+    <div className="w-full">
+      <Card className="overflow-hidden rounded-[34px] border-0 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
+        <div className="grid min-h-[560px] lg:grid-cols-[0.95fr_1.05fr]">
+          <section className="order-2 flex flex-col justify-between gap-6 border-t border-slate-100 bg-[#fbfcfd] p-7 sm:p-10 lg:order-1 lg:border-r lg:border-t-0">
+            <div>
+              <div className="flex min-w-0 items-center gap-4">
               {shopLogo ? (
-                <img alt={activatedShop?.name ?? state.brand.posName} className="h-14 w-14 rounded-[22px] object-cover shadow-[0_18px_40px_rgba(15,23,42,0.16)]" src={shopLogo} />
+                <img alt={activatedShop?.name ?? state.brand.posName} className="h-14 w-14 rounded-[18px] border border-slate-100 object-cover shadow-[0_14px_34px_rgba(15,23,42,0.12)]" src={shopLogo} />
               ) : state.brand.logoUrl ? (
-                <img alt={state.brand.companyName} className="h-14 w-14 rounded-[22px] object-cover shadow-[0_18px_40px_rgba(15,23,42,0.16)]" src={state.brand.logoUrl} />
+                <img alt={state.brand.companyName} className="h-14 w-14 rounded-[18px] border border-slate-100 object-cover shadow-[0_14px_34px_rgba(15,23,42,0.12)]" src={state.brand.logoUrl} />
               ) : (
-                <span className="grid h-14 w-14 place-items-center rounded-[22px] bg-slate-950 text-white shadow-[0_18px_40px_rgba(15,23,42,0.16)]">
+                <span className="grid h-14 w-14 place-items-center rounded-[18px] bg-slate-950 text-white shadow-[0_14px_34px_rgba(15,23,42,0.12)]">
                   <Store className="h-7 w-7" />
                 </span>
               )}
               <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">
                   {isOwnerMode ? "Owner portal" : activatedShop ? "Store POS" : "POS activation"}
                 </p>
-                <h1 className="mt-1 truncate font-display text-3xl font-semibold leading-tight text-slate-950 sm:text-4xl">
+                <h1 className="mt-2 max-w-[420px] font-display text-4xl font-medium leading-tight text-slate-950 sm:text-5xl">
                   {isOwnerMode ? state.brand.posName : activatedShop?.name ?? "Activate this store"}
                 </h1>
               </div>
             </div>
-            <LocaleSwitcher className="min-w-[150px]" showLabel={false} />
-          </div>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-4">
-            <div className="relative min-h-[280px] flex-1 overflow-hidden rounded-[36px] border border-white/80 bg-slate-950 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
+              <div className="mt-8 overflow-hidden rounded-[28px] border border-slate-100 bg-slate-950 shadow-[0_22px_60px_rgba(15,23,42,0.14)]">
               {heroImage ? (
-                <img alt={state.brand.posName} className="h-full w-full object-cover" src={heroImage} />
+                  <img alt={state.brand.posName} className="aspect-[16/9] w-full object-cover" src={heroImage} />
               ) : (
-                <div className="h-full min-h-[360px] bg-[radial-gradient(circle_at_20%_20%,_rgba(245,158,11,0.24),_transparent_30%),radial-gradient(circle_at_80%_10%,_rgba(148,163,184,0.22),_transparent_28%),linear-gradient(135deg,#020617_0%,#111827_100%)]" />
+                  <div className="aspect-[16/9] w-full bg-[radial-gradient(circle_at_20%_20%,_rgba(245,158,11,0.24),_transparent_30%),radial-gradient(circle_at_80%_10%,_rgba(16,185,129,0.22),_transparent_28%),linear-gradient(135deg,#020617_0%,#111827_100%)]" />
               )}
+              </div>
+
+              <div className="mt-5 rounded-[28px] border border-slate-100 bg-white p-5 shadow-[0_16px_42px_rgba(15,23,42,0.05)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Counter quote</p>
+                <p className="mt-3 font-display text-2xl font-medium leading-tight text-slate-950">"{visibleQuote}"</p>
+              </div>
             </div>
 
-            <div className="rounded-[30px] border border-white/80 bg-white/82 p-5 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur">
-              <p className="font-display text-2xl font-semibold leading-tight text-slate-950">"{visibleQuote}"</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+              {state.brand.companyName} {state.brand.supportPhone ? `| ${state.brand.supportPhone}` : ""}
+            </p>
+          </section>
+
+          <section className="order-1 flex flex-col justify-between p-7 sm:p-10 lg:order-2">
+            <div className="flex justify-end">
+              <LocaleSwitcher className="min-w-[170px]" showLabel={false} />
             </div>
-          </div>
-
-          <p className="relative shrink-0 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-            {state.brand.companyName} | {state.brand.supportPhone}
-          </p>
-        </div>
-      </Card>
-
-      <Card className="order-1 flex flex-col justify-center border-slate-200 bg-white p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] sm:p-8 lg:order-2 lg:h-full lg:p-8">
+            <div className="mx-auto flex w-full max-w-[450px] flex-1 flex-col justify-center py-8">
         {requiresFirstRunSetup ? (
           <div>
             <span className="inline-flex rounded-2xl bg-emerald-50 p-3 text-emerald-700">
               <Store className="h-5 w-5" />
             </span>
-            <h2 className="mt-5 font-display text-3xl font-semibold text-slate-950">Create first admin</h2>
+            <h2 className="mt-5 font-display text-4xl font-medium text-slate-950">Create first admin</h2>
             <p className="mt-3 text-sm leading-6 text-slate-600">
               {activatedShop?.name} is already created and this device is activated. Add the first admin login once; after that this screen becomes the normal staff sign-in.
             </p>
@@ -487,26 +486,28 @@ export function LoginForm() {
             <span className="inline-flex rounded-2xl bg-emerald-50 p-3 text-emerald-700">
               <KeyRound className="h-5 w-5" />
             </span>
-            <h2 className="mt-5 font-display text-3xl font-semibold text-slate-950">Activate store POS</h2>
+            <h2 className="mt-5 font-display text-4xl font-medium text-slate-950">Activate store POS</h2>
             <p className="mt-3 text-sm leading-6 text-slate-600">
               This is shown only until the store is activated on this browser/device.
             </p>
             <div className="mt-7 space-y-4">
               <label className="block space-y-2">
                 <span className="text-sm font-semibold text-slate-950">Activation key</span>
-                <Input autoComplete="off" className="font-mono" placeholder="SPOS-KSA-..." value={activationKey} onChange={(event) => setActivationKey(event.target.value)} />
+                <Input autoComplete="off" className="h-14 rounded-[10px] border-slate-400 bg-white font-mono text-base focus:border-blue-600" placeholder="SPOS-KSA-..." value={activationKey} onChange={(event) => setActivationKey(event.target.value)} />
               </label>
               {activationMessage ? (
                 <p className={cn("rounded-2xl px-4 py-3 text-sm font-semibold", activationMessage.includes("accepted") || activationMessage.includes("activated") ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700")}>
                   {activationMessage}
                 </p>
               ) : null}
-              <Button className="w-full" disabled={isPending} onClick={activateKey}>
+              <div className="flex flex-col-reverse gap-3 pt-3 sm:flex-row sm:items-center sm:justify-end">
+                <Button asChild className="rounded-full px-5" variant="ghost">
+                  <Link href="/register">First-time setup</Link>
+                </Button>
+                <Button className="rounded-full px-7" disabled={isPending} onClick={activateKey}>
                 {isPending ? "Verifying..." : "Verify activation key"}
               </Button>
-              <Button asChild className="w-full" variant="secondary">
-                <Link href="/register">First-time store setup</Link>
-              </Button>
+              </div>
             </div>
           </div>
         ) : (
@@ -517,7 +518,7 @@ export function LoginForm() {
             <p className="mt-5 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">
               {isOwnerMode ? "Owner sign in" : "User sign in"}
             </p>
-            <h2 className="mt-2 font-display text-3xl font-semibold text-slate-950">
+            <h2 className="mt-2 font-display text-4xl font-medium text-slate-950">
               {isOwnerMode ? "Open owner portal" : "Open the POS"}
             </h2>
             <p className="mt-3 text-sm leading-6 text-slate-600">
@@ -530,12 +531,13 @@ export function LoginForm() {
               {isOwnerMode ? (
                 <label className="block space-y-2">
                   <span className="text-sm font-semibold text-slate-950">{t("login.email")}</span>
-                  <Input autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+                  <Input autoComplete="email" className="h-14 rounded-[10px] border-slate-400 bg-white text-base focus:border-blue-600" value={email} onChange={(event) => setEmail(event.target.value)} />
                 </label>
               ) : (
                 <label className="block space-y-2">
                   <span className="text-sm font-semibold text-slate-950">Registered user</span>
                   <Select
+                    className="h-14 rounded-[10px] border-slate-400 bg-white text-base focus:border-blue-600"
                     value={selectedUser?.id ?? ""}
                     onChange={(event) => {
                       const nextUser = registeredShopUsers.find((user) => user.id === event.target.value);
@@ -554,12 +556,13 @@ export function LoginForm() {
               )}
               <label className="block space-y-2">
                 <span className="text-sm font-semibold text-slate-950">{t("login.password")}</span>
-                <Input autoComplete="current-password" minLength={8} type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+                <Input autoComplete="current-password" className="h-14 rounded-[10px] border-slate-400 bg-white text-base focus:border-blue-600" minLength={8} type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
               </label>
 
               {error ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</p> : null}
 
-              <Button className="w-full" disabled={isPending} type="submit">
+              <div className="flex justify-end pt-3">
+                <Button className="rounded-full px-8" disabled={isPending} type="submit">
                 {isPending ? t("login.openingWorkspace") : (
                   <span className="inline-flex items-center gap-2">
                     <LockKeyhole className="h-4 w-4" />
@@ -567,6 +570,7 @@ export function LoginForm() {
                   </span>
                 )}
               </Button>
+              </div>
             </form>
 
             {!isOwnerMode && activatedShop ? (
@@ -627,6 +631,14 @@ export function LoginForm() {
             ) : null}
           </div>
         )}
+            </div>
+            <div className="flex flex-wrap justify-end gap-5 text-sm text-slate-500">
+              <span>Help</span>
+              <span>Privacy</span>
+              <span>Terms</span>
+            </div>
+          </section>
+        </div>
       </Card>
     </div>
   );
