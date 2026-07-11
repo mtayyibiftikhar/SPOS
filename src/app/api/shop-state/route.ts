@@ -18,6 +18,80 @@ function isMissingSnapshotTableError(error: { code?: string; message?: string })
   return error.code === "42P01" || error.code === "PGRST205" || /shop_cloud_snapshots/i.test(error.message ?? "");
 }
 
+function resolveEffectiveLicenseStatus(license: {
+  auto_lock_days_after_expiry?: number | null;
+  expires_at?: string | null;
+  status: "trial" | "active" | "expired" | "locked";
+}) {
+  if (license.status === "locked") {
+    return "locked";
+  }
+
+  if (!license.expires_at) {
+    return license.status;
+  }
+
+  const expiresAt = new Date(license.expires_at);
+
+  if (!Number.isFinite(expiresAt.getTime()) || Date.now() <= expiresAt.getTime()) {
+    return license.status;
+  }
+
+  const daysExpired = Math.floor((Date.now() - expiresAt.getTime()) / 86_400_000);
+  const autoLockDays = license.auto_lock_days_after_expiry ?? 0;
+
+  return daysExpired >= autoLockDays ? "locked" : "expired";
+}
+
+async function assertShopCanAccessCloudState(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  shopId: string
+) {
+  const [{ data: shop, error: shopError }, { data: license, error: licenseError }] = await Promise.all([
+    supabase.from("shops").select("id, license_status").eq("id", shopId).maybeSingle(),
+    supabase
+      .from("licenses")
+      .select("id, status, expires_at, auto_lock_days_after_expiry")
+      .eq("shop_id", shopId)
+      .maybeSingle()
+  ]);
+
+  if (shopError) {
+    throw shopError;
+  }
+
+  if (licenseError) {
+    throw licenseError;
+  }
+
+  if (!shop || !license) {
+    return false;
+  }
+
+  const licenseStatus = resolveEffectiveLicenseStatus(license);
+
+  if (licenseStatus === "locked") {
+    await supabase
+      .from("licenses")
+      .update({
+        locked_at: new Date().toISOString(),
+        lock_reason: "Automatically locked during shop cloud state check.",
+        status: "locked"
+      })
+      .eq("id", license.id);
+
+    return false;
+  }
+
+  if (licenseStatus === "expired") {
+    await supabase.from("licenses").update({ status: "expired" }).eq("id", license.id);
+
+    return false;
+  }
+
+  return true;
+}
+
 async function ensureSnapshotBucket(supabase: ReturnType<typeof createSupabaseAdminClient>) {
   const { error } = await supabase.storage.createBucket(SNAPSHOT_BUCKET, {
     public: false
@@ -66,6 +140,11 @@ async function authorizeShopStateAccess(request: Request, shopId: string) {
   const userId = clean(request.headers.get("x-user-id"));
   const userEmail = clean(request.headers.get("x-user-email")).toLowerCase();
   const productKey = clean(request.headers.get("x-product-key"));
+  const shopCanAccessCloudState = await assertShopCanAccessCloudState(supabase, shopId);
+
+  if (!shopCanAccessCloudState) {
+    return { ok: false, supabase, userId: null };
+  }
 
   if (userId) {
     let query = supabase

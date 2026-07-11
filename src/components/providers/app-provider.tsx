@@ -1205,6 +1205,57 @@ function mergeShopCloudStatePatch(current: DemoAppState, patch: ShopCloudStatePa
   } satisfies DemoAppState;
 }
 
+function removeShopFromLocalState(current: DemoAppState, shopId: string) {
+  const billIds = new Set(current.bills.filter((bill) => bill.shopId === shopId).map((bill) => bill.id));
+  const refundIds = new Set(current.refunds.filter((refund) => refund.shopId === shopId).map((refund) => refund.id));
+  const purchaseOrderIds = new Set(
+    current.purchaseOrders.filter((purchaseOrder) => purchaseOrder.shopId === shopId).map((purchaseOrder) => purchaseOrder.id)
+  );
+  const customerIds = new Set(current.customers.filter((customer) => customer.shopId === shopId).map((customer) => customer.id));
+  const { [shopId]: _removedReceiptSequence, ...receiptSequencesByShop } = current.receiptSequencesByShop;
+  const { [shopId]: _removedPaymentSequence, ...accountPaymentSequencesByShop } = current.accountPaymentSequencesByShop;
+  const { [shopId]: _removedSettings, ...settingsByShop } = current.settingsByShop;
+
+  return {
+    ...current,
+    session: current.session?.shopId === shopId ? null : current.session,
+    shops: current.shops.filter((entry) => entry.id !== shopId),
+    licenses: current.licenses.filter((entry) => entry.shopId !== shopId),
+    productKeys: current.productKeys.filter((entry) => entry.shopId !== shopId),
+    deviceActivations: current.deviceActivations.filter((entry) => entry.shopId !== shopId),
+    users: current.users.filter((entry) => entry.shopId !== shopId),
+    categories: current.categories.filter((entry) => entry.shopId !== shopId),
+    products: current.products.filter((entry) => entry.shopId !== shopId),
+    inventoryAdjustments: current.inventoryAdjustments.filter((entry) => entry.shopId !== shopId),
+    inventoryBatches: current.inventoryBatches.filter((entry) => entry.shopId !== shopId),
+    suppliers: current.suppliers.filter((entry) => entry.shopId !== shopId),
+    purchaseOrders: current.purchaseOrders.filter((entry) => entry.shopId !== shopId),
+    purchaseOrderItems: current.purchaseOrderItems.filter((entry) => !purchaseOrderIds.has(entry.purchaseOrderId)),
+    deletedProducts: current.deletedProducts.filter((entry) => entry.shopId !== shopId),
+    customers: current.customers.filter((entry) => entry.shopId !== shopId),
+    customerAccountPayments: current.customerAccountPayments.filter((entry) => !customerIds.has(entry.customerId)),
+    accountPaymentSequencesByShop,
+    bills: current.bills.filter((entry) => entry.shopId !== shopId),
+    billItems: current.billItems.filter((entry) => !billIds.has(entry.billId)),
+    refunds: current.refunds.filter((entry) => entry.shopId !== shopId),
+    refundItems: current.refundItems.filter((entry) => !refundIds.has(entry.refundId)),
+    payments: current.payments.filter((entry) => !billIds.has(entry.billId)),
+    ledgerEntries: current.ledgerEntries.filter((entry) => entry.shopId !== shopId),
+    businessDays: current.businessDays.filter((entry) => entry.shopId !== shopId),
+    shifts: current.shifts.filter((entry) => entry.shopId !== shopId),
+    dayCloses: current.dayCloses.filter((entry) => entry.shopId !== shopId),
+    cashMovements: current.cashMovements.filter((entry) => entry.shopId !== shopId),
+    expenseCategories: current.expenseCategories.filter((entry) => entry.shopId !== shopId),
+    expenses: current.expenses.filter((entry) => entry.shopId !== shopId),
+    receiptSequencesByShop,
+    settingsByShop,
+    announcements: current.announcements.filter((entry) => entry.targetShopId !== shopId),
+    supportTickets: current.supportTickets.filter((entry) => entry.shopId !== shopId),
+    supportSessions: current.supportSessions.filter((entry) => entry.shopId !== shopId),
+    auditLogs: current.auditLogs.filter((entry) => entry.shopId !== shopId)
+  } satisfies DemoAppState;
+}
+
 function buildShopCloudHeaders(state: DemoAppState, shopId: string, session: SessionUser | null) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -1490,6 +1541,10 @@ export function AppProvider({
         }));
 
         if (!payload.ok) {
+          if (!shouldUseSharedStateEndpoint() && [401, 403, 404].includes(response.status)) {
+            setState((current) => removeShopFromLocalState(current, cloudSyncShopId));
+          }
+
           return;
         }
 
@@ -1522,6 +1577,62 @@ export function AppProvider({
   }, [
     activatedCloudShopId,
     cloudLoadAttemptedShopIds,
+    cloudSyncShopId,
+    isHydrated,
+    session,
+    state.productKeys
+  ]);
+
+  useEffect(() => {
+    if (!isHydrated || !cloudSyncShopId || shouldUseSharedStateEndpoint()) {
+      return;
+    }
+
+    let active = true;
+
+    const validateShopCloudAccess = async () => {
+      try {
+        const response = await fetch(`${SHOP_CLOUD_STATE_ENDPOINT}?shopId=${encodeURIComponent(cloudSyncShopId)}`, {
+          cache: "no-store",
+          headers: buildShopCloudHeaders(state, cloudSyncShopId, session)
+        });
+        const payload = (await response.json()) as {
+          ok: boolean;
+          state?: ShopCloudStatePatch | null;
+        };
+
+        if (!active) {
+          return;
+        }
+
+        if (!payload.ok) {
+          if ([401, 403, 404].includes(response.status)) {
+            setState((current) => removeShopFromLocalState(current, cloudSyncShopId));
+          }
+
+          return;
+        }
+
+        if (payload.state) {
+          setState((current) => ({
+            ...mergeShopCloudStatePatch(current, payload.state ?? {}, cloudSyncShopId),
+            session: current.session
+          }));
+        }
+      } catch {
+        // Offline/network issues should not wipe a store; only explicit cloud denial should.
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      void validateShopCloudAccess();
+    }, 45_000);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [
     cloudSyncShopId,
     isHydrated,
     session,
