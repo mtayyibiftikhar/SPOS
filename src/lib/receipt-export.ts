@@ -1,6 +1,7 @@
 import type { Bill, BillItem, BrandProfile, POSSettings, ReceiptSettings, ReceiptSize, Shop, User } from "@/types/pos";
 import { hasNativeDownloadSupport, saveBlobWithNative } from "@/lib/native-bridge";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
+import { buildPublicReceiptUrl } from "@/lib/public-receipts";
 import { getReceiptItemNameLines } from "@/lib/receipt-language";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 
@@ -56,6 +57,7 @@ export type ReceiptPdfDocument = {
   logoUrl?: string;
   ownerLogoUrl?: string;
   ownerImprintLines?: string[];
+  qrCaption?: string;
   qrCodeUrl?: string;
   elements: PdfElement[];
 };
@@ -628,7 +630,8 @@ export function buildReceiptPdfDocument({
     logoUrl: posSettings?.logoUrl,
     ownerLogoUrl: ownerImprintLines.length > 0 ? brand?.logoUrl : undefined,
     ownerImprintLines,
-    qrCodeUrl: buildQrCodeImageUrl(posSettings?.receiptQrUrl, receiptSize === "a4" ? 156 : 116),
+    qrCaption: "Digital receipt",
+    qrCodeUrl: buildQrCodeImageUrl(buildPublicReceiptUrl(bill.publicToken), receiptSize === "a4" ? 156 : 116),
     elements
   } satisfies ReceiptPdfDocument;
 }
@@ -769,7 +772,7 @@ function createPdfContent(
   }
 
   if (assets.qrAsset) {
-    const caption = "Shop QR";
+    const caption = document.qrCaption ?? "Digital receipt";
     const captionWidth = estimateTextWidth(caption, 9);
     const captionX = margins.horizontal + Math.max(0, (contentWidth - captionWidth) / 2);
     renderPdfText(commands, caption, captionX, y - 2, 9, "F2");
@@ -1205,7 +1208,7 @@ async function createImageReceiptPdfBlob(document: ReceiptPdfDocument) {
       context,
       maxWidth: contentWidth,
       size: 9,
-      text: "Shop QR",
+      text: document.qrCaption ?? "Digital receipt",
       x: pageWidth / 2,
       y
     }) + 8;

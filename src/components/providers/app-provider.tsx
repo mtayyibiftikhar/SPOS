@@ -63,6 +63,7 @@ import {
 } from "@/lib/catalog";
 import { calculateBillRefundState } from "@/lib/refunds";
 import { clearShopDataScope, ownerClearShopDataScopeLabels, type OwnerClearShopDataScope } from "@/lib/shop-data-reset";
+import { createPublicReceiptToken } from "@/lib/public-receipts";
 import { createId, getDirection, hashSecret } from "@/lib/utils";
 
 const STORAGE_KEY = "simple-pos-demo-state";
@@ -151,7 +152,6 @@ type RegisterInstalledShopInput = {
   website?: string;
   currency: string;
   vatNumber?: string;
-  receiptQrUrl?: string;
   taxEnabled: boolean;
   taxName: string;
   taxRate: number;
@@ -791,10 +791,17 @@ function normalizeStoredState(stored: DemoAppState, ownerBootstrap: OwnerBootstr
       number: payment.number ?? `PAY-${String(index + 1).padStart(6, "0")}`,
       allocations: payment.allocations ?? []
     })),
-    bills: (stored.bills ?? []).map((bill) => ({
-      ...bill,
-      itemDiscountAmount: bill.itemDiscountAmount ?? 0
-    })),
+    bills: (stored.bills ?? []).reduce<DemoAppState["bills"]>((bills, bill) => {
+      const publicToken = bill.publicToken?.trim() || createPublicReceiptToken(bills.map((entry) => entry.publicToken));
+
+      bills.push({
+        ...bill,
+        itemDiscountAmount: bill.itemDiscountAmount ?? 0,
+        publicToken
+      });
+
+      return bills;
+    }, []),
     billItems: (stored.billItems ?? []).map((item) => ({
       ...item,
       discountType: item.discountType ?? "fixed",
@@ -2633,7 +2640,6 @@ export function AppProvider({
                   website: payload.website?.trim() || undefined,
                   currency: payload.currency.trim() || "SAR",
                   vatNumber: payload.vatNumber?.trim() || undefined,
-                  receiptQrUrl: payload.receiptQrUrl?.trim() || undefined,
                   autoDayRolloverEnabled: working.settingsByShop[shopId]?.pos.autoDayRolloverEnabled ?? false
                 },
                 printer: {
@@ -2827,7 +2833,6 @@ export function AppProvider({
                   email: email?.trim() || undefined,
                   currency: "SAR",
                   vatNumber: "",
-                  receiptQrUrl: "",
                   autoDayRolloverEnabled: false
                 },
                 printer: {
@@ -6125,9 +6130,11 @@ export function AppProvider({
           const createdAt = new Date().toISOString();
           const receiptSequence = current.receiptSequencesByShop[currentShopId] ?? 1;
           const billNumber = `REC-${String(receiptSequence).padStart(6, "0")}`;
+          const publicToken = createPublicReceiptToken(current.bills.map((entry) => entry.publicToken));
           const bill = {
             id: billId,
             shopId: currentShopId,
+            publicToken,
             customerId: customerRecord?.id,
             businessDate:
               activeBusinessDay.businessDate ??

@@ -15,7 +15,6 @@ type CompleteInstallationRequest = {
   phone?: string;
   productKey?: string;
   receiptFooterText?: string;
-  receiptQrUrl?: string;
   shopName?: string;
   taxEnabled?: boolean;
   taxMode?: string;
@@ -280,7 +279,7 @@ export async function POST(request: Request) {
             website: optionalClean(body.website),
             currency,
             vat_number: optionalClean(body.vatNumber),
-            receipt_qr_url: optionalClean(body.receiptQrUrl),
+            receipt_qr_url: null,
             printer_settings: {
               receiptSize: "80mm",
               autoPrintAfterSale: false

@@ -171,7 +171,7 @@ export async function POST(request: Request) {
         website: pos?.website ?? shop.website ?? null,
         currency: pos?.currency || shop.currency || "SAR",
         vat_number: pos?.vatNumber ?? null,
-        receipt_qr_url: pos?.receiptQrUrl ?? null,
+        receipt_qr_url: null,
         printer_settings: settings?.printer ?? {},
         receipt_settings: settings?.receipt ?? {},
         tax_settings: settings?.tax ?? {},

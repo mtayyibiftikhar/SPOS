@@ -38,7 +38,6 @@ type RegisterFormState = {
   website: string;
   currency: string;
   vatNumber: string;
-  receiptQrUrl: string;
   taxEnabled: boolean;
   taxName: string;
   taxRate: number;
@@ -140,7 +139,6 @@ export default function RegisterPage() {
     website: "",
     currency: "SAR",
     vatNumber: "",
-    receiptQrUrl: "",
     taxEnabled: true,
     taxName: "VAT",
     taxRate: 15,
@@ -197,7 +195,6 @@ export default function RegisterPage() {
       website: current.website || settings?.pos.website || shop.website || "",
       currency: current.currency || settings?.pos.currency || shop.currency || "SAR",
       vatNumber: current.vatNumber || settings?.pos.vatNumber || "",
-      receiptQrUrl: current.receiptQrUrl || settings?.pos.receiptQrUrl || "",
       taxEnabled: settings?.tax.enabled ?? current.taxEnabled,
       taxName: current.taxName || settings?.tax.name || "VAT",
       taxRate: current.taxRate || settings?.tax.rate || 15,
@@ -464,10 +461,6 @@ export default function RegisterPage() {
                   <label className="space-y-2">
                     <span className="text-sm font-semibold text-slate-950">VAT number</span>
                     <Input value={form.vatNumber} onChange={(event) => updateForm("vatNumber", event.target.value)} />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-sm font-semibold text-slate-950">Receipt QR URL</span>
-                    <Input placeholder="https://" value={form.receiptQrUrl} onChange={(event) => updateForm("receiptQrUrl", event.target.value)} />
                   </label>
                   <label className="space-y-2">
                     <span className="text-sm font-semibold text-slate-950">Tax name</span>

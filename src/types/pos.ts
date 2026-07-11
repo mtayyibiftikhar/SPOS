@@ -243,6 +243,7 @@ export interface CustomerAccountPayment {
 export interface Bill {
   id: string;
   shopId: string;
+  publicToken?: string;
   customerId?: string;
   businessDate?: string;
   shiftId?: string;

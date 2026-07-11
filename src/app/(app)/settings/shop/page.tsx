@@ -7,7 +7,6 @@ import { SettingsFormShell } from "@/components/settings/settings-form-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { deleteImageAssetFromCloud, resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
-import { buildQrCodeImageUrl } from "@/lib/qr-code";
 
 export default function ShopSettingsPage() {
   const { currentSettings, currentShopId, session, state, t, updateSettings } = usePosApp();
@@ -19,7 +18,6 @@ export default function ShopSettingsPage() {
   const [currency, setCurrency] = useState(currentSettings?.pos.currency ?? "SAR");
   const [logoUrl, setLogoUrl] = useState(currentSettings?.pos.logoUrl ?? "");
   const [vatNumber, setVatNumber] = useState(currentSettings?.pos.vatNumber ?? "");
-  const [receiptQrUrl, setReceiptQrUrl] = useState(currentSettings?.pos.receiptQrUrl ?? "");
   const [autoDayRolloverEnabled, setAutoDayRolloverEnabled] = useState(currentSettings?.pos.autoDayRolloverEnabled ?? false);
   const [logoFeedback, setLogoFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
 
@@ -27,7 +25,6 @@ export default function ShopSettingsPage() {
     return null;
   }
 
-  const receiptQrPreviewUrl = buildQrCodeImageUrl(receiptQrUrl, 180);
   const activeProductKey = state.productKeys.find(
     (productKey) => productKey.shopId === currentShopId && productKey.key.trim().length >= 30
   )?.key;
@@ -130,7 +127,6 @@ export default function ShopSettingsPage() {
             currency,
             logoUrl: logoUrl.trim() || undefined,
             vatNumber: vatNumber.trim() || undefined,
-            receiptQrUrl: receiptQrUrl.trim() || undefined,
             autoDayRolloverEnabled
           });
         }}
@@ -162,15 +158,6 @@ export default function ShopSettingsPage() {
         <div>
           <label className="mb-2 block text-sm font-medium text-ink">{t("settings.vatNumber")}</label>
           <Input value={vatNumber} onChange={(event) => setVatNumber(event.target.value)} />
-        </div>
-        <div>
-          <label className="mb-2 block text-sm font-medium text-ink">{t("settings.receiptQrUrl")}</label>
-          <Input
-            placeholder="https://"
-            value={receiptQrUrl}
-            onChange={(event) => setReceiptQrUrl(event.target.value)}
-          />
-          <p className="mt-2 text-sm leading-6 text-slate-600">{t("settings.receiptQrUrlDesc")}</p>
         </div>
         <div className="md:col-span-2">
           <Card className="border-emerald-200 bg-emerald-50/70 p-5">
@@ -237,14 +224,11 @@ export default function ShopSettingsPage() {
               ) : null}
             </Card>
 
-            <Card className="flex min-h-[220px] flex-col items-center justify-center gap-4 border-dashed p-5 text-center">
-              {receiptQrPreviewUrl ? (
-                <img src={receiptQrPreviewUrl} alt="Receipt QR preview" className="h-36 w-36 rounded-2xl border border-line bg-white p-2" />
-              ) : null}
+            <Card className="flex min-h-[176px] flex-col items-center justify-center gap-4 border-dashed p-5 text-center">
               <div className="space-y-2">
                 <p className="text-sm font-medium text-ink">{t("settings.receiptQrPreview")}</p>
                 <p className="text-sm leading-6 text-slate-600">
-                  {receiptQrPreviewUrl ? t("settings.receiptQrPreviewDesc") : t("settings.receiptQrEmpty")}
+                  {t("settings.receiptQrPreviewDesc")}
                 </p>
               </div>
             </Card>

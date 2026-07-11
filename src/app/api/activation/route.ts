@@ -214,7 +214,7 @@ export async function POST(request: Request) {
         .maybeSingle(),
       supabase
         .from("pos_settings")
-        .select("shop_id, shop_name, logo_url, address, phone, email, website, currency, vat_number, receipt_qr_url, printer_settings, receipt_settings, tax_settings")
+        .select("shop_id, shop_name, logo_url, address, phone, email, website, currency, vat_number, printer_settings, receipt_settings, tax_settings")
         .eq("shop_id", productKeyRow.shop_id)
         .maybeSingle(),
       supabase
@@ -324,7 +324,6 @@ export async function POST(request: Request) {
                   website: settings?.website ?? shop.website ?? undefined,
                   currency: settings?.currency ?? shop.currency ?? "SAR",
                   vatNumber: settings?.vat_number ?? undefined,
-                  receiptQrUrl: settings?.receipt_qr_url ?? undefined,
                   autoDayRolloverEnabled: false
                 },
                 printer: settings?.printer_settings ?? {

@@ -20,6 +20,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
+import { buildPublicReceiptUrl } from "@/lib/public-receipts";
 import { hasNativeDownloadSupport, printElementWithNative, saveBlobWithNative } from "@/lib/native-bridge";
 import { getReceiptItemNameLines, getReceiptItemNameText } from "@/lib/receipt-language";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
@@ -142,7 +143,8 @@ export function ReceiptView({ billId }: { billId: string }) {
     shop: posSettings?.shopName ?? shop?.name ?? t("brand.name")
   });
   const receiptBrand = posSettings?.shopName ?? shop?.name ?? t("brand.name");
-  const receiptQrImageUrl = buildQrCodeImageUrl(posSettings?.receiptQrUrl, 172);
+  const digitalReceiptUrl = buildPublicReceiptUrl(bill.publicToken);
+  const receiptQrImageUrl = buildQrCodeImageUrl(digitalReceiptUrl, 172);
   const receiptInitials =
     receiptBrand
       .split(/\s+/)
@@ -187,7 +189,8 @@ export function ReceiptView({ billId }: { billId: string }) {
       `${bill.taxName ?? t("common.tax")}: ${formatCurrency(bill.taxAmount, shop?.currency ?? "SAR", locale)}`,
       `${t("common.total")}: ${formatCurrency(bill.total, shop?.currency ?? "SAR", locale)}`,
       `${t("common.paidAmount")}: ${formatCurrency(bill.paidAmount, shop?.currency ?? "SAR", locale)}`,
-      `${t("common.dueAmount")}: ${formatCurrency(bill.dueAmount, shop?.currency ?? "SAR", locale)}`
+      `${t("common.dueAmount")}: ${formatCurrency(bill.dueAmount, shop?.currency ?? "SAR", locale)}`,
+      ...(digitalReceiptUrl ? ["", `${t("receipt.digitalReceipt")}: ${digitalReceiptUrl}`] : [])
     ].join("\n");
   };
   const emailSubject = t("receipt.emailSubject", {
@@ -595,6 +598,16 @@ export function ReceiptView({ billId }: { billId: string }) {
                       className="mx-auto mt-3 h-28 w-28 rounded-2xl border border-line bg-white p-1.5"
                     />
                     <p className="mt-3 text-xs leading-5 text-slate-500">{t("receipt.qrDesc")}</p>
+                    {digitalReceiptUrl ? (
+                      <a
+                        className="mt-2 block truncate text-xs font-semibold text-emerald-700"
+                        href={digitalReceiptUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        {t("receipt.openDigitalReceipt")}
+                      </a>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
