@@ -266,13 +266,13 @@ function SectionButton({
   return (
     <button
       className={cn(
-        "inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition hover:-translate-y-0.5",
+        "inline-flex items-center justify-center gap-2 rounded-2xl border px-3 py-2.5 text-left text-sm font-semibold transition hover:-translate-y-0.5",
         active ? "border-slate-950 bg-slate-950 text-white shadow-[0_22px_44px_rgba(15,23,42,0.16)]" : "border-slate-200 bg-white hover:border-emerald-200"
       )}
       onClick={onClick}
       type="button"
     >
-      <span className={cn("inline-flex rounded-xl p-2", active ? "bg-white/15" : "bg-slate-50 text-slate-700")}>
+      <span className={cn("inline-flex rounded-xl p-1.5", active ? "bg-white/15" : "bg-slate-50 text-slate-700")}>
         <Icon className="h-4 w-4" />
       </span>
       <span>{label}</span>
@@ -2082,21 +2082,10 @@ export default function OwnerPage() {
   );
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Owner portal</p>
-            <h1 className="mt-2 font-display text-3xl font-semibold text-slate-950">POS company command center</h1>
-            <p className="mt-2 text-sm leading-6 text-slate-600">Separate owner workspace for shops, licensing, activation, reports, branding, access, and audit.</p>
-          </div>
-          <Badge variant="success">{state.brand.posName}</Badge>
-        </div>
-      </div>
-
+    <div className="space-y-4">
       {message ? <div className="rounded-3xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-900">{message}</div> : null}
 
-      <Card className="p-3 sm:p-4">
+      <Card className="p-2 sm:p-3">
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-9">
           {ownerSections.map((section) => (
             <SectionButton
