@@ -1216,6 +1216,33 @@ function mergeShopCloudStatePatch(current: DemoAppState, patch: ShopCloudStatePa
   } satisfies DemoAppState;
 }
 
+function markShopLicenseBlocked(current: DemoAppState, shopId: string, status: "expired" | "locked", message?: string) {
+  const now = new Date().toISOString();
+  const existingLicense = current.licenses.find((license) => license.shopId === shopId);
+  const nextLicense = existingLicense
+    ? {
+        ...existingLicense,
+        status,
+        lockedAt: status === "locked" ? existingLicense.lockedAt ?? now : existingLicense.lockedAt,
+        lockReason: status === "locked" ? existingLicense.lockReason ?? message ?? "Locked by POS owner." : existingLicense.lockReason
+      }
+    : {
+        id: `license_block_${shopId}`,
+        shopId,
+        status,
+        lockedAt: status === "locked" ? now : undefined,
+        lockReason: status === "locked" ? message ?? "Locked by POS owner." : undefined
+      };
+
+  return {
+    ...current,
+    licenses: existingLicense
+      ? current.licenses.map((license) => (license.shopId === shopId ? nextLicense : license))
+      : [...current.licenses, nextLicense],
+    shops: current.shops.map((shop) => (shop.id === shopId ? { ...shop, licenseStatus: status } : shop))
+  } satisfies DemoAppState;
+}
+
 function removeShopFromLocalState(current: DemoAppState, shopId: string) {
   const billIds = new Set(current.bills.filter((bill) => bill.shopId === shopId).map((bill) => bill.id));
   const refundIds = new Set(current.refunds.filter((refund) => refund.shopId === shopId).map((refund) => refund.id));
@@ -1537,6 +1564,7 @@ export function AppProvider({
           headers: buildShopCloudHeaders(state, cloudSyncShopId, session)
         });
         const payload = (await response.json()) as {
+          licenseStatus?: "expired" | "locked";
           ok: boolean;
           message?: string;
           state?: ShopCloudStatePatch | null;
@@ -1552,6 +1580,14 @@ export function AppProvider({
         }));
 
         if (!payload.ok) {
+          if (payload.licenseStatus === "locked" || payload.licenseStatus === "expired") {
+            setState((current) => ({
+              ...markShopLicenseBlocked(current, cloudSyncShopId, payload.licenseStatus!, payload.message),
+              session: current.session
+            }));
+            return;
+          }
+
           if (!shouldUseSharedStateEndpoint() && [401, 403, 404].includes(response.status)) {
             setState((current) => removeShopFromLocalState(current, cloudSyncShopId));
           }
@@ -1608,7 +1644,9 @@ export function AppProvider({
           headers: buildShopCloudHeaders(state, cloudSyncShopId, session)
         });
         const payload = (await response.json()) as {
+          licenseStatus?: "expired" | "locked";
           ok: boolean;
+          message?: string;
           state?: ShopCloudStatePatch | null;
         };
 
@@ -1617,6 +1655,14 @@ export function AppProvider({
         }
 
         if (!payload.ok) {
+          if (payload.licenseStatus === "locked" || payload.licenseStatus === "expired") {
+            setState((current) => ({
+              ...markShopLicenseBlocked(current, cloudSyncShopId, payload.licenseStatus!, payload.message),
+              session: current.session
+            }));
+            return;
+          }
+
           if ([401, 403, 404].includes(response.status)) {
             setState((current) => removeShopFromLocalState(current, cloudSyncShopId));
           }

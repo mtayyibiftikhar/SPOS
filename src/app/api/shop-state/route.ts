@@ -66,7 +66,11 @@ async function assertShopCanAccessCloudState(
   }
 
   if (!shop || !license) {
-    return false;
+    return {
+      ok: false,
+      message: "Shop or license was not found.",
+      status: "missing" as const
+    };
   }
 
   const licenseStatus = resolveEffectiveLicenseStatus(license);
@@ -81,16 +85,28 @@ async function assertShopCanAccessCloudState(
       })
       .eq("id", license.id);
 
-    return false;
+    return {
+      ok: false,
+      message: "Your POS is temporarily locked. Please contact support.",
+      status: "locked" as const
+    };
   }
 
   if (licenseStatus === "expired") {
     await supabase.from("licenses").update({ status: "expired" }).eq("id", license.id);
 
-    return false;
+    return {
+      ok: false,
+      message: "Your POS license has expired. Please contact support.",
+      status: "expired" as const
+    };
   }
 
-  return true;
+  return {
+    ok: true,
+    message: null,
+    status: licenseStatus
+  };
 }
 
 async function ensureSnapshotBucket(supabase: ReturnType<typeof createSupabaseAdminClient>) {
@@ -143,8 +159,8 @@ async function authorizeShopStateAccess(request: Request, shopId: string) {
   const productKey = clean(request.headers.get("x-product-key"));
   const shopCanAccessCloudState = await assertShopCanAccessCloudState(supabase, shopId);
 
-  if (!shopCanAccessCloudState) {
-    return { ok: false, supabase, userId: null };
+  if (!shopCanAccessCloudState.ok) {
+    return { ...shopCanAccessCloudState, supabase, userId: null };
   }
 
   if (userId) {
@@ -188,7 +204,7 @@ async function authorizeShopStateAccess(request: Request, shopId: string) {
     }
   }
 
-  return { ok: false, supabase, userId: null };
+  return { ok: false, message: "Shop cloud state is not authorized.", status: "unauthorized" as const, supabase, userId: null };
 }
 
 export async function GET(request: Request) {
@@ -203,7 +219,12 @@ export async function GET(request: Request) {
     const authorization = await authorizeShopStateAccess(request, shopId);
 
     if (!authorization.ok) {
-      return NextResponse.json({ ok: false, message: "Shop cloud state is not authorized." }, { status: 401 });
+      const statusCode = authorization.status === "locked" ? 423 : authorization.status === "expired" ? 402 : 401;
+
+      return NextResponse.json(
+        { ok: false, licenseStatus: authorization.status, message: authorization.message },
+        { status: statusCode }
+      );
     }
 
     const { data, error } = await authorization.supabase
@@ -268,7 +289,12 @@ export async function POST(request: Request) {
     const authorization = await authorizeShopStateAccess(request, shopId);
 
     if (!authorization.ok) {
-      return NextResponse.json({ ok: false, message: "Shop cloud state is not authorized." }, { status: 401 });
+      const statusCode = authorization.status === "locked" ? 423 : authorization.status === "expired" ? 402 : 401;
+
+      return NextResponse.json(
+        { ok: false, licenseStatus: authorization.status, message: authorization.message },
+        { status: statusCode }
+      );
     }
 
     const { error } = await authorization.supabase.from("shop_cloud_snapshots").upsert(

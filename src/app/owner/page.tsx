@@ -254,13 +254,11 @@ function buildActivationEmailHref(shop: Shop, key: string) {
 
 function SectionButton({
   active,
-  description,
   icon: Icon,
   label,
   onClick
 }: {
   active: boolean;
-  description: string;
   icon: LucideIcon;
   label: string;
   onClick: () => void;
@@ -268,17 +266,16 @@ function SectionButton({
   return (
     <button
       className={cn(
-        "rounded-[22px] border p-4 text-left transition hover:-translate-y-0.5",
+        "inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition hover:-translate-y-0.5",
         active ? "border-slate-950 bg-slate-950 text-white shadow-[0_22px_44px_rgba(15,23,42,0.16)]" : "border-slate-200 bg-white hover:border-emerald-200"
       )}
       onClick={onClick}
       type="button"
     >
-      <span className={cn("inline-flex rounded-2xl p-2", active ? "bg-white/15" : "bg-emerald-50 text-emerald-700")}>
+      <span className={cn("inline-flex rounded-xl p-2", active ? "bg-white/15" : "bg-slate-50 text-slate-700")}>
         <Icon className="h-4 w-4" />
       </span>
-      <p className="mt-3 text-sm font-semibold">{label}</p>
-      <p className={cn("mt-1 text-xs leading-5", active ? "text-white/70" : "text-slate-500")}>{description}</p>
+      <span>{label}</span>
     </button>
   );
 }
@@ -331,6 +328,8 @@ export default function OwnerPage() {
   const [storeFilter, setStoreFilter] = useState<StoreFilter>("all");
   const [selectedShopId, setSelectedShopId] = useState(state.shops[0]?.id ?? "");
   const [message, setMessage] = useState<string | null>(null);
+  const [storeDetailOpen, setStoreDetailOpen] = useState(false);
+  const [storeSearch, setStoreSearch] = useState("");
   const [lastGeneratedKey, setLastGeneratedKey] = useState<{ key: string; shopId: string } | null>(null);
   const [createShopForm, setCreateShopForm] = useState({
     shopName: "",
@@ -565,15 +564,20 @@ export default function OwnerPage() {
   }, [cloudSummary, state.deviceActivations, state.licenses, state.productKeys, state.shops, state.users]);
 
   const filteredStoreRows = ownerMetrics.rows.filter((row) => {
-    if (storeFilter === "all") {
-      return true;
-    }
+    const normalizedSearch = storeSearch.trim().toLowerCase();
+    const matchesSearch =
+      !normalizedSearch ||
+      [row.shop.name, row.shop.email, row.shop.phone, row.shop.address, row.shop.planName]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(normalizedSearch));
+    const matchesFilter =
+      storeFilter === "all"
+        ? true
+        : storeFilter === "expiring"
+          ? row.expiryDays !== null && row.expiryDays >= 0 && row.expiryDays <= 7 && row.status !== "locked"
+          : row.status === storeFilter;
 
-    if (storeFilter === "expiring") {
-      return row.expiryDays !== null && row.expiryDays >= 0 && row.expiryDays <= 7 && row.status !== "locked";
-    }
-
-    return row.status === storeFilter;
+    return matchesSearch && matchesFilter;
   });
 
   const reportMetrics = useMemo(() => {
@@ -1035,57 +1039,7 @@ export default function OwnerPage() {
     );
   };
 
-  const renderOverview = () => (
-    <div className="grid gap-6">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {[
-          { label: "Total stores", value: ownerMetrics.counts.all, icon: Building2 },
-          { label: "Active stores", value: ownerMetrics.counts.active, icon: ShieldCheck },
-          { label: "Going to expire", value: ownerMetrics.counts.expiring, icon: Bell },
-          { label: "Locked stores", value: ownerMetrics.counts.locked, icon: Lock }
-        ].map((item) => {
-          const Icon = item.icon;
-
-          return (
-            <Card className="p-5" key={item.label}>
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-sm text-slate-500">{item.label}</p>
-                  <p className="mt-2 font-display text-3xl font-semibold text-slate-950">{item.value}</p>
-                </div>
-                <span className="rounded-2xl bg-slate-950 p-3 text-white">
-                  <Icon className="h-5 w-5" />
-                </span>
-              </div>
-            </Card>
-          );
-        })}
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        {[
-          { title: "Create client shop", desc: "Prepare shop, license, device limit, and first key. Store admin is created during installation.", section: "create" as OwnerSectionId, icon: UserRoundPlus },
-          { title: "Control active shops", desc: "Filter active, locked, expired, and expiring stores without mixing CRM tickets into owner work.", section: "stores" as OwnerSectionId, icon: Building2 },
-          { title: "Owner reports", desc: "Track processed sales, active users, devices, license status, expiring shops, and locked shops.", section: "reports" as OwnerSectionId, icon: BarChart3 }
-        ].map((item) => {
-          const Icon = item.icon;
-
-          return (
-            <Card className="p-6" key={item.title}>
-              <span className="inline-flex rounded-2xl bg-emerald-50 p-3 text-emerald-700">
-                <Icon className="h-5 w-5" />
-              </span>
-              <h3 className="mt-5 font-display text-2xl font-semibold text-slate-950">{item.title}</h3>
-              <p className="mt-2 text-sm leading-6 text-slate-600">{item.desc}</p>
-              <Button className="mt-5" onClick={() => setActiveSection(item.section)} variant="secondary">
-                Open
-              </Button>
-            </Card>
-          );
-        })}
-      </div>
-    </div>
-  );
+  const renderOverview = () => null;
 
   const renderCreateShop = () => (
     <Card className="p-6">
@@ -1178,31 +1132,96 @@ export default function OwnerPage() {
     const draft = selectedShopSafeId ? getLicenseDraft(selectedShopSafeId) : null;
     const profileDraft = selectedShop ? getShopProfileDraft(selectedShop) : null;
 
+    if (!storeDetailOpen) {
+      return (
+        <div className="grid gap-5">
+          <Card className="p-4">
+            <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
+              <Input
+                placeholder="Search store by name, email, phone, address, or plan"
+                value={storeSearch}
+                onChange={(event) => setStoreSearch(event.target.value)}
+              />
+              <div className="flex flex-wrap gap-2">
+                {[
+                  ["all", "All"],
+                  ["active", "Active"],
+                  ["trial", "Trial"],
+                  ["expiring", "Expiring"],
+                  ["locked", "Locked"],
+                  ["expired", "Expired"]
+                ].map(([id, label]) => (
+                  <StoreFilterButton
+                    active={storeFilter === id}
+                    count={ownerMetrics.counts[id as StoreFilter]}
+                    key={id}
+                    label={label}
+                    onClick={() => setStoreFilter(id as StoreFilter)}
+                  />
+                ))}
+              </div>
+            </div>
+          </Card>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {filteredStoreRows.map((row) => (
+              <button
+                className="rounded-[28px] border border-slate-200 bg-white p-5 text-left shadow-[0_18px_48px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-slate-950"
+                key={row.shop.id}
+                onClick={() => {
+                  setSelectedShopId(row.shop.id);
+                  setStoreDetailOpen(true);
+                }}
+                type="button"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-display text-2xl font-semibold text-slate-950">{row.shop.name}</p>
+                    <p className="mt-1 truncate text-sm text-slate-500">{row.shop.email || row.shop.phone || "No contact saved"}</p>
+                  </div>
+                  <Badge variant={licenseVariant(row.status)}>{row.status}</Badge>
+                </div>
+                <div className="mt-5 grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-2xl bg-slate-50 p-3">
+                    <p className="font-display text-xl font-semibold text-slate-950">{row.users.length}</p>
+                    <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Users</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-3">
+                    <p className="font-display text-xl font-semibold text-slate-950">{row.devices.length}</p>
+                    <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Devices</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-3">
+                    <p className="font-display text-xl font-semibold text-slate-950">{row.productKeys.length}</p>
+                    <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Keys</p>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {filteredStoreRows.length === 0 ? (
+            <Card className="p-8 text-center">
+              <p className="font-display text-2xl font-semibold text-slate-950">No stores found</p>
+            </Card>
+          ) : null}
+        </div>
+      );
+    }
+
     return (
       <div className="grid gap-6">
         <Card className="p-4">
-          <div className="flex flex-wrap gap-2">
-            {[
-              ["all", "All"],
-              ["active", "Active"],
-              ["trial", "Trial"],
-              ["expiring", "Going to expire"],
-              ["locked", "Locked"],
-              ["expired", "Expired"]
-            ].map(([id, label]) => (
-              <StoreFilterButton
-                active={storeFilter === id}
-                count={ownerMetrics.counts[id as StoreFilter]}
-                key={id}
-                label={label}
-                onClick={() => setStoreFilter(id as StoreFilter)}
-              />
-            ))}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <Button onClick={() => setStoreDetailOpen(false)} type="button" variant="secondary">
+              Back to stores
+            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant={licenseVariant(getEffectiveLicenseStatus(selectedLicense))}>{getEffectiveLicenseStatus(selectedLicense)}</Badge>
+              <Badge variant="neutral">{selectedUsers.length} users</Badge>
+              <Badge variant="neutral">{selectedDevices.length} devices</Badge>
+            </div>
           </div>
         </Card>
-
-        <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
-          {renderStorePicker()}
 
           <div className="grid gap-5">
             <Card className="p-6">
@@ -1449,7 +1468,6 @@ export default function OwnerPage() {
               </Card>
             ) : null}
           </div>
-        </div>
       </div>
     );
   };
@@ -2075,7 +2093,18 @@ export default function OwnerPage() {
       <Card className="p-3 sm:p-4">
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-9">
           {ownerSections.map((section) => (
-            <SectionButton active={activeSection === section.id} description={section.description} icon={section.icon} key={section.id} label={section.label} onClick={() => setActiveSection(section.id)} />
+            <SectionButton
+              active={activeSection === section.id}
+              icon={section.icon}
+              key={section.id}
+              label={section.label}
+              onClick={() => {
+                setActiveSection(section.id);
+                if (section.id === "stores") {
+                  setStoreDetailOpen(false);
+                }
+              }}
+            />
           ))}
         </div>
       </Card>

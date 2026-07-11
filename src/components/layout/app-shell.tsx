@@ -2,17 +2,44 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { CheckCircle2, Menu, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, LockKeyhole, Mail, Menu, MessageCircle, Phone, X } from "lucide-react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { usePosApp } from "@/components/providers/app-provider";
-import { cn } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
+
+function getBlockedStatus(license: ReturnType<typeof usePosApp>["currentLicense"]) {
+  if (!license) {
+    return null;
+  }
+
+  if (license.status === "locked" || license.status === "expired") {
+    return license.status;
+  }
+
+  if (!license.expiresAt) {
+    return null;
+  }
+
+  const expiresAt = new Date(license.expiresAt);
+
+  if (!Number.isFinite(expiresAt.getTime()) || Date.now() <= expiresAt.getTime()) {
+    return null;
+  }
+
+  const daysExpired = Math.floor((Date.now() - expiresAt.getTime()) / 86_400_000);
+  const autoLockDays = license.autoLockDaysAfterExpiry ?? 0;
+
+  return daysExpired >= autoLockDays ? "locked" : "expired";
+}
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { endSupportSession, saveFeedback, session, state } = usePosApp();
+  const { currentLicense, currentSettings, currentShop, endSupportSession, locale, logout, saveFeedback, session, state } = usePosApp();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const isBillingRoute = pathname === "/billing";
+  const blockedStatus = session?.workspace === "shop" ? getBlockedStatus(currentLicense) : null;
+  const isLocked = blockedStatus === "locked";
   const supportSession =
     session?.supportSessionId
       ? state.supportSessions.find((entry) => entry.id === session.supportSessionId && !entry.endedAt)
@@ -107,7 +134,71 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
             </div>
           ) : null}
-          <div className="flex-1 min-h-0">{children}</div>
+          <div className="flex-1 min-h-0">
+            {blockedStatus ? (
+              <div className="grid min-h-[68vh] place-items-center">
+                <div className="w-full max-w-3xl rounded-[34px] border border-slate-200 bg-white p-6 text-center shadow-[0_28px_80px_rgba(15,23,42,0.12)] sm:p-8">
+                  <span className={cn("mx-auto inline-flex h-16 w-16 items-center justify-center rounded-[24px] text-white", isLocked ? "bg-slate-950" : "bg-amber-500")}>
+                    {isLocked ? <LockKeyhole className="h-7 w-7" /> : <AlertTriangle className="h-7 w-7" />}
+                  </span>
+                  <p className="mt-6 text-xs font-bold uppercase tracking-[0.28em] text-slate-400">{currentShop?.name ?? "Store POS"}</p>
+                  <h1 className="mt-3 font-display text-4xl font-semibold leading-tight text-slate-950">
+                    {isLocked ? "Your POS is locked" : "Your POS license has expired"}
+                  </h1>
+                  <p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-slate-600">
+                    {isLocked
+                      ? "Billing, product editing, and store operations are temporarily blocked by the POS owner."
+                      : "This shop license is past its expiry date. Please contact support to renew access."}
+                  </p>
+
+                  <div className="mt-6 grid gap-3 text-left sm:grid-cols-2">
+                    <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Status</p>
+                      <p className="mt-2 font-display text-2xl font-semibold capitalize text-slate-950">{blockedStatus}</p>
+                    </div>
+                    <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Expiry</p>
+                      <p className="mt-2 font-semibold text-slate-950">
+                        {currentLicense?.expiresAt ? formatDateTime(currentLicense.expiresAt, locale) : "Not set"}
+                      </p>
+                    </div>
+                    {currentLicense?.lockReason ? (
+                      <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4 sm:col-span-2">
+                        <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Reason</p>
+                        <p className="mt-2 text-sm font-semibold text-slate-950">{currentLicense.lockReason}</p>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-7 flex flex-wrap justify-center gap-3">
+                    {state.brand.supportWhatsapp ? (
+                      <a className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-bold text-white" href={`https://wa.me/${state.brand.supportWhatsapp.replace(/\D/g, "")}`} rel="noreferrer" target="_blank">
+                        <MessageCircle className="h-4 w-4" />
+                        WhatsApp support
+                      </a>
+                    ) : null}
+                    {(currentSettings?.pos.phone || state.brand.supportPhone) ? (
+                      <a className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-950" href={`tel:${currentSettings?.pos.phone || state.brand.supportPhone}`}>
+                        <Phone className="h-4 w-4" />
+                        Call
+                      </a>
+                    ) : null}
+                    {state.brand.supportEmail ? (
+                      <a className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-950" href={`mailto:${state.brand.supportEmail}?subject=${encodeURIComponent(`${currentShop?.name ?? "POS"} license ${blockedStatus}`)}`}>
+                        <Mail className="h-4 w-4" />
+                        Email
+                      </a>
+                    ) : null}
+                    <button className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-950" onClick={logout} type="button">
+                      Sign out
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              children
+            )}
+          </div>
         </main>
       </div>
       {saveFeedback ? (
