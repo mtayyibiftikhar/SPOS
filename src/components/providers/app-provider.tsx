@@ -512,6 +512,15 @@ interface AppContextValue {
     userId: string;
     password: string;
   }) => Promise<{ ok: boolean; message?: string }>;
+  saveOwnerPortalUser: (payload: {
+    id?: string;
+    name: string;
+    email: string;
+    phone?: string;
+    role: Extract<User["role"], "super_admin" | "support">;
+    password?: string;
+  }) => { ok: boolean; message?: string; userId?: string };
+  setOwnerPortalUserActive: (userId: string, isActive: boolean) => { ok: boolean; message?: string };
   endSupportSession: () => void;
   updateSettings: <TSection extends SettingsSection>(
     section: TSection,
@@ -920,7 +929,7 @@ function buildOwnerCloudSyncState(state: DemoAppState) {
     settingsByShop: state.settingsByShop,
     shops: state.shops,
     users: state.users
-      .filter((user) => user.role === "super_admin")
+      .filter((user) => !user.shopId && ["super_admin", "support"].includes(user.role))
       .map((user) => ({
         email: user.email,
         isActive: user.isActive,
@@ -2028,7 +2037,7 @@ export function AppProvider({
           return { ok: false, message: "This user is inactive. Ask the shop admin to reactivate access." };
         }
 
-        if (workspace === "owner" && account.role !== "super_admin") {
+        if (workspace === "owner" && !["super_admin", "support"].includes(account.role)) {
           return { ok: false, message: resolveTranslation(state.ui.locale, "login.error", dictionaryOverrides) };
         }
 
@@ -2080,7 +2089,7 @@ export function AppProvider({
           return { ok: false, message: "This user is inactive. Ask the shop admin to reactivate access." };
         }
 
-        if (workspace === "owner" && user.role !== "super_admin") {
+        if (workspace === "owner" && !["super_admin", "support"].includes(user.role)) {
           return { ok: false, message: resolveTranslation(state.ui.locale, "login.error", dictionaryOverrides) };
         }
 
@@ -3616,8 +3625,8 @@ export function AppProvider({
         return result;
       },
       ownerStartSupportSession: ({ shopId, reason, minutes }) => {
-        if (!session || session.role !== "super_admin") {
-          return { ok: false, message: "Only the POS owner can start support sessions." };
+        if (!session || !["super_admin", "support"].includes(session.role)) {
+          return { ok: false, message: "Only owner support users can start support sessions." };
         }
 
         const normalizedReason = reason.trim();
@@ -3685,8 +3694,8 @@ export function AppProvider({
         return result;
       },
       ownerResetShopUserPassword: async ({ email, shopId, userId, password }) => {
-        if (!session || session.role !== "super_admin") {
-          return { ok: false, message: "Only the POS owner can reset store user access." };
+        if (!session || !["super_admin", "support"].includes(session.role)) {
+          return { ok: false, message: "Only owner support users can reset store user access." };
         }
 
         const normalizedPassword = password.trim();
@@ -3785,6 +3794,161 @@ export function AppProvider({
               ...current.auditLogs
             ]
           };
+        });
+
+        return result;
+      },
+      saveOwnerPortalUser: ({ id, name, email, phone, role, password }) => {
+        if (!session || session.role !== "super_admin") {
+          return { ok: false, message: "Only the POS owner can manage owner portal users." };
+        }
+
+        const normalizedName = name.trim();
+        const normalizedEmail = email.trim().toLowerCase();
+        const normalizedPhone = phone?.trim() || undefined;
+        const normalizedPassword = password?.trim() ?? "";
+        const passwordError = normalizedPassword ? validatePasswordLength(normalizedPassword, "Password") : null;
+
+        if (!normalizedName || !normalizedEmail) {
+          return { ok: false, message: "Name and email are required." };
+        }
+
+        if (passwordError) {
+          return { ok: false, message: passwordError };
+        }
+
+        let result: { ok: boolean; message?: string; userId?: string } = {
+          ok: false,
+          message: "Unable to save owner portal user."
+        };
+
+        setState((current) => {
+          if (findUserEmailConflict(current.users, normalizedEmail, id)) {
+            result = { ok: false, message: "Another user already uses this email address." };
+            return current;
+          }
+
+          const existingUser = id ? current.users.find((user) => user.id === id && !user.shopId) : undefined;
+          const createdAt = new Date().toISOString();
+
+          if (id && !existingUser) {
+            result = { ok: false, message: "Owner portal user not found." };
+            return current;
+          }
+
+          if (!existingUser && !normalizedPassword) {
+            result = { ok: false, message: "Password is required for a new owner portal user." };
+            return current;
+          }
+
+          const userId = existingUser?.id ?? createId("owner_user");
+          const nextUser: User = {
+            id: userId,
+            name: normalizedName,
+            email: normalizedEmail,
+            phone: normalizedPhone,
+            role,
+            isActive: existingUser?.isActive ?? true,
+            passwordHash: normalizedPassword ? hashSecret(normalizedPassword) : existingUser?.passwordHash,
+            createdAt: existingUser?.createdAt ?? createdAt,
+            lastLoginAt: existingUser?.lastLoginAt
+          };
+
+          result = {
+            ok: true,
+            message: existingUser ? "Owner portal user updated." : "Owner portal user created.",
+            userId
+          };
+
+          const nextState = {
+            ...current,
+            users: existingUser
+              ? current.users.map((user) => (user.id === existingUser.id ? nextUser : user))
+              : [nextUser, ...current.users],
+            auditLogs: [
+              {
+                id: createId("audit"),
+                actorId: session.id,
+                action: existingUser ? "owner.portal_user.update" : "owner.portal_user.create",
+                targetId: userId,
+                detail: `${existingUser ? "Updated" : "Created"} owner portal user ${normalizedEmail} as ${role}.`,
+                createdAt
+              },
+              ...current.auditLogs
+            ]
+          };
+
+          persistLocalOwnerStateSnapshot(nextState);
+
+          return nextState;
+        });
+
+        return result;
+      },
+      setOwnerPortalUserActive: (userId, isActive) => {
+        if (!session || session.role !== "super_admin") {
+          return { ok: false, message: "Only the POS owner can manage owner portal users." };
+        }
+
+        let result: { ok: boolean; message?: string } = {
+          ok: false,
+          message: "Unable to update owner portal user access."
+        };
+
+        setState((current) => {
+          const user = current.users.find((entry) => entry.id === userId && !entry.shopId);
+
+          if (!user) {
+            result = { ok: false, message: "Owner portal user not found." };
+            return current;
+          }
+
+          if (!isActive && user.id === session.id) {
+            result = { ok: false, message: "You cannot deactivate your own owner account." };
+            return current;
+          }
+
+          const activeOwners = current.users.filter(
+            (entry) => !entry.shopId && entry.role === "super_admin" && entry.isActive && entry.id !== userId
+          );
+
+          if (!isActive && user.role === "super_admin" && activeOwners.length === 0) {
+            result = { ok: false, message: "At least one active owner account is required." };
+            return current;
+          }
+
+          const updatedAt = new Date().toISOString();
+          result = {
+            ok: true,
+            message: isActive ? "Owner portal user activated." : "Owner portal user deactivated."
+          };
+
+          const nextState = {
+            ...current,
+            users: current.users.map((entry) =>
+              entry.id === userId
+                ? {
+                    ...entry,
+                    isActive
+                  }
+                : entry
+            ),
+            auditLogs: [
+              {
+                id: createId("audit"),
+                actorId: session.id,
+                action: "owner.portal_user.access",
+                targetId: user.id,
+                detail: `${isActive ? "Activated" : "Deactivated"} owner portal user ${user.email}.`,
+                createdAt: updatedAt
+              },
+              ...current.auditLogs
+            ]
+          };
+
+          persistLocalOwnerStateSnapshot(nextState);
+
+          return nextState;
         });
 
         return result;

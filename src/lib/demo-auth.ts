@@ -23,14 +23,18 @@ export function normalizeDemoUsers(
   ownerSeed: User,
   ownerBootstrap: OwnerBootstrapAccount = DEFAULT_OWNER_BOOTSTRAP
 ) {
-  let ownerFound = false;
+  let bootstrapOwnerFound = false;
 
   const normalizedUsers = users.map((user) => {
     if (user.role !== "super_admin") {
       return user;
     }
 
-    ownerFound = true;
+    if (user.id !== ownerSeed.id && user.email.trim().toLowerCase() !== ownerSeed.email.trim().toLowerCase()) {
+      return user;
+    }
+
+    bootstrapOwnerFound = true;
 
     return {
       ...user,
@@ -40,7 +44,7 @@ export function normalizeDemoUsers(
     };
   });
 
-  if (ownerFound) {
+  if (bootstrapOwnerFound) {
     return normalizedUsers;
   }
 

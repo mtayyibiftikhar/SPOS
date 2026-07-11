@@ -16,8 +16,23 @@ export function OwnerShell({ children }: { children: React.ReactNode }) {
         <div className="rounded-[26px] border border-line bg-white/95 p-4 shadow-[0_18px_46px_rgba(15,23,42,0.08)]">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-olive">{t("owner.controlLabel")}</p>
-              <h1 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">{state.brand.posName}</h1>
+              <div className="flex items-center gap-3">
+                {state.brand.logoUrl ? (
+                  <img
+                    alt={state.brand.companyName}
+                    className="h-14 w-14 rounded-2xl border border-slate-200 object-cover"
+                    src={state.brand.logoUrl}
+                  />
+                ) : (
+                  <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-950 font-display text-lg font-semibold text-white">
+                    {state.brand.posName.slice(0, 2).toUpperCase()}
+                  </span>
+                )}
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-olive">{t("owner.controlLabel")}</p>
+                  <h1 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">{state.brand.posName}</h1>
+                </div>
+              </div>
             </div>
             <div className="flex flex-wrap items-center justify-start gap-2 lg:justify-end">
               <LocaleSwitcher className="min-w-[170px]" showLabel={false} />

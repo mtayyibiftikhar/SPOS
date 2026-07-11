@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
+  ArrowLeft,
   BarChart3,
   Bell,
   Building2,
@@ -14,6 +15,7 @@ import {
   Mail,
   MonitorSmartphone,
   Palette,
+  ReceiptText,
   ShieldCheck,
   Trash2,
   Unlock,
@@ -320,11 +322,16 @@ export default function OwnerPage() {
     ownerSetProductKeyStatus,
     ownerStartSupportSession,
     ownerUpdateShopProfile,
+    saveOwnerPortalUser,
     setBrandProfile,
+    setOwnerPortalUserActive,
+    session,
     state,
     t
   } = usePosApp();
   const [activeSection, setActiveSection] = useState<OwnerSectionId>("overview");
+  const [brandingView, setBrandingView] = useState<"menu" | "identity" | "login" | "dashboard" | "receipt" | "loading" | "support" | "team">("menu");
+  const [accessDetailOpen, setAccessDetailOpen] = useState(false);
   const [storeFilter, setStoreFilter] = useState<StoreFilter>("all");
   const [selectedShopId, setSelectedShopId] = useState(state.shops[0]?.id ?? "");
   const [message, setMessage] = useState<string | null>(null);
@@ -381,6 +388,14 @@ export default function OwnerPage() {
   const [selectedResetUserId, setSelectedResetUserId] = useState("");
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [ownerUserForm, setOwnerUserForm] = useState({
+    id: "",
+    name: "",
+    email: "",
+    phone: "",
+    role: "support" as Extract<User["role"], "super_admin" | "support">,
+    password: ""
+  });
   const [clearDataConfirmName, setClearDataConfirmName] = useState("");
   const [clearDataScope, setClearDataScope] = useState<OwnerClearShopDataScope>("bills");
   const [isClearingShopData, setIsClearingShopData] = useState(false);
@@ -390,6 +405,8 @@ export default function OwnerPage() {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const ownerUser = state.users.find((user) => user.role === "super_admin" && user.isActive);
+  const isFullOwner = session?.role === "super_admin";
+  const ownerPortalUsers = state.users.filter((user) => !user.shopId && ["super_admin", "support"].includes(user.role));
 
   const selectedShop = state.shops.find((shop) => shop.id === selectedShopId) ?? state.shops[0];
   const selectedShopSafeId = selectedShop?.id ?? "";
@@ -968,6 +985,72 @@ export default function OwnerPage() {
         tone: "error",
         message: error instanceof Error ? error.message : "Login hero image upload failed."
       });
+    }
+  };
+
+  const saveBrandingProfile = () => {
+    setBrandProfile({
+      posName,
+      companyName,
+      logoUrl: companyLogoUrl.trim() || undefined,
+      address: companyAddress.trim() || undefined,
+      website: companyWebsite.trim() || undefined,
+      supportWhatsapp,
+      supportEmail,
+      supportPhone,
+      receiptImprintEnabled,
+      receiptImprintText,
+      loadingTitle,
+      loadingMessage,
+      loginHeroImages: loginHeroImagesText
+        .split("\n")
+        .map((imageUrl) => imageUrl.trim())
+        .filter(Boolean),
+      loginQuotes: loginQuotesText
+        .split("\n")
+        .map((quote) => quote.trim())
+        .filter(Boolean),
+      loginAdEnabled,
+      loginAdTitle,
+      loginAdMessage,
+      loginAdImageUrl: loginAdImageUrl.trim() || undefined,
+      loginAdCtaLabel: loginAdCtaLabel.trim() || undefined,
+      loginAdCtaUrl: loginAdCtaUrl.trim() || undefined
+    });
+    setBrandingSavedAt(new Date().toLocaleTimeString());
+    setMessage("Branding saved.");
+  };
+
+  const resetOwnerUserForm = () => {
+    setOwnerUserForm({
+      id: "",
+      name: "",
+      email: "",
+      phone: "",
+      role: "support",
+      password: ""
+    });
+  };
+
+  const editOwnerPortalUser = (user: User) => {
+    setOwnerUserForm({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone ?? "",
+      role: user.role === "super_admin" ? "super_admin" : "support",
+      password: ""
+    });
+    setBrandingView("team");
+  };
+
+  const saveOwnerTeamUser = () => {
+    const result = saveOwnerPortalUser(ownerUserForm);
+
+    showResult(result);
+
+    if (result.ok) {
+      resetOwnerUserForm();
     }
   };
 
@@ -1775,281 +1858,474 @@ export default function OwnerPage() {
     </div>
   );
 
-  const renderBranding = () => (
-    <Card className="p-6">
-      <h2 className="font-display text-3xl font-semibold text-slate-950">POS company branding</h2>
-      <p className="mt-2 text-sm leading-6 text-slate-600">Control POS name, logo, loading screen, support details, and optional receipt imprint.</p>
-      <form
-        className="mt-6 grid gap-5"
-        onChangeCapture={() => setBrandingSavedAt(null)}
-        onSubmit={(event) => {
-          event.preventDefault();
-          setBrandProfile({
-            posName,
-            companyName,
-            logoUrl: companyLogoUrl.trim() || undefined,
-            address: companyAddress.trim() || undefined,
-            website: companyWebsite.trim() || undefined,
-            supportWhatsapp,
-            supportEmail,
-            supportPhone,
-            receiptImprintEnabled,
-            receiptImprintText,
-            loadingTitle,
-            loadingMessage,
-            loginHeroImages: loginHeroImagesText
-              .split("\n")
-              .map((imageUrl) => imageUrl.trim())
-              .filter(Boolean),
-            loginQuotes: loginQuotesText
-              .split("\n")
-              .map((quote) => quote.trim())
-              .filter(Boolean),
-            loginAdEnabled,
-            loginAdTitle,
-            loginAdMessage,
-            loginAdImageUrl: loginAdImageUrl.trim() || undefined,
-            loginAdCtaLabel: loginAdCtaLabel.trim() || undefined,
-            loginAdCtaUrl: loginAdCtaUrl.trim() || undefined
-          });
-          setBrandingSavedAt(new Date().toLocaleTimeString());
-          setMessage("Branding saved.");
-        }}
-      >
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">POS product name</span><Input value={posName} onChange={(event) => setPosName(event.target.value)} /></label>
-          <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">POS company name</span><Input value={companyName} onChange={(event) => setCompanyName(event.target.value)} /></label>
-          <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">Company address</span><Input value={companyAddress} onChange={(event) => setCompanyAddress(event.target.value)} /></label>
-          <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">Website</span><Input value={companyWebsite} onChange={(event) => setCompanyWebsite(event.target.value)} /></label>
-          <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">Support WhatsApp</span><Input value={supportWhatsapp} onChange={(event) => setSupportWhatsapp(event.target.value)} /></label>
-          <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">Support email</span><Input value={supportEmail} onChange={(event) => setSupportEmail(event.target.value)} /></label>
-          <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">Support phone</span><Input value={supportPhone} onChange={(event) => setSupportPhone(event.target.value)} /></label>
-          <label className="space-y-2">
-            <span className="text-sm font-semibold text-slate-950">POS company logo</span>
-            <Input accept="image/*" className="h-auto py-3" type="file" onChange={(event) => void loadCompanyLogo(event.target.files?.[0])} />
-            <span className="block text-xs leading-5 text-slate-500">Recommended: square 512x512 JPG/PNG.</span>
-          </label>
-        </div>
+  const renderBranding = () => {
+    const brandingSections = [
+      { id: "identity", label: "Owner screen identity", description: "Edit owner portal name, company name, logo, address, and website.", icon: Palette },
+      { id: "team", label: "Owner team", description: "Add owners and customer service reps for the owner portal.", icon: UsersRound },
+      { id: "login", label: "Login pictures", description: "Manage POS login hero images and random quotes.", icon: MonitorSmartphone },
+      { id: "dashboard", label: "Dashboard image", description: "Control the optional dashboard image/announcement block.", icon: Bell },
+      { id: "receipt", label: "Receipt imprint", description: "Control whether POS company branding appears on receipts.", icon: ReceiptText },
+      { id: "loading", label: "Loading screen", description: "Set the branded loading screen title and short message.", icon: ShieldCheck },
+      { id: "support", label: "Support contacts", description: "WhatsApp, email, and phone shown to stores.", icon: UserCog }
+    ] as const;
+    const activeBrandingSection = brandingSections.find((section) => section.id === brandingView);
 
-        {brandingAssetMessage ? (
-          <div
-            className={
-              brandingAssetMessage.tone === "success"
-                ? "rounded-3xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-medium text-emerald-800"
-                : "rounded-3xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm font-medium text-rose-800"
-            }
-          >
-            {brandingAssetMessage.message}
-          </div>
-        ) : null}
-
-        {companyLogoUrl ? (
-          <div className="flex items-center gap-3 rounded-3xl border border-slate-200 bg-slate-50 p-4">
-            <img alt={companyName} className="h-14 w-14 rounded-2xl object-cover" src={companyLogoUrl} />
-            <div className="min-w-0">
-              <p className="font-semibold text-slate-950">{companyName}</p>
-              <p className="truncate text-sm text-slate-500">{companyWebsite || supportEmail}</p>
+    if (brandingView === "menu") {
+      return (
+        <Card className="p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Owner branding</p>
+              <h2 className="mt-2 font-display text-3xl font-semibold text-slate-950">Choose what to edit</h2>
             </div>
-            <Button className="ml-auto" onClick={() => setCompanyLogoUrl("")} type="button" variant="secondary">Remove logo</Button>
+            <Badge variant={brandingSavedAt ? "success" : "warning"}>
+              {brandingSavedAt ? `Saved at ${brandingSavedAt}` : "Not saved yet"}
+            </Badge>
           </div>
-        ) : null}
+          <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {brandingSections.map((section) => {
+              const Icon = section.icon;
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-            <label className="flex items-center gap-3 text-sm font-semibold text-slate-950">
-              <input checked={receiptImprintEnabled} className="h-5 w-5 accent-emerald-600" onChange={(event) => setReceiptImprintEnabled(event.target.checked)} type="checkbox" />
-              Print POS company imprint on receipts
-            </label>
-            <label className="mt-4 block space-y-2"><span className="text-sm font-semibold text-slate-950">Receipt imprint text</span><Input value={receiptImprintText} onChange={(event) => setReceiptImprintText(event.target.value)} /></label>
+              return (
+                <button
+                  className="rounded-[28px] border border-slate-200 bg-white p-5 text-left shadow-[0_18px_48px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-slate-950"
+                  key={section.id}
+                  onClick={() => setBrandingView(section.id)}
+                  type="button"
+                >
+                  <span className="inline-flex rounded-2xl bg-emerald-50 p-3 text-emerald-700">
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <p className="mt-4 font-display text-2xl font-semibold text-slate-950">{section.label}</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-500">{section.description}</p>
+                </button>
+              );
+            })}
           </div>
-          <div className="rounded-3xl border border-slate-200 bg-white p-5">
-            <p className="text-sm font-semibold text-slate-950">Loading screen</p>
-            <div className="mt-4 grid gap-3">
-              <Input value={loadingTitle} onChange={(event) => setLoadingTitle(event.target.value)} />
-              <Input value={loadingMessage} onChange={(event) => setLoadingMessage(event.target.value)} />
-            </div>
-          </div>
-        </div>
+        </Card>
+      );
+    }
 
-        <div className="grid gap-4 xl:grid-cols-3">
-          <div className="rounded-3xl border border-slate-200 bg-white p-5">
-            <p className="text-sm font-semibold text-slate-950">POS login hero pictures</p>
-            <p className="mt-2 text-sm font-semibold text-slate-500">Recommended size: 1600 x 1100 px.</p>
-            <Input
-              accept="image/*"
-              className="mt-4 h-auto py-3"
-              multiple
-              type="file"
-              onChange={(event) => void loadLoginHeroImages(event.target.files ?? undefined)}
-            />
-            <Textarea
-              className="mt-4 min-h-36"
-              placeholder="One hero image URL per line"
-              value={loginHeroImagesText}
-              onChange={(event) => setLoginHeroImagesText(event.target.value)}
-            />
-            {getLoginHeroImages().length > 0 ? (
-              <div className="mt-4 rounded-[24px] border border-slate-200 bg-slate-50 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Login picture rotation</p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {getLoginHeroImages().length} picture{getLoginHeroImages().length === 1 ? "" : "s"} will rotate randomly.
-                    </p>
-                  </div>
-                  <Button onClick={() => { setLoginHeroImagesText(""); setBrandingSavedAt(null); }} size="sm" type="button" variant="secondary">
-                    Clear all
-                  </Button>
-                </div>
-                <div className="mt-3 grid max-h-80 grid-cols-1 gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
-                  {getLoginHeroImages().map((imageUrl, index) => (
-                    <div className="group overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-[0_14px_36px_rgba(15,23,42,0.08)]" key={`${imageUrl}-${index}`}>
-                      <div className="relative">
-                        <img
-                          alt={`Login hero preview ${index + 1}`}
-                          className="aspect-video w-full object-cover"
-                          src={imageUrl}
-                        />
-                        <span className="absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-700">
-                          Image {index + 1}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3 p-3">
-                        <p className="min-w-0 truncate text-xs text-slate-500">{imageUrl}</p>
-                        <Button onClick={() => void removeLoginHeroImage(imageUrl)} size="sm" type="button" variant="danger">
-                          Remove
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+    return (
+      <Card className="p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <Button onClick={() => setBrandingView("menu")} type="button" variant="secondary">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to branding sections
+            </Button>
+            <h2 className="mt-4 font-display text-3xl font-semibold text-slate-950">
+              {activeBrandingSection?.label ?? "Branding"}
+            </h2>
           </div>
-          <div className="rounded-3xl border border-slate-200 bg-white p-5">
-            <p className="text-sm font-semibold text-slate-950">POS login quotes</p>
-            <p className="mt-2 text-sm font-semibold text-slate-500">One quote per line.</p>
-            <Textarea
-              className="mt-4 min-h-36"
-              value={loginQuotesText}
-              onChange={(event) => setLoginQuotesText(event.target.value)}
-            />
-          </div>
-          <div className="rounded-3xl border border-slate-200 bg-white p-5">
-            <label className="flex items-center gap-3 text-sm font-semibold text-slate-950">
-              <input
-                checked={loginAdEnabled}
-                className="h-5 w-5 accent-slate-950"
-                onChange={(event) => setLoginAdEnabled(event.target.checked)}
-                type="checkbox"
-              />
-              Show dashboard image
-            </label>
-            <p className="mt-2 text-sm font-semibold text-slate-500">Recommended size: 1600 x 900 px.</p>
-            <div className="mt-4 grid gap-3">
-              <label className="space-y-2">
-                <span className="text-sm font-semibold text-slate-950">Dashboard picture</span>
-                <Input accept="image/*" className="h-auto py-3" type="file" onChange={(event) => void loadLoginAdImage(event.target.files?.[0])} />
-              </label>
-              {loginAdImageUrl ? (
-                <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.08)]">
-                  <img alt="Dashboard image preview" className="aspect-video w-full object-cover" src={loginAdImageUrl} />
-                  <div className="flex items-center justify-between gap-3 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Dashboard image</p>
-                    <Button onClick={() => setLoginAdImageUrl("")} size="sm" type="button" variant="secondary">Remove image</Button>
-                  </div>
-                </div>
-              ) : null}
-              <Input placeholder="Optional click URL" value={loginAdCtaUrl} onChange={(event) => setLoginAdCtaUrl(event.target.value)} />
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit">{brandingSavedAt ? "Branding saved" : "Save branding"}</Button>
           <Badge variant={brandingSavedAt ? "success" : "warning"}>
             {brandingSavedAt ? `Saved at ${brandingSavedAt}` : "Not saved yet"}
           </Badge>
         </div>
-      </form>
-    </Card>
-  );
+
+        <form
+          className="mt-6 grid gap-5"
+          onChangeCapture={() => setBrandingSavedAt(null)}
+          onSubmit={(event) => {
+            event.preventDefault();
+            saveBrandingProfile();
+          }}
+        >
+          {brandingView === "identity" ? (
+            <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-slate-950">Owner portal / POS name</span>
+                  <Input value={posName} onChange={(event) => setPosName(event.target.value)} />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-slate-950">POS company name</span>
+                  <Input value={companyName} onChange={(event) => setCompanyName(event.target.value)} />
+                </label>
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-sm font-semibold text-slate-950">Company address</span>
+                  <Input value={companyAddress} onChange={(event) => setCompanyAddress(event.target.value)} />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-slate-950">Website</span>
+                  <Input value={companyWebsite} onChange={(event) => setCompanyWebsite(event.target.value)} />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-slate-950">Main owner logo</span>
+                  <Input accept="image/*" className="h-auto py-3" type="file" onChange={(event) => void loadCompanyLogo(event.target.files?.[0])} />
+                  <span className="block text-xs leading-5 text-slate-500">Recommended: square 512x512 JPG/PNG.</span>
+                </label>
+              </div>
+              <div className="rounded-[32px] border border-slate-200 bg-slate-50 p-5">
+                {companyLogoUrl ? (
+                  <img alt={companyName} className="mx-auto h-28 w-28 rounded-[28px] object-cover shadow-[0_18px_40px_rgba(15,23,42,0.12)]" src={companyLogoUrl} />
+                ) : (
+                  <div className="mx-auto flex h-28 w-28 items-center justify-center rounded-[28px] bg-slate-950 font-display text-3xl font-semibold text-white">
+                    {posName.slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <p className="mt-4 text-center font-display text-2xl font-semibold text-slate-950">{posName}</p>
+                <p className="mt-1 truncate text-center text-sm text-slate-500">{companyName}</p>
+                {companyLogoUrl ? (
+                  <Button className="mt-4 w-full" onClick={() => setCompanyLogoUrl("")} type="button" variant="secondary">
+                    Remove logo
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {brandingView === "support" ? (
+            <div className="grid gap-4 md:grid-cols-3">
+              <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">Support WhatsApp</span><Input value={supportWhatsapp} onChange={(event) => setSupportWhatsapp(event.target.value)} /></label>
+              <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">Support email</span><Input value={supportEmail} onChange={(event) => setSupportEmail(event.target.value)} /></label>
+              <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">Support phone</span><Input value={supportPhone} onChange={(event) => setSupportPhone(event.target.value)} /></label>
+            </div>
+          ) : null}
+
+          {brandingView === "receipt" ? (
+            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+              <label className="flex items-center gap-3 text-sm font-semibold text-slate-950">
+                <input checked={receiptImprintEnabled} className="h-5 w-5 accent-emerald-600" onChange={(event) => setReceiptImprintEnabled(event.target.checked)} type="checkbox" />
+                Print POS company imprint on receipts
+              </label>
+              <label className="mt-4 block space-y-2">
+                <span className="text-sm font-semibold text-slate-950">Receipt imprint text</span>
+                <Input value={receiptImprintText} onChange={(event) => setReceiptImprintText(event.target.value)} />
+              </label>
+            </div>
+          ) : null}
+
+          {brandingView === "loading" ? (
+            <div className="rounded-3xl border border-slate-200 bg-white p-5">
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-slate-950">Loading title</span>
+                  <Input value={loadingTitle} onChange={(event) => setLoadingTitle(event.target.value)} />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-slate-950">Loading message</span>
+                  <Input value={loadingMessage} onChange={(event) => setLoadingMessage(event.target.value)} />
+                </label>
+              </div>
+            </div>
+          ) : null}
+
+          {brandingView === "login" ? (
+            <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+              <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                <p className="text-sm font-semibold text-slate-950">POS login hero pictures</p>
+                <p className="mt-2 text-sm font-semibold text-slate-500">Recommended size: 1600 x 1100 px.</p>
+                <Input
+                  accept="image/*"
+                  className="mt-4 h-auto py-3"
+                  multiple
+                  type="file"
+                  onChange={(event) => void loadLoginHeroImages(event.target.files ?? undefined)}
+                />
+                <Textarea
+                  className="mt-4 min-h-28"
+                  placeholder="One hero image URL per line"
+                  value={loginHeroImagesText}
+                  onChange={(event) => setLoginHeroImagesText(event.target.value)}
+                />
+                {getLoginHeroImages().length > 0 ? (
+                  <div className="mt-4 grid max-h-[460px] gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
+                    {getLoginHeroImages().map((imageUrl, index) => (
+                      <div className="overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-[0_14px_36px_rgba(15,23,42,0.08)]" key={`${imageUrl}-${index}`}>
+                        <img alt={`Login hero preview ${index + 1}`} className="aspect-video w-full object-cover" src={imageUrl} />
+                        <div className="flex items-center justify-between gap-3 p-3">
+                          <p className="min-w-0 truncate text-xs text-slate-500">Image {index + 1}</p>
+                          <Button onClick={() => void removeLoginHeroImage(imageUrl)} size="sm" type="button" variant="danger">Remove</Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                <p className="text-sm font-semibold text-slate-950">POS login quotes</p>
+                <p className="mt-2 text-sm font-semibold text-slate-500">One quote per line.</p>
+                <Textarea className="mt-4 min-h-64" value={loginQuotesText} onChange={(event) => setLoginQuotesText(event.target.value)} />
+              </div>
+            </div>
+          ) : null}
+
+          {brandingView === "dashboard" ? (
+            <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
+              <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                <label className="flex items-center gap-3 text-sm font-semibold text-slate-950">
+                  <input checked={loginAdEnabled} className="h-5 w-5 accent-slate-950" onChange={(event) => setLoginAdEnabled(event.target.checked)} type="checkbox" />
+                  Show dashboard image
+                </label>
+                <p className="mt-2 text-sm font-semibold text-slate-500">Recommended size: 1600 x 900 px.</p>
+                <div className="mt-4 grid gap-3">
+                  <Input accept="image/*" className="h-auto py-3" type="file" onChange={(event) => void loadLoginAdImage(event.target.files?.[0])} />
+                  <Input placeholder="Optional click URL" value={loginAdCtaUrl} onChange={(event) => setLoginAdCtaUrl(event.target.value)} />
+                </div>
+              </div>
+              <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.08)]">
+                {loginAdImageUrl ? (
+                  <img alt="Dashboard image preview" className="aspect-video w-full object-cover" src={loginAdImageUrl} />
+                ) : (
+                  <div className="flex aspect-video items-center justify-center bg-slate-100 text-sm font-semibold text-slate-500">No dashboard image</div>
+                )}
+                {loginAdImageUrl ? (
+                  <div className="p-3">
+                    <Button onClick={() => setLoginAdImageUrl("")} size="sm" type="button" variant="secondary">Remove image</Button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {brandingView === "team" ? (
+            <div className="grid gap-5 xl:grid-cols-[420px_1fr]">
+              <div className="rounded-[32px] border border-slate-200 bg-white p-5">
+                <h3 className="font-display text-2xl font-semibold text-slate-950">{ownerUserForm.id ? "Edit owner user" : "Add owner user"}</h3>
+                {!isFullOwner ? (
+                  <p className="mt-4 rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
+                    Only a full owner can add or edit owner portal users.
+                  </p>
+                ) : (
+                  <div className="mt-4 grid gap-3">
+                    <Input placeholder="Full name" value={ownerUserForm.name} onChange={(event) => setOwnerUserForm((current) => ({ ...current, name: event.target.value }))} />
+                    <Input placeholder="Email" type="email" value={ownerUserForm.email} onChange={(event) => setOwnerUserForm((current) => ({ ...current, email: event.target.value }))} />
+                    <Input placeholder="Phone" value={ownerUserForm.phone} onChange={(event) => setOwnerUserForm((current) => ({ ...current, phone: event.target.value }))} />
+                    <Select value={ownerUserForm.role} onChange={(event) => setOwnerUserForm((current) => ({ ...current, role: event.target.value as Extract<User["role"], "super_admin" | "support"> }))}>
+                      <option value="super_admin">Owner - full control</option>
+                      <option value="support">Customer service rep</option>
+                    </Select>
+                    <Input
+                      minLength={8}
+                      placeholder={ownerUserForm.id ? "New password (leave blank to keep)" : "Create password"}
+                      type="password"
+                      value={ownerUserForm.password}
+                      onChange={(event) => setOwnerUserForm((current) => ({ ...current, password: event.target.value }))}
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <Button onClick={saveOwnerTeamUser} type="button">{ownerUserForm.id ? "Save owner user" : "Add owner user"}</Button>
+                      <Button onClick={resetOwnerUserForm} type="button" variant="secondary">Clear</Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="grid gap-3">
+                {ownerPortalUsers.map((user) => (
+                  <div className="rounded-[26px] border border-slate-200 bg-white p-4" key={user.id}>
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="font-display text-xl font-semibold text-slate-950">{user.name}</p>
+                        <p className="text-sm text-slate-500">{user.email}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant={user.isActive ? "success" : "danger"}>{user.isActive ? "Active" : "Inactive"}</Badge>
+                        <Badge variant={user.role === "super_admin" ? "warning" : "neutral"}>{user.role === "super_admin" ? "Owner" : "Customer service"}</Badge>
+                      </div>
+                    </div>
+                    {isFullOwner ? (
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <Button onClick={() => editOwnerPortalUser(user)} size="sm" type="button" variant="secondary">Edit</Button>
+                        <Button
+                          onClick={() => showResult(setOwnerPortalUserActive(user.id, !user.isActive))}
+                          size="sm"
+                          type="button"
+                          variant={user.isActive ? "danger" : "secondary"}
+                        >
+                          {user.isActive ? "Deactivate" : "Activate"}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {brandingAssetMessage ? (
+            <div
+              className={
+                brandingAssetMessage.tone === "success"
+                  ? "rounded-3xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-medium text-emerald-800"
+                  : "rounded-3xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm font-medium text-rose-800"
+              }
+            >
+              {brandingAssetMessage.message}
+            </div>
+          ) : null}
+
+          {brandingView !== "team" ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="submit">{brandingSavedAt ? "Branding saved" : "Save branding"}</Button>
+              <Badge variant={brandingSavedAt ? "success" : "warning"}>
+                {brandingSavedAt ? `Saved at ${brandingSavedAt}` : "Not saved yet"}
+              </Badge>
+            </div>
+          ) : null}
+        </form>
+      </Card>
+    );
+  };
 
   const renderAccess = () => {
     const selectedResetUser = selectedUsers.find((user) => user.id === selectedResetUserId);
 
-    return (
-      <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
-        {renderStorePicker()}
+    if (!accessDetailOpen) {
+      return (
         <div className="grid gap-5">
-          <Card className="p-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Professional support access</p>
-            <h2 className="mt-2 font-display text-3xl font-semibold text-slate-950">{selectedShop?.name ?? "No store selected"}</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              No hidden master password. Use timed impersonation or reset a store user password with audit logs. The old password is never shown.
-            </p>
+          <Card className="p-4">
+            <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
+              <Input
+                placeholder="Search store before support access"
+                value={storeSearch}
+                onChange={(event) => setStoreSearch(event.target.value)}
+              />
+              <div className="flex flex-wrap gap-2">
+                {[
+                  ["all", "All"],
+                  ["active", "Active"],
+                  ["trial", "Trial"],
+                  ["expiring", "Expiring"],
+                  ["locked", "Locked"],
+                  ["expired", "Expired"]
+                ].map(([id, label]) => (
+                  <StoreFilterButton
+                    active={storeFilter === id}
+                    count={ownerMetrics.counts[id as StoreFilter]}
+                    key={id}
+                    label={label}
+                    onClick={() => setStoreFilter(id as StoreFilter)}
+                  />
+                ))}
+              </div>
+            </div>
+          </Card>
 
-            {selectedShop ? (
-              <div className="mt-6 grid gap-5 lg:grid-cols-2">
-                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                  <h3 className="font-display text-2xl font-semibold text-slate-950">Timed support session</h3>
-                  <Textarea className="mt-4" placeholder="Reason for support access" value={supportReasons[selectedShop.id] ?? ""} onChange={(event) => setSupportReasons((current) => ({ ...current, [selectedShop.id]: event.target.value }))} />
-                  <Button className="mt-4" onClick={() => showResult(ownerStartSupportSession({ shopId: selectedShop.id, reason: supportReasons[selectedShop.id] ?? "", minutes: 60 }))}>
-                    Start 60 minute session
-                  </Button>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {filteredStoreRows.map((row) => (
+              <button
+                className="rounded-[28px] border border-slate-200 bg-white p-5 text-left shadow-[0_18px_48px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-slate-950"
+                key={row.shop.id}
+                onClick={() => {
+                  setSelectedShopId(row.shop.id);
+                  setSelectedResetUserId("");
+                  setAccessDetailOpen(true);
+                }}
+                type="button"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-display text-2xl font-semibold text-slate-950">{row.shop.name}</p>
+                    <p className="mt-1 truncate text-sm text-slate-500">{row.shop.email || row.shop.phone || "No contact saved"}</p>
+                  </div>
+                  <Badge variant={licenseVariant(row.status)}>{row.status}</Badge>
                 </div>
-
-                <div className="rounded-3xl border border-slate-200 bg-white p-5">
-                  <h3 className="font-display text-2xl font-semibold text-slate-950">Reset store user password</h3>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">
-                    Use this when a cashier or shop admin forgets the POS sign-in password. For live users, this updates Supabase Auth.
-                  </p>
-                  <div className="mt-4 grid gap-3">
-                    <Select value={selectedResetUserId} onChange={(event) => setSelectedResetUserId(event.target.value)}>
-                      <option value="">Select store user</option>
-                      {selectedUsers.map((user) => (
-                        <option key={user.id} value={user.id}>{user.name} - {user.email}</option>
-                      ))}
-                    </Select>
-                    <Input minLength={8} placeholder="New temporary password" type="password" value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} />
-                    <Button
-                      disabled={!selectedResetUser || isResettingPassword}
-                      onClick={async () => {
-                        if (!selectedShop || !selectedResetUser) {
-                          return;
-                        }
-
-                        setIsResettingPassword(true);
-                        try {
-                          const result = await ownerResetShopUserPassword({
-                            email: selectedResetUser.email,
-                            password: temporaryPassword,
-                            shopId: selectedShop.id,
-                            userId: selectedResetUser.id
-                          });
-                          showResult(result);
-                          if (result.ok) {
-                            setTemporaryPassword("");
-                          }
-                        } finally {
-                          setIsResettingPassword(false);
-                        }
-                      }}
-                      variant="secondary"
-                    >
-                      {isResettingPassword ? "Resetting password..." : "Save temporary password"}
-                    </Button>
-                    {selectedResetUser ? (
-                      <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-xs font-medium leading-5 text-emerald-900">
-                        Selected: {selectedResetUser.name} ({selectedResetUser.role}). Give the new password to the user securely.
-                      </p>
-                    ) : null}
+                <div className="mt-5 grid grid-cols-2 gap-2 text-center">
+                  <div className="rounded-2xl bg-slate-50 p-3">
+                    <p className="font-display text-xl font-semibold text-slate-950">{row.users.length}</p>
+                    <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Users</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-3">
+                    <p className="font-display text-xl font-semibold text-slate-950">{row.devices.length}</p>
+                    <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Devices</p>
                   </div>
                 </div>
-              </div>
-            ) : null}
-          </Card>
+              </button>
+            ))}
+          </div>
+
+          {filteredStoreRows.length === 0 ? (
+            <Card className="p-8 text-center">
+              <p className="font-display text-2xl font-semibold text-slate-950">No stores found</p>
+            </Card>
+          ) : null}
         </div>
+      );
+    }
+
+    return (
+      <div className="grid gap-5">
+        <Card className="p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <Button onClick={() => setAccessDetailOpen(false)} type="button" variant="secondary">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to store selection
+            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant={licenseVariant(getEffectiveLicenseStatus(selectedLicense))}>{getEffectiveLicenseStatus(selectedLicense)}</Badge>
+              <Badge variant="neutral">{selectedUsers.length} users</Badge>
+              <Badge variant="neutral">{selectedDevices.length} devices</Badge>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Professional support access</p>
+          <h2 className="mt-2 font-display text-3xl font-semibold text-slate-950">{selectedShop?.name ?? "No store selected"}</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            No hidden master password. Use timed impersonation or reset a store user password with audit logs. The old password is never shown.
+          </p>
+
+          {selectedShop ? (
+            <div className="mt-6 grid gap-5 lg:grid-cols-2">
+              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                <h3 className="font-display text-2xl font-semibold text-slate-950">Timed support session</h3>
+                <Textarea className="mt-4" placeholder="Reason for support access" value={supportReasons[selectedShop.id] ?? ""} onChange={(event) => setSupportReasons((current) => ({ ...current, [selectedShop.id]: event.target.value }))} />
+                <Button className="mt-4" onClick={() => showResult(ownerStartSupportSession({ shopId: selectedShop.id, reason: supportReasons[selectedShop.id] ?? "", minutes: 60 }))}>
+                  Start 60 minute session
+                </Button>
+              </div>
+
+              <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                <h3 className="font-display text-2xl font-semibold text-slate-950">Reset store user password</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Use this when a cashier or shop admin forgets the POS sign-in password. For live users, this updates Supabase Auth.
+                </p>
+                <div className="mt-4 grid gap-3">
+                  <Select value={selectedResetUserId} onChange={(event) => setSelectedResetUserId(event.target.value)}>
+                    <option value="">Select store user</option>
+                    {selectedUsers.map((user) => (
+                      <option key={user.id} value={user.id}>{user.name} - {user.email}</option>
+                    ))}
+                  </Select>
+                  <Input minLength={8} placeholder="New temporary password" type="password" value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} />
+                  <Button
+                    disabled={!selectedResetUser || isResettingPassword}
+                    onClick={async () => {
+                      if (!selectedShop || !selectedResetUser) {
+                        return;
+                      }
+
+                      setIsResettingPassword(true);
+                      try {
+                        const result = await ownerResetShopUserPassword({
+                          email: selectedResetUser.email,
+                          password: temporaryPassword,
+                          shopId: selectedShop.id,
+                          userId: selectedResetUser.id
+                        });
+                        showResult(result);
+                        if (result.ok) {
+                          setTemporaryPassword("");
+                        }
+                      } finally {
+                        setIsResettingPassword(false);
+                      }
+                    }}
+                    variant="secondary"
+                  >
+                    {isResettingPassword ? "Resetting password..." : "Save temporary password"}
+                  </Button>
+                  {selectedResetUser ? (
+                    <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-xs font-medium leading-5 text-emerald-900">
+                      Selected: {selectedResetUser.name} ({selectedResetUser.role}). Give the new password to the user securely.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </Card>
       </div>
     );
   };
@@ -2097,6 +2373,12 @@ export default function OwnerPage() {
                 setActiveSection(section.id);
                 if (section.id === "stores") {
                   setStoreDetailOpen(false);
+                }
+                if (section.id === "branding") {
+                  setBrandingView("menu");
+                }
+                if (section.id === "access") {
+                  setAccessDetailOpen(false);
                 }
               }}
             />
