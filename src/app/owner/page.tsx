@@ -1850,9 +1850,7 @@ export default function OwnerPage() {
         <div className="grid gap-4 xl:grid-cols-3">
           <div className="rounded-3xl border border-slate-200 bg-white p-5">
             <p className="text-sm font-semibold text-slate-950">POS login hero pictures</p>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              Upload one or many pictures, or paste image URLs below. Login randomly chooses one visual each time it opens.
-            </p>
+            <p className="mt-2 text-sm font-semibold text-slate-500">Recommended size: 1600 x 1100 px.</p>
             <Input
               accept="image/*"
               className="mt-4 h-auto py-3"
@@ -1906,64 +1904,39 @@ export default function OwnerPage() {
           </div>
           <div className="rounded-3xl border border-slate-200 bg-white p-5">
             <p className="text-sm font-semibold text-slate-950">POS login quotes</p>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              Add one quote per line. Login randomly chooses one quote each time it opens.
-            </p>
+            <p className="mt-2 text-sm font-semibold text-slate-500">One quote per line.</p>
             <Textarea
               className="mt-4 min-h-36"
               value={loginQuotesText}
               onChange={(event) => setLoginQuotesText(event.target.value)}
             />
           </div>
-          <div className="rounded-3xl border border-emerald-200 bg-emerald-50/70 p-5">
+          <div className="rounded-3xl border border-slate-200 bg-white p-5">
             <label className="flex items-center gap-3 text-sm font-semibold text-slate-950">
               <input
                 checked={loginAdEnabled}
-                className="h-5 w-5 accent-emerald-600"
+                className="h-5 w-5 accent-slate-950"
                 onChange={(event) => setLoginAdEnabled(event.target.checked)}
                 type="checkbox"
               />
-              Show ad/announcement box on POS dashboard
+              Show dashboard image
             </label>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              This appears on the dashboard after sign-in. Login only shows the hero picture and quote.
-            </p>
+            <p className="mt-2 text-sm font-semibold text-slate-500">Recommended size: 1600 x 900 px.</p>
             <div className="mt-4 grid gap-3">
-              <Input placeholder="Ad title" value={loginAdTitle} onChange={(event) => setLoginAdTitle(event.target.value)} />
               <label className="space-y-2">
-                <span className="text-sm font-semibold text-slate-950">Dashboard announcement picture</span>
+                <span className="text-sm font-semibold text-slate-950">Dashboard picture</span>
                 <Input accept="image/*" className="h-auto py-3" type="file" onChange={(event) => void loadLoginAdImage(event.target.files?.[0])} />
-                <span className="block text-xs leading-5 text-slate-600">
-                  Recommended size: 1600x900, 16:9 landscape. It appears wide on the POS dashboard.
-                </span>
               </label>
               {loginAdImageUrl ? (
-                <div className="overflow-hidden rounded-[28px] border border-emerald-200 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.08)]">
-                  <img alt="Login ad preview" className="aspect-video w-full object-cover" src={loginAdImageUrl} />
+                <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.08)]">
+                  <img alt="Dashboard image preview" className="aspect-video w-full object-cover" src={loginAdImageUrl} />
                   <div className="flex items-center justify-between gap-3 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Ad image preview</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Dashboard image</p>
                     <Button onClick={() => setLoginAdImageUrl("")} size="sm" type="button" variant="secondary">Remove image</Button>
                   </div>
                 </div>
               ) : null}
-              <Textarea
-                className="min-h-28"
-                placeholder="Ad message"
-                value={loginAdMessage}
-                onChange={(event) => setLoginAdMessage(event.target.value)}
-              />
-              <div className="grid gap-3 md:grid-cols-2">
-                <Input
-                  placeholder="CTA label"
-                  value={loginAdCtaLabel}
-                  onChange={(event) => setLoginAdCtaLabel(event.target.value)}
-                />
-                <Input
-                  placeholder="CTA URL"
-                  value={loginAdCtaUrl}
-                  onChange={(event) => setLoginAdCtaUrl(event.target.value)}
-                />
-              </div>
+              <Input placeholder="Optional click URL" value={loginAdCtaUrl} onChange={(event) => setLoginAdCtaUrl(event.target.value)} />
             </div>
           </div>
         </div>

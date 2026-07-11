@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, LockKeyhole, LogOut, ShieldCheck, Sparkles, Store, UserRound } from "lucide-react";
+import { KeyRound, LockKeyhole, LogOut, ShieldCheck, Store, UserRound } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
 import { LocaleSwitcher } from "@/components/shared/locale-switcher";
 import { Button } from "@/components/ui/button";
@@ -415,8 +415,8 @@ export function LoginForm() {
 
   return (
     <div className="grid gap-5 lg:h-[calc(100dvh-5rem)] lg:grid-cols-[minmax(0,1fr)_minmax(380px,460px)] lg:overflow-hidden">
-      <Card className="relative order-2 overflow-hidden border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_34%),linear-gradient(145deg,#ffffff_0%,#eef8f3_100%)] p-4 sm:p-6 lg:order-1 lg:h-full lg:p-7">
-        <div className="absolute right-[-120px] top-[-120px] h-80 w-80 rounded-full bg-emerald-200/35 blur-3xl" />
+      <Card className="relative order-2 overflow-hidden border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(15,23,42,0.08),_transparent_34%),linear-gradient(145deg,#ffffff_0%,#f6f1e8_100%)] p-4 sm:p-6 lg:order-1 lg:h-full lg:p-7">
+        <div className="absolute right-[-120px] top-[-120px] h-80 w-80 rounded-full bg-slate-200/40 blur-3xl" />
         <div className="absolute bottom-[-150px] left-[-120px] h-80 w-80 rounded-full bg-amber-200/35 blur-3xl" />
 
         <div className="relative flex h-full min-h-[540px] flex-col gap-5 lg:min-h-0">
@@ -432,7 +432,7 @@ export function LoginForm() {
                 </span>
               )}
               <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
                   {isOwnerMode ? "Owner portal" : activatedShop ? "Store POS" : "POS activation"}
                 </p>
                 <h1 className="mt-1 truncate font-display text-3xl font-semibold leading-tight text-slate-950 sm:text-4xl">
@@ -448,38 +448,12 @@ export function LoginForm() {
               {heroImage ? (
                 <img alt={state.brand.posName} className="h-full w-full object-cover" src={heroImage} />
               ) : (
-                <div className="grid h-full min-h-[360px] place-items-center bg-[radial-gradient(circle_at_30%_20%,_rgba(16,185,129,0.42),_transparent_32%),radial-gradient(circle_at_80%_10%,_rgba(245,158,11,0.34),_transparent_26%),linear-gradient(135deg,#020617_0%,#064e3b_100%)]">
-                  <div className="text-center text-white">
-                    <Sparkles className="mx-auto h-14 w-14 text-emerald-100" />
-                    <p className="mt-5 text-xs font-semibold uppercase tracking-[0.28em] text-white/60">{state.brand.companyName}</p>
-                    <p className="mt-2 font-display text-5xl font-semibold">{state.brand.posName}</p>
-                  </div>
-                </div>
+                <div className="h-full min-h-[360px] bg-[radial-gradient(circle_at_20%_20%,_rgba(245,158,11,0.24),_transparent_30%),radial-gradient(circle_at_80%_10%,_rgba(148,163,184,0.22),_transparent_28%),linear-gradient(135deg,#020617_0%,#111827_100%)]" />
               )}
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/85 via-slate-950/24 to-transparent p-6 text-white">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100/80">
-                  {activatedShop ? "Ready for checkout" : "Simple POS workspace"}
-                </p>
-                <p className="mt-2 max-w-xl text-sm leading-6 text-white/80">
-                  {isOwnerMode
-                    ? "Owner controls stay separate from the client POS."
-                    : activatedShop
-                      ? `${activatedShop.address || "Store workspace"} | ${activatedShop.phone || "No phone saved"}`
-                      : "Activate once, then keep the counter fast and clean."}
-                </p>
-              </div>
             </div>
 
-            <div className="rounded-[30px] border border-white/80 bg-white/75 p-5 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Counter quote</p>
-              <p className="mt-3 font-display text-2xl font-semibold leading-tight text-slate-950">"{visibleQuote}"</p>
-              <p className="mt-3 text-sm leading-6 text-slate-600">
-                {isOwnerMode
-                  ? "Manage stores, keys, licenses, branding, and access from a separate owner workspace."
-                  : activatedShop
-                    ? `${activatedShop.address || "Store workspace"} | ${activatedShop.phone || "No phone saved"}`
-                    : "Enter the activation key once. After that, this page becomes the normal user sign-in screen for this store."}
-              </p>
+            <div className="rounded-[30px] border border-white/80 bg-white/82 p-5 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur">
+              <p className="font-display text-2xl font-semibold leading-tight text-slate-950">"{visibleQuote}"</p>
             </div>
           </div>
 
