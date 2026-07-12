@@ -1191,8 +1191,8 @@ export function BillingWorkspace() {
         ) : null}
       </Card>
 
-      <div className="grid flex-1 min-h-0 gap-3 xl:grid-cols-[minmax(0,1.35fr)_500px] 2xl:grid-cols-[minmax(0,1.25fr)_560px]">
-        <Card className="grid min-h-[560px] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:min-h-0">
+      <div className="grid flex-1 min-h-0 gap-3 xl:grid-cols-2">
+        <Card className="grid min-h-[560px] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:order-2 xl:min-h-0">
           <div className="border-b border-slate-200 px-4 py-4">
             <div className="relative">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -1255,7 +1255,7 @@ export function BillingWorkspace() {
           <div className="min-h-0 overflow-y-auto px-4 py-4">{renderCartRows()}</div>
 
           <div className="border-t border-slate-200 px-4 py-3">
-            <div className="grid gap-3 xl:grid-cols-[170px_minmax(0,1fr)_320px] xl:items-stretch">
+            <div className="grid gap-3 xl:grid-cols-[150px_minmax(0,1fr)_260px] 2xl:grid-cols-[170px_minmax(0,1fr)_300px] xl:items-stretch">
               <Button
                 asChild
                 className="group h-[68px] justify-start rounded-[20px] border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-950 shadow-[0_12px_28px_rgba(15,23,42,0.06)] hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50/70 hover:shadow-[0_16px_34px_rgba(5,150,105,0.13)]"
@@ -1301,7 +1301,7 @@ export function BillingWorkspace() {
           </div>
         </Card>
 
-        <Card className="grid min-h-[560px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:min-h-0">
+        <Card className="grid min-h-[560px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:order-1 xl:min-h-0">
           <div className="border-b border-slate-200 px-4 py-4">
             <SectionEyebrow>{t("billing.quickProductsTitle")}</SectionEyebrow>
             <div className="mt-1 flex items-start justify-between gap-3">
