@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -212,6 +212,7 @@ function SectionEyebrow({ children }: { children: ReactNode }) {
 
 export function BillingWorkspace() {
   const router = useRouter();
+  const cartPanelRef = useRef<HTMLDivElement>(null);
   const {
     createBill,
     currentBusinessDay,
@@ -258,6 +259,11 @@ export function BillingWorkspace() {
   const checkoutBlocked = !currentBusinessDay || !currentShift;
   const customerSearchHasValue = deferredCustomerSearch.trim().length > 0;
   const productSearchHasValue = productSearch.trim().length > 0;
+
+  const focusCartPanel = () => {
+    cartPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "start" });
+    cartPanelRef.current?.focus({ preventScroll: true });
+  };
 
   const productById = useMemo(
     () =>
@@ -1189,8 +1195,12 @@ export function BillingWorkspace() {
         ) : null}
       </Card>
 
-      <div className="grid flex-1 min-h-0 gap-3 xl:grid-cols-[minmax(0,1.8fr)_320px]">
-        <Card className="grid min-h-[560px] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:min-h-0">
+      <div className="grid flex-1 min-h-0 gap-3 xl:grid-cols-[minmax(0,1.55fr)_420px] 2xl:grid-cols-[minmax(0,1.45fr)_460px]">
+        <Card
+          ref={cartPanelRef}
+          tabIndex={-1}
+          className="grid min-h-[560px] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] outline-none transition focus:ring-2 focus:ring-emerald-300/80 xl:min-h-0"
+        >
           <div className="border-b border-slate-200 px-4 py-4">
             <div className="relative">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -1284,7 +1294,7 @@ export function BillingWorkspace() {
           </div>
         </Card>
 
-        <Card className="grid min-h-[560px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:min-h-0">
+        <Card className="grid min-h-[560px] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:min-h-0">
           <div className="border-b border-slate-200 px-4 py-4">
             <SectionEyebrow>{t("billing.quickProductsTitle")}</SectionEyebrow>
             <div className="mt-1 flex items-start justify-between gap-3">
@@ -1433,6 +1443,20 @@ export function BillingWorkspace() {
             ) : (
               <EmptyState label={t("billing.emptyQuickTab")} />
             )}
+          </div>
+
+          <div className="border-t border-slate-200 px-4 py-3">
+            <Button
+              className="h-11 w-full rounded-[16px] border border-emerald-200 bg-emerald-50 text-sm font-semibold text-emerald-900 shadow-inner shadow-emerald-100 hover:bg-emerald-100"
+              onClick={focusCartPanel}
+              type="button"
+              variant="secondary"
+            >
+              <span className="inline-flex items-center gap-2">
+                <ArrowLeft className="h-4 w-4" />
+                {t("billing.backToSale")}
+              </span>
+            </Button>
           </div>
         </Card>
       </div>
