@@ -8,6 +8,7 @@ import {
   getBusinessDateInTimezone,
   getLatestClosedShift
 } from "@/lib/cash-control";
+import { calculateSalesReportSummaryRange } from "@/lib/refunds";
 import { usePosApp } from "@/components/providers/app-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,6 +51,69 @@ function SummaryRow({
   );
 }
 
+function getMonthStart(value: string) {
+  return `${value.slice(0, 7)}-01`;
+}
+
+function getWeekStart(value: string) {
+  const date = new Date(`${value}T00:00:00`);
+  const day = date.getDay();
+  const daysFromMonday = day === 0 ? 6 : day - 1;
+  date.setDate(date.getDate() - daysFromMonday);
+  return date.toISOString().slice(0, 10);
+}
+
+function OverviewStatCard({
+  label,
+  value,
+  note,
+  tone = "neutral"
+}: {
+  label: string;
+  value: string;
+  note: string;
+  tone?: "neutral" | "success" | "warning";
+}) {
+  const toneClass =
+    tone === "success"
+      ? "border-emerald-200 bg-emerald-50"
+      : tone === "warning"
+        ? "border-amber-200 bg-amber-50"
+        : "border-slate-200 bg-white";
+
+  return (
+    <div className={`rounded-[26px] border p-5 shadow-[0_18px_42px_rgba(15,23,42,0.05)] ${toneClass}`}>
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{label}</p>
+      <p className="mt-3 font-display text-3xl font-semibold tracking-[-0.04em] text-ink">{value}</p>
+      <p className="mt-2 text-sm leading-5 text-slate-600">{note}</p>
+    </div>
+  );
+}
+
+function DashboardMiniMetric({
+  label,
+  value,
+  tone = "neutral"
+}: {
+  label: string;
+  value: string;
+  tone?: "neutral" | "success" | "warning";
+}) {
+  const toneClass =
+    tone === "success"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+      : tone === "warning"
+        ? "border-amber-200 bg-amber-50 text-amber-950"
+        : "border-slate-200 bg-slate-50 text-slate-950";
+
+  return (
+    <div className={`rounded-[22px] border p-4 ${toneClass}`}>
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
+      <p className="mt-2 font-display text-2xl font-semibold tracking-[-0.03em]">{value}</p>
+    </div>
+  );
+}
+
 export function CashControlPanel() {
   const {
     addCashMovement,
@@ -88,7 +152,7 @@ export function CashControlPanel() {
   const [expensePaymentMethod, setExpensePaymentMethod] = useState<"cash" | "card" | "bank">("cash");
   const [expenseVendorName, setExpenseVendorName] = useState("");
   const [expenseNote, setExpenseNote] = useState("");
-  const [activeControl, setActiveControl] = useState<"day" | "shift" | "expenses">("day");
+  const [activeControl, setActiveControl] = useState<"overview" | "day" | "shift" | "expenses">("overview");
   const [dayFeedback, setDayFeedback] = useState<Feedback>(null);
   const [shiftFeedback, setShiftFeedback] = useState<Feedback>(null);
   const [movementFeedback, setMovementFeedback] = useState<Feedback>(null);
@@ -164,6 +228,98 @@ export function CashControlPanel() {
     );
   }, [currentBusinessDay, currentShop, state.shifts]);
 
+  const deviceShiftLimit = useMemo(() => {
+    if (!currentShop) {
+      return 1;
+    }
+
+    const shopKeys = state.productKeys.filter((key) => key.shopId === currentShop.id && key.status !== "revoked");
+    const keyLimit = shopKeys.reduce((highest, key) => Math.max(highest, key.allowedDevices), 0);
+
+    return Math.max(1, keyLimit);
+  }, [currentShop, state.productKeys]);
+
+  const todaySummary = useMemo(() => {
+    if (!currentShop) {
+      return null;
+    }
+
+    return calculateSalesReportSummaryRange({
+      dateFrom: todayBusinessDate,
+      dateTo: todayBusinessDate,
+      shopId: currentShop.id,
+      timeZone,
+      bills: state.bills,
+      billItems: state.billItems,
+      expenses: state.expenses,
+      refunds: state.refunds
+    });
+  }, [currentShop, state.billItems, state.bills, state.expenses, state.refunds, timeZone, todayBusinessDate]);
+
+  const weekSummary = useMemo(() => {
+    if (!currentShop) {
+      return null;
+    }
+
+    return calculateSalesReportSummaryRange({
+      dateFrom: getWeekStart(todayBusinessDate),
+      dateTo: todayBusinessDate,
+      shopId: currentShop.id,
+      timeZone,
+      bills: state.bills,
+      billItems: state.billItems,
+      expenses: state.expenses,
+      refunds: state.refunds
+    });
+  }, [currentShop, state.billItems, state.bills, state.expenses, state.refunds, timeZone, todayBusinessDate]);
+
+  const monthSummary = useMemo(() => {
+    if (!currentShop) {
+      return null;
+    }
+
+    return calculateSalesReportSummaryRange({
+      dateFrom: getMonthStart(todayBusinessDate),
+      dateTo: todayBusinessDate,
+      shopId: currentShop.id,
+      timeZone,
+      bills: state.bills,
+      billItems: state.billItems,
+      expenses: state.expenses,
+      refunds: state.refunds
+    });
+  }, [currentShop, state.billItems, state.bills, state.expenses, state.refunds, timeZone, todayBusinessDate]);
+
+  const inventoryPulse = useMemo(() => {
+    if (!currentShop) {
+      return {
+        activeProducts: 0,
+        lowStock: 0,
+        stockUnits: 0,
+        stockValue: 0
+      };
+    }
+
+    const physicalProducts = state.products.filter(
+      (product) => product.shopId === currentShop.id && product.kind === "product" && product.status === "active"
+    );
+
+    return physicalProducts.reduce(
+      (totals, product) => ({
+        activeProducts: totals.activeProducts + 1,
+        lowStock: totals.lowStock + (product.stockQuantity <= product.reorderLevel ? 1 : 0),
+        stockUnits: totals.stockUnits + product.stockQuantity,
+        stockValue: totals.stockValue + product.stockQuantity * product.costPrice
+      }),
+      {
+        activeProducts: 0,
+        lowStock: 0,
+        stockUnits: 0,
+        stockValue: 0
+      }
+    );
+  }, [currentShop, state.products]);
+
   const recentMovements = useMemo(() => {
     if (!currentShop) {
       return [];
@@ -171,6 +327,7 @@ export function CashControlPanel() {
 
     return state.cashMovements
       .filter((movement) => movement.shopId === currentShop.id)
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
       .slice(0, 5);
   }, [currentShop, state.cashMovements]);
 
@@ -371,8 +528,9 @@ export function CashControlPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex w-full max-w-md rounded-[18px] border border-slate-200 bg-white p-1 shadow-[0_14px_34px_rgba(15,23,42,0.04)]">
+      <div className="flex w-full max-w-2xl rounded-[20px] border border-slate-200 bg-white p-1 shadow-[0_14px_34px_rgba(15,23,42,0.04)]">
         {([
+          { key: "overview", label: t("dashboard.overview") },
           { key: "day", label: t("cashControl.dayLabel") },
           { key: "shift", label: t("cashControl.shiftLabel") },
           { key: "expenses", label: t("cashControl.expenses") }
@@ -391,6 +549,111 @@ export function CashControlPanel() {
       </div>
 
       <div className="grid gap-6">
+        {activeControl === "overview" ? (
+          <Card className="overflow-hidden p-0">
+            <div className="border-b border-slate-200 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.12),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fafc_100%)] p-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-olive">{t("dashboard.registerOverview")}</p>
+                  <h2 className="mt-2 font-display text-2xl font-semibold text-ink">{t("dashboard.salesCashControl")}</h2>
+                </div>
+                <Badge variant={currentBusinessDay ? "success" : "warning"}>
+                  {currentBusinessDay ? t("cashControl.dayOpen") : t("cashControl.dayClosedState")}
+                </Badge>
+              </div>
+            </div>
+
+            <div className="grid gap-4 p-6 md:grid-cols-2 xl:grid-cols-5">
+              <OverviewStatCard
+                label={t("dashboard.todaySales")}
+                value={formatCurrency(todaySummary?.netSales ?? 0, currency, locale)}
+                note={t("dashboard.todayBillsAfterRefunds", { count: todaySummary?.billCount ?? 0 })}
+                tone={currentBusinessDay ? "success" : "neutral"}
+              />
+              <OverviewStatCard
+                label={t("dashboard.weekSales")}
+                value={formatCurrency(weekSummary?.netSales ?? 0, currency, locale)}
+                note={t("dashboard.weekRangeToToday", { from: formatBusinessDate(getWeekStart(todayBusinessDate), locale) })}
+              />
+              <OverviewStatCard
+                label={t("dashboard.monthSales")}
+                value={formatCurrency(monthSummary?.netSales ?? 0, currency, locale)}
+                note={t("dashboard.monthNetSales")}
+              />
+              <OverviewStatCard
+                label={t("dashboard.monthProfit", { month: todayBusinessDate.slice(0, 7) })}
+                value={formatCurrency(monthSummary?.netProfit ?? 0, currency, locale)}
+                note={t("dashboard.monthProfitAfterAdjustments")}
+                tone="success"
+              />
+              <OverviewStatCard
+                label={t("dashboard.openShifts")}
+                value={`${openShiftsForDay.length}/${deviceShiftLimit}`}
+                note={t("dashboard.openShiftsCapacity")}
+                tone={openShiftsForDay.length >= deviceShiftLimit ? "warning" : "neutral"}
+              />
+            </div>
+
+            <div className="grid gap-4 border-t border-slate-200 p-6 lg:grid-cols-2">
+              <div className="rounded-[28px] border border-slate-200 bg-white p-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{t("dashboard.registerStatus")}</p>
+                <div className="mt-4 space-y-3">
+                  <SummaryRow
+                    label={t("cashControl.businessDate")}
+                    value={currentBusinessDay ? formatBusinessDate(currentBusinessDay.businessDate, locale) : t("dashboard.notOpen")}
+                    emphasis
+                  />
+                  <SummaryRow
+                    label={t("dashboard.dayBills")}
+                    value={`${activeDaySummary?.billCount ?? 0}`}
+                  />
+                  <SummaryRow
+                    label={t("dashboard.shiftBills")}
+                    value={`${activeShiftSummary?.billCount ?? 0}`}
+                  />
+                  <SummaryRow
+                    label={t("cashControl.expectedCash")}
+                    value={formatCurrency(activeDaySummary?.expectedCash ?? 0, currency, locale)}
+                    emphasis
+                  />
+                  <SummaryRow
+                    label={t("cashControl.cashSales")}
+                    value={formatCurrency(activeDaySummary?.cashSales ?? 0, currency, locale)}
+                  />
+                  <SummaryRow
+                    label={t("cashControl.expenses")}
+                    value={formatCurrency(activeDaySummary?.expenses ?? 0, currency, locale)}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-[28px] border border-slate-200 bg-white p-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{t("dashboard.inventoryPulse")}</p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <DashboardMiniMetric
+                    label={t("dashboard.inventoryValue")}
+                    value={formatCurrency(inventoryPulse.stockValue, currency, locale)}
+                    tone="success"
+                  />
+                  <DashboardMiniMetric
+                    label={t("dashboard.inventoryUnits")}
+                    value={`${inventoryPulse.stockUnits}`}
+                  />
+                  <DashboardMiniMetric
+                    label={t("dashboard.activeProducts")}
+                    value={`${inventoryPulse.activeProducts}`}
+                  />
+                  <DashboardMiniMetric
+                    label={t("dashboard.lowStockItems")}
+                    value={`${inventoryPulse.lowStock}`}
+                    tone={inventoryPulse.lowStock > 0 ? "warning" : "neutral"}
+                  />
+                </div>
+              </div>
+            </div>
+          </Card>
+        ) : null}
+
         {activeControl === "day" ? (
       <Card className="p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -523,7 +786,8 @@ export function CashControlPanel() {
             <div className="rounded-3xl bg-shell p-5">
               <div className="flex flex-wrap items-center gap-3">
                 <Badge variant="neutral">{formatDateTime(currentShift.startedAt, locale)}</Badge>
-                <Badge variant="neutral">{t("cashControl.billCount", { count: activeShiftSummary.billCount })}</Badge>
+                <Badge variant="neutral">{t("dashboard.shiftBillsWithCount", { count: activeShiftSummary.billCount })}</Badge>
+                <Badge variant="neutral">{t("dashboard.dayBillsWithCount", { count: activeDaySummary?.billCount ?? 0 })}</Badge>
               </div>
             </div>
 
@@ -572,43 +836,6 @@ export function CashControlPanel() {
               <FeedbackText feedback={shiftFeedback} />
             </div>
 
-            <div className="rounded-3xl border border-dashed border-line bg-shell/70 p-5">
-              <div className="flex items-center gap-2 text-sm font-semibold text-ink">
-                {movementType === "cash_in" ? <ArrowDownLeft className="h-4 w-4" /> : <ArrowUpRight className="h-4 w-4" />}
-                {t("cashControl.movementTitle")}
-              </div>
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.movementType")}</label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Button
-                      variant={movementType === "cash_in" ? "primary" : "secondary"}
-                      onClick={() => setMovementType("cash_in")}
-                    >
-                      {t("cashControl.cashIn")}
-                    </Button>
-                    <Button
-                      variant={movementType === "cash_out" ? "primary" : "secondary"}
-                      onClick={() => setMovementType("cash_out")}
-                    >
-                      {t("cashControl.cashOut")}
-                    </Button>
-                  </div>
-                </div>
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.amount")}</label>
-                  <Input inputMode="decimal" value={movementAmount} onChange={(event) => setMovementAmount(event.target.value)} />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="mb-2 block text-sm font-medium text-ink">{t("common.reason")}</label>
-                  <Textarea value={movementReason} onChange={(event) => setMovementReason(event.target.value)} />
-                </div>
-                <Button className="sm:col-span-2" onClick={handleCashMovement}>
-                  {t("cashControl.saveMovement")}
-                </Button>
-                <FeedbackText feedback={movementFeedback} />
-              </div>
-            </div>
           </div>
         ) : canUseShift ? (
           <div className="mt-6 space-y-5">
@@ -668,30 +895,6 @@ export function CashControlPanel() {
           </div>
         )}
 
-        <div className="mt-6 rounded-3xl bg-cloud p-5">
-          <div className="flex items-center gap-2 text-sm font-semibold text-ink">
-            <Wallet className="h-4 w-4" />
-            {t("cashControl.recentMovements")}
-          </div>
-          <div className="mt-4 space-y-3">
-            {recentMovements.length > 0 ? (
-              recentMovements.map((movement) => (
-                <div key={movement.id} className="rounded-2xl bg-white px-4 py-3">
-                  <div className="flex items-center justify-between gap-3 text-sm">
-                    <span className="font-medium text-ink">
-                      {movement.type === "cash_in" ? t("cashControl.cashIn") : t("cashControl.cashOut")}
-                    </span>
-                    <span className="text-ink">{formatCurrency(movement.amount, currency, locale)}</span>
-                  </div>
-                  <p className="mt-1 text-sm text-slate-600">{movement.reason}</p>
-                  <p className="mt-1 text-xs text-slate-500">{formatDateTime(movement.createdAt, locale)}</p>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm leading-6 text-slate-600">{t("cashControl.noMovements")}</p>
-            )}
-          </div>
-        </div>
       </Card>
         ) : null}
 
@@ -709,8 +912,13 @@ export function CashControlPanel() {
         </div>
 
         {canManageDay ? (
-          <div className="mt-6 grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+          <div className="mt-6 space-y-5">
+          <div className="grid gap-5 xl:grid-cols-2">
             <div className="rounded-3xl border border-line bg-white p-5">
+              <div className="mb-5 flex items-center gap-2 text-sm font-semibold text-ink">
+                <Wallet className="h-4 w-4" />
+                {t("expense.title")}
+              </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="mb-2 block text-sm font-medium text-ink">{t("common.category")}</label>
@@ -772,6 +980,58 @@ export function CashControlPanel() {
               </div>
             </div>
 
+            <div className="rounded-3xl border border-line bg-white p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+                    {movementType === "cash_in" ? <ArrowDownLeft className="h-4 w-4" /> : <ArrowUpRight className="h-4 w-4" />}
+                    {t("cashControl.drawerAdjustmentTitle")}
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-slate-500">{t("cashControl.drawerAdjustmentHint")}</p>
+                </div>
+                <Badge variant="neutral">
+                  {movementType === "cash_in" ? t("cashControl.cashIn") : t("cashControl.cashOut")}
+                </Badge>
+              </div>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.movementType")}</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Button
+                      variant={movementType === "cash_in" ? "primary" : "secondary"}
+                      onClick={() => setMovementType("cash_in")}
+                    >
+                      {t("cashControl.cashIn")}
+                    </Button>
+                    <Button
+                      variant={movementType === "cash_out" ? "primary" : "secondary"}
+                      onClick={() => setMovementType("cash_out")}
+                    >
+                      {t("cashControl.cashOut")}
+                    </Button>
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.amount")}</label>
+                  <Input inputMode="decimal" value={movementAmount} onChange={(event) => setMovementAmount(event.target.value)} />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="mb-2 block text-sm font-medium text-ink">{t("common.reason")}</label>
+                  <Textarea value={movementReason} onChange={(event) => setMovementReason(event.target.value)} />
+                </div>
+                <Button
+                  className="sm:col-span-2"
+                  onClick={handleCashMovement}
+                  disabled={!currentBusinessDay || !currentShift}
+                >
+                  {t("cashControl.saveMovement")}
+                </Button>
+                <FeedbackText feedback={movementFeedback} />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-5 xl:grid-cols-2">
             <div className="rounded-3xl bg-cloud p-5">
               <div className="flex items-center gap-2 text-sm font-semibold text-ink">
                 <Wallet className="h-4 w-4" />
@@ -797,6 +1057,32 @@ export function CashControlPanel() {
                 )}
               </div>
             </div>
+
+            <div className="rounded-3xl bg-cloud p-5">
+              <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+                <Wallet className="h-4 w-4" />
+                {t("cashControl.recentMovements")}
+              </div>
+              <div className="mt-4 space-y-3">
+                {recentMovements.length > 0 ? (
+                  recentMovements.map((movement) => (
+                    <div key={movement.id} className="rounded-2xl bg-white px-4 py-3">
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="font-medium text-ink">
+                          {movement.type === "cash_in" ? t("cashControl.cashIn") : t("cashControl.cashOut")}
+                        </span>
+                        <span className="text-ink">{formatCurrency(movement.amount, currency, locale)}</span>
+                      </div>
+                      <p className="mt-1 text-sm text-slate-600">{movement.reason}</p>
+                      <p className="mt-1 text-xs text-slate-500">{formatDateTime(movement.createdAt, locale)}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm leading-6 text-slate-600">{t("cashControl.noMovements")}</p>
+                )}
+              </div>
+            </div>
+          </div>
           </div>
         ) : (
           <p className="mt-6 text-sm leading-6 text-slate-600">{t("expense.adminOnly")}</p>

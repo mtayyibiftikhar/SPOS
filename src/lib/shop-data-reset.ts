@@ -34,7 +34,7 @@ function clearBillingLedgerRows(rows: AccountingLedgerEntry[] | undefined, shopI
   return (rows ?? []).filter(
     (entry) =>
       entry.shopId !== shopId ||
-      !["bill", "customer_payment", "refund"].includes(entry.referenceType)
+      !["bill", "cash_movement", "customer_payment", "refund"].includes(entry.referenceType)
   );
 }
 
@@ -46,6 +46,7 @@ export function clearShopDataScope<TState extends ResettableState>(
     actorId?: string;
     createdAt?: string;
     shopName?: string;
+    skipAudit?: boolean;
   } = {}
 ) {
   const clearBills = scope === "all" || scope === "bills";
@@ -78,6 +79,9 @@ export function clearShopDataScope<TState extends ResettableState>(
     next.refundItems = (state.refundItems ?? []).filter((item) => !refundIds.has(item.refundId));
     next.payments = (state.payments ?? []).filter((payment) => !billIds.has(payment.billId));
     next.ledgerEntries = clearBillingLedgerRows(state.ledgerEntries, shopId, scope === "all");
+    next.businessDays = rowsWithoutShop(state.businessDays, shopId);
+    next.shifts = rowsWithoutShop(state.shifts, shopId);
+    next.cashMovements = rowsWithoutShop(state.cashMovements, shopId);
     next.dayCloses = rowsWithoutShop(state.dayCloses, shopId);
     next.receiptSequencesByShop = {
       ...omitShopKey(state.receiptSequencesByShop, shopId),
@@ -100,18 +104,20 @@ export function clearShopDataScope<TState extends ResettableState>(
     next.supportSessions = rowsWithoutShop(state.supportSessions, shopId);
   }
 
-  next.auditLogs = [
-    {
-      id: `audit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      shopId,
-      actorId: options.actorId ?? "owner",
-      action: "owner.shop_data.clear",
-      targetId: shopId,
-      detail: `Cleared ${scopeLabel} for ${options.shopName ?? "store"}.`,
-      createdAt
-    },
-    ...(state.auditLogs ?? [])
-  ];
+  if (!options.skipAudit) {
+    next.auditLogs = [
+      {
+        id: `audit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        shopId,
+        actorId: options.actorId ?? "owner",
+        action: `owner.shop_data.clear.${scope}`,
+        targetId: shopId,
+        detail: `Cleared ${scopeLabel} for ${options.shopName ?? "store"}.`,
+        createdAt
+      },
+      ...(state.auditLogs ?? [])
+    ];
+  }
 
   return next as TState;
 }

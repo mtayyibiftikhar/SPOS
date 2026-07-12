@@ -69,6 +69,8 @@ import { createId, getDirection, hashSecret } from "@/lib/utils";
 const STORAGE_KEY = "simple-pos-demo-state";
 const SHARED_STATE_ENDPOINT = "/api/local-state";
 const SHOP_CLOUD_STATE_ENDPOINT = "/api/shop-state";
+const SHARED_STATE_REFRESH_INTERVAL_MS = 2_500;
+const SHOP_CLOUD_POLL_INTERVAL_MS = 8_000;
 const MIN_PASSWORD_LENGTH = 8;
 
 function shouldUseSharedStateEndpoint() {
@@ -96,6 +98,18 @@ function validatePasswordLength(password: string, label = "Password") {
   return password.trim().length >= MIN_PASSWORD_LENGTH
     ? null
     : `${label} must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+}
+
+function parseJsonPayload<TPayload>(raw: string, fallback: TPayload) {
+  if (!raw.trim()) {
+    return fallback;
+  }
+
+  try {
+    return JSON.parse(raw) as TPayload;
+  } catch {
+    return fallback;
+  }
 }
 
 type LoginPayload = {
@@ -214,6 +228,18 @@ type ShopCloudStatePatch = Partial<
     | "users"
   >
 >;
+
+type ShopCloudAccessPayload = {
+  licenseStatus?: "expired" | "locked";
+  ok: boolean;
+  message?: string;
+  state?: ShopCloudStatePatch | null;
+  updatedAt?: string | null;
+};
+
+type SharedStatePayload = {
+  state?: DemoAppState | null;
+};
 
 type OwnerLicenseInput = {
   shopId: string;
@@ -1106,6 +1132,83 @@ function replaceRowsForShop<TItem extends { shopId?: string }>(currentRows: TIte
   return [...currentRows.filter((row) => row.shopId !== shopId), ...cloudRows];
 }
 
+function getResetScopeFromAuditLog(log: DemoAppState["auditLogs"][number]) {
+  if (log.action === "owner.shop_data.clear.all" || /entire pos data/i.test(log.detail ?? "")) {
+    return "all" satisfies OwnerClearShopDataScope;
+  }
+
+  if (log.action === "owner.shop_data.clear.products" || /products and inventory/i.test(log.detail ?? "")) {
+    return "products" satisfies OwnerClearShopDataScope;
+  }
+
+  if (
+    log.action === "owner.shop_data.clear.bills" ||
+    log.action === "owner.shop_data.clear" ||
+    /bills and sales/i.test(log.detail ?? "")
+  ) {
+    return "bills" satisfies OwnerClearShopDataScope;
+  }
+
+  return null;
+}
+
+function getLatestShopDataResetLogs(state: DemoAppState) {
+  const resets = new Map<
+    string,
+    {
+      log: DemoAppState["auditLogs"][number];
+      scope: OwnerClearShopDataScope;
+    }
+  >();
+
+  state.auditLogs.forEach((log) => {
+    const shopId = log.shopId ?? log.targetId;
+    const scope = getResetScopeFromAuditLog(log);
+
+    if (!shopId || !scope) {
+      return;
+    }
+
+    const current = resets.get(shopId);
+
+    if (!current || log.createdAt.localeCompare(current.log.createdAt) > 0) {
+      resets.set(shopId, { log, scope });
+    }
+  });
+
+  return resets;
+}
+
+function carryForwardAuthoritativeShopDataResets(current: DemoAppState, incoming: DemoAppState) {
+  const currentResets = getLatestShopDataResetLogs(current);
+  const incomingResets = getLatestShopDataResetLogs(incoming);
+  let nextState = incoming;
+
+  currentResets.forEach((reset, shopId) => {
+    const incomingReset = incomingResets.get(shopId);
+
+    if (incomingReset && incomingReset.log.createdAt.localeCompare(reset.log.createdAt) >= 0) {
+      return;
+    }
+
+    const shopName =
+      current.shops.find((shop) => shop.id === shopId)?.name ?? incoming.shops.find((shop) => shop.id === shopId)?.name;
+
+    nextState = clearShopDataScope(nextState, shopId, reset.scope, {
+      actorId: reset.log.actorId,
+      createdAt: reset.log.createdAt,
+      shopName,
+      skipAudit: true
+    });
+    nextState = {
+      ...nextState,
+      auditLogs: [reset.log, ...nextState.auditLogs.filter((log) => log.id !== reset.log.id)]
+    };
+  });
+
+  return nextState;
+}
+
 function buildShopCloudSyncState(state: DemoAppState, shopId: string): ShopCloudStatePatch {
   const shopBills = rowsForShop(state.bills, shopId);
   const billIds = new Set(shopBills.map((bill) => bill.id));
@@ -1358,6 +1461,9 @@ export function AppProvider({
   const [autoRolloverTick, setAutoRolloverTick] = useState(0);
   const [saveFeedback, setSaveFeedback] = useState<{ savedAt: string } | null>(null);
   const hasCompletedInitialPersist = useRef(false);
+  const lastSharedStateRaw = useRef<string | null>(null);
+  const lastLocalStateRaw = useRef<string | null>(null);
+  const lastSharedStateWriteAt = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -1379,7 +1485,8 @@ export function AppProvider({
 
       try {
         const response = await fetch(SHARED_STATE_ENDPOINT, { cache: "no-store" });
-        const payload = (await response.json()) as { state?: DemoAppState | null };
+        const rawPayload = await response.text();
+        const payload = parseJsonPayload<SharedStatePayload>(rawPayload, { state: null });
         const sharedState = payload.state ? normalizeStoredState(payload.state, ownerBootstrap) : null;
 
         if (!active) {
@@ -1417,16 +1524,22 @@ export function AppProvider({
       return;
     }
 
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const localStateRaw = JSON.stringify(state);
+    lastLocalStateRaw.current = localStateRaw;
+    window.localStorage.setItem(STORAGE_KEY, localStateRaw);
 
     if (shouldUseSharedStateEndpoint()) {
+      const sharedStateRaw = JSON.stringify({
+        state: {
+          ...state,
+          session: null
+        }
+      });
+      lastSharedStateRaw.current = sharedStateRaw;
+      lastSharedStateWriteAt.current = Date.now();
+
       void fetch(SHARED_STATE_ENDPOINT, {
-        body: JSON.stringify({
-          state: {
-            ...state,
-            session: null
-          }
-        }),
+        body: sharedStateRaw,
         headers: {
           "Content-Type": "application/json"
         },
@@ -1448,6 +1561,82 @@ export function AppProvider({
 
     return () => window.clearTimeout(timer);
   }, [isHydrated, state]);
+
+  useEffect(() => {
+    if (!isHydrated || !shouldUseSharedStateEndpoint()) {
+      return;
+    }
+
+    let active = true;
+
+    const refreshSharedState = async () => {
+      try {
+        const response = await fetch(SHARED_STATE_ENDPOINT, { cache: "no-store" });
+        const rawPayload = await response.text();
+        const payload = parseJsonPayload<SharedStatePayload>(rawPayload, { state: null });
+
+        if (!active || !payload.state) {
+          return;
+        }
+
+        const incomingState = normalizeStoredState(payload.state, ownerBootstrap);
+        const incomingRaw = JSON.stringify({
+          state: {
+            ...incomingState,
+            session: null
+          }
+        });
+
+        if (incomingRaw === lastSharedStateRaw.current) {
+          return;
+        }
+
+        if (Date.now() - lastSharedStateWriteAt.current < 1_500) {
+          return;
+        }
+
+        lastSharedStateRaw.current = incomingRaw;
+
+        setState((current) => {
+          const reconciledIncomingState = carryForwardAuthoritativeShopDataResets(current, incomingState);
+          const reconciledIncomingRaw = JSON.stringify({
+            state: {
+              ...reconciledIncomingState,
+              session: null
+            }
+          });
+          const currentRaw = JSON.stringify({
+            state: {
+              ...current,
+              session: null
+            }
+          });
+
+          if (reconciledIncomingRaw === currentRaw) {
+            return current;
+          }
+
+          lastSharedStateRaw.current = reconciledIncomingRaw;
+
+          return {
+            ...reconciledIncomingState,
+            session: current.session
+          };
+        });
+      } catch {
+        // Local dev polling should never interrupt the POS if the file endpoint is unavailable.
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      void refreshSharedState();
+    }, SHARED_STATE_REFRESH_INTERVAL_MS);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [isHydrated, ownerBootstrap]);
 
   useEffect(() => {
     if (!isHydrated) {
@@ -1579,12 +1768,11 @@ export function AppProvider({
           cache: "no-store",
           headers: buildShopCloudHeaders(state, cloudSyncShopId, session)
         });
-        const payload = (await response.json()) as {
-          licenseStatus?: "expired" | "locked";
-          ok: boolean;
-          message?: string;
-          state?: ShopCloudStatePatch | null;
-        };
+        const rawPayload = await response.text();
+        const payload = parseJsonPayload<ShopCloudAccessPayload>(rawPayload, {
+          ok: response.ok,
+          message: response.statusText
+        });
 
         if (!active) {
           return;
@@ -1613,7 +1801,10 @@ export function AppProvider({
 
         if (payload.state) {
           setState((current) => ({
-            ...mergeShopCloudStatePatch(current, payload.state ?? {}, cloudSyncShopId),
+            ...carryForwardAuthoritativeShopDataResets(
+              current,
+              mergeShopCloudStatePatch(current, payload.state ?? {}, cloudSyncShopId)
+            ),
             session: current.session
           }));
         }
@@ -1659,12 +1850,11 @@ export function AppProvider({
           cache: "no-store",
           headers: buildShopCloudHeaders(state, cloudSyncShopId, session)
         });
-        const payload = (await response.json()) as {
-          licenseStatus?: "expired" | "locked";
-          ok: boolean;
-          message?: string;
-          state?: ShopCloudStatePatch | null;
-        };
+        const rawPayload = await response.text();
+        const payload = parseJsonPayload<ShopCloudAccessPayload>(rawPayload, {
+          ok: response.ok,
+          message: response.statusText
+        });
 
         if (!active) {
           return;
@@ -1688,7 +1878,10 @@ export function AppProvider({
 
         if (payload.state) {
           setState((current) => ({
-            ...mergeShopCloudStatePatch(current, payload.state ?? {}, cloudSyncShopId),
+            ...carryForwardAuthoritativeShopDataResets(
+              current,
+              mergeShopCloudStatePatch(current, payload.state ?? {}, cloudSyncShopId)
+            ),
             session: current.session
           }));
         }
@@ -1699,7 +1892,7 @@ export function AppProvider({
 
     const timer = window.setInterval(() => {
       void validateShopCloudAccess();
-    }, 45_000);
+    }, SHOP_CLOUD_POLL_INTERVAL_MS);
 
     return () => {
       active = false;
@@ -3105,26 +3298,8 @@ export function AppProvider({
           return { ok: false, message: "Type the exact store name before clearing data." };
         }
 
-        const ownerEmail = state.users.find((user) => user.role === "super_admin" && user.isActive)?.email;
-
-        try {
-          const cloudResult = await clearOwnerShopDataInCloud(
-            {
-              scope,
-              shopId,
-              shopName: shop.name
-            },
-            ownerEmail
-          );
-
-          if (!cloudResult.ok) {
-            return { ok: false, message: cloudResult.message ?? "Unable to clear this store data in cloud." };
-          }
-        } catch {
-          return { ok: false, message: "Unable to reach cloud reset service. Try again before asking the store to log in." };
-        }
-
         const clearedAt = new Date().toISOString();
+        const ownerEmail = state.users.find((user) => user.role === "super_admin" && user.isActive)?.email;
 
         setState((current) => {
           const nextState = clearShopDataScope(current, shopId, scope, {
@@ -3137,6 +3312,31 @@ export function AppProvider({
 
           return nextState;
         });
+
+        try {
+          const cloudResult = await clearOwnerShopDataInCloud(
+            {
+              scope,
+              shopId,
+              shopName: shop.name
+            },
+            ownerEmail
+          );
+
+          if (!cloudResult.ok) {
+            return {
+              ok: true,
+              message: `${ownerClearShopDataScopeLabels[scope]} cleared locally for ${shop.name}. Cloud reset warning: ${
+                cloudResult.message ?? "Unable to clear this store data in cloud."
+              }`
+            };
+          }
+        } catch {
+          return {
+            ok: true,
+            message: `${ownerClearShopDataScopeLabels[scope]} cleared locally for ${shop.name}. Cloud reset warning: unable to reach cloud reset service.`
+          };
+        }
 
         return { ok: true, message: `${ownerClearShopDataScopeLabels[scope]} cleared for ${shop.name}.` };
       },
@@ -5828,6 +6028,24 @@ export function AppProvider({
 
           if (openShift) {
             result = { ok: false, message: "Close the current shift before starting a new one." };
+            return current;
+          }
+
+          const openShiftsForDay = current.shifts.filter(
+            (shift) => shift.shopId === currentShopId && shift.businessDate === openDay.businessDate && !shift.endedAt
+          );
+          const allowedShiftCount = Math.max(
+            1,
+            current.productKeys
+              .filter((key) => key.shopId === currentShopId && key.status !== "revoked")
+              .reduce((highest, key) => Math.max(highest, key.allowedDevices), 0)
+          );
+
+          if (openShiftsForDay.length >= allowedShiftCount) {
+            result = {
+              ok: false,
+              message: `Only ${allowedShiftCount} open shift${allowedShiftCount === 1 ? "" : "s"} allowed for this shop today. Close a shift before opening another.`
+            };
             return current;
           }
 
