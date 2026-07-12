@@ -33,7 +33,7 @@ import { WorkspaceSectionsNav } from "@/components/ui/workspace-sections-nav";
 import { formatBusinessDate, formatCurrency, formatDateTime } from "@/lib/utils";
 
 type RangePreset = "today" | "yesterday" | "week" | "month" | "year" | "custom";
-type ReportView = "overview" | "profit" | "cashier" | "inventory" | "refunds" | "tax";
+type ReportView = "overview" | "profit" | "cashier" | "inventory" | "expenses" | "refunds" | "tax";
 
 function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
@@ -171,6 +171,7 @@ export function ReportsOverview() {
     requestedView === "profit" ||
     requestedView === "cashier" ||
     requestedView === "inventory" ||
+    requestedView === "expenses" ||
     requestedView === "refunds" ||
     requestedView === "tax"
       ? requestedView
@@ -293,9 +294,43 @@ export function ReportsOverview() {
             movement.businessDate >= selectedRange.dateFrom &&
             movement.businessDate <= selectedRange.dateTo
         )
-        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
-        .slice(0, 8),
+        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
     [currentShop?.id, selectedRange.dateFrom, selectedRange.dateTo, state.cashMovements]
+  );
+
+  const filteredExpenses = useMemo(
+    () =>
+      state.expenses
+        .filter(
+          (expense) =>
+            expense.shopId === currentShop?.id &&
+            expense.businessDate >= selectedRange.dateFrom &&
+            expense.businessDate <= selectedRange.dateTo
+        )
+        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
+    [currentShop?.id, selectedRange.dateFrom, selectedRange.dateTo, state.expenses]
+  );
+
+  const expenseReportSummary = useMemo(
+    () => ({
+      bankExpenses: filteredExpenses
+        .filter((expense) => expense.paymentMethod === "bank")
+        .reduce((sum, expense) => sum + expense.amount, 0),
+      cardExpenses: filteredExpenses
+        .filter((expense) => expense.paymentMethod === "card")
+        .reduce((sum, expense) => sum + expense.amount, 0),
+      cashExpenses: filteredExpenses
+        .filter((expense) => expense.paymentMethod === "cash")
+        .reduce((sum, expense) => sum + expense.amount, 0),
+      cashIn: filteredMovements
+        .filter((movement) => movement.type === "cash_in")
+        .reduce((sum, movement) => sum + movement.amount, 0),
+      cashOut: filteredMovements
+        .filter((movement) => movement.type === "cash_out")
+        .reduce((sum, movement) => sum + movement.amount, 0),
+      totalExpenses: filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0)
+    }),
+    [filteredExpenses, filteredMovements]
   );
 
   const cashierPerformance = useMemo(() => {
@@ -744,6 +779,7 @@ export function ReportsOverview() {
         profit: "Profit & Loss Report",
         cashier: "Sales by Employee Report",
         inventory: "Inventory Report",
+        expenses: "Expenses & Drawer Adjustments Report",
         refunds: "Refund Report",
         tax: "Tax Payable Report"
       };
@@ -773,7 +809,55 @@ export function ReportsOverview() {
                   : [{ label: t("reports.waitingForShift"), value: "-" }]
               }
             ]
-          : activeView === "inventory"
+          : activeView === "expenses"
+            ? [
+                {
+                  title: t("reports.expenseReportTitle"),
+                  rows: [
+                    { label: t("reports.expenseCount"), value: String(filteredExpenses.length) },
+                    { label: t("reports.expenseTotal"), value: formatCurrency(expenseReportSummary.totalExpenses, currency, "en") },
+                    { label: t("common.cash"), value: formatCurrency(expenseReportSummary.cashExpenses, currency, "en") },
+                    { label: t("common.card"), value: formatCurrency(expenseReportSummary.cardExpenses, currency, "en") },
+                    { label: t("common.bank"), value: formatCurrency(expenseReportSummary.bankExpenses, currency, "en") }
+                  ]
+                },
+                {
+                  title: t("reports.expenseLog"),
+                  rows:
+                    filteredExpenses.length > 0
+                      ? filteredExpenses.slice(0, 80).map((expense) => ({
+                          label: `${expense.categoryName} | ${formatDateTime(expense.createdAt, "en")}`,
+                          value: formatCurrency(expense.amount, currency, "en"),
+                          detail: `${expense.paymentMethod.toUpperCase()}${expense.vendorName ? ` | ${expense.vendorName}` : ""}${
+                            expense.note ? ` | ${expense.note}` : ""
+                          }`
+                        }))
+                      : [{ label: t("expense.none"), value: "-" }]
+                },
+                {
+                  title: t("reports.drawerAdjustmentReportTitle"),
+                  rows: [
+                    { label: t("cashControl.cashIn"), value: formatCurrency(expenseReportSummary.cashIn, currency, "en") },
+                    { label: t("cashControl.cashOut"), value: formatCurrency(expenseReportSummary.cashOut, currency, "en") },
+                    { label: t("reports.drawerAdjustmentCount"), value: String(filteredMovements.length) }
+                  ]
+                },
+                {
+                  title: t("reports.drawerAdjustmentLog"),
+                  rows:
+                    filteredMovements.length > 0
+                      ? filteredMovements.slice(0, 80).map((movement) => ({
+                          label: `${movement.type === "cash_in" ? t("cashControl.cashIn") : t("cashControl.cashOut")} | ${formatDateTime(
+                            movement.createdAt,
+                            "en"
+                          )}`,
+                          value: formatCurrency(movement.amount, currency, "en"),
+                          detail: movement.reason
+                        }))
+                      : [{ label: t("cashControl.noMovements"), value: "-" }]
+                }
+              ]
+            : activeView === "inventory"
             ? [
                 {
                   title: t("reports.inventoryReportTitle"),
@@ -961,6 +1045,12 @@ export function ReportsOverview() {
             active: activeView === "inventory",
             label: t("reports.sectionInventory"),
             description: t("reports.sectionInventoryDesc")
+          },
+          {
+            href: "/reports?view=expenses",
+            active: activeView === "expenses",
+            label: t("reports.sectionExpenses"),
+            description: t("reports.sectionExpensesDesc")
           },
           {
             href: "/reports?view=refunds",
@@ -1484,6 +1574,103 @@ export function ReportsOverview() {
               )}
             </div>
           </Card>
+        </div>
+      ) : null}
+
+      {activeView === "expenses" ? (
+        <div className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <MetricCard
+              description={t("reports.sectionExpensesDesc")}
+              label={t("reports.expenseTotal")}
+              value={formatCurrency(expenseReportSummary.totalExpenses, currency, locale)}
+            />
+            <MetricCard
+              description={t("reports.sectionExpensesDesc")}
+              label={t("reports.expenseCount")}
+              value={filteredExpenses.length}
+            />
+            <MetricCard
+              description={t("cashControl.drawerAdjustmentHint")}
+              label={t("cashControl.cashIn")}
+              value={formatCurrency(expenseReportSummary.cashIn, currency, locale)}
+            />
+            <MetricCard
+              description={t("cashControl.drawerAdjustmentHint")}
+              label={t("cashControl.cashOut")}
+              value={formatCurrency(expenseReportSummary.cashOut, currency, locale)}
+            />
+            <MetricCard
+              description={t("reports.drawerAdjustmentReportTitle")}
+              label={t("reports.drawerAdjustmentCount")}
+              value={filteredMovements.length}
+            />
+          </div>
+
+          <div className="grid gap-6 xl:grid-cols-2">
+            <Card className="overflow-hidden p-0">
+              <div className="border-b border-slate-200 p-6">
+                <div className="flex items-center gap-2">
+                  <WalletCards className="h-5 w-5 text-ink" />
+                  <div>
+                    <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.expenseLog")}</h2>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">{selectedRangeLabel}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {filteredExpenses.length > 0 ? (
+                  filteredExpenses.map((expense) => (
+                    <div key={expense.id} className="grid gap-3 p-4 md:grid-cols-[1fr_1fr_auto]">
+                      <div>
+                        <p className="text-sm font-semibold text-ink">{expense.categoryName}</p>
+                        <p className="mt-1 text-xs text-slate-500">{formatDateTime(expense.createdAt, locale)}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-slate-600">{expense.vendorName || expense.paymentMethod.toUpperCase()}</p>
+                        {expense.note ? <p className="mt-1 text-xs text-slate-500">{expense.note}</p> : null}
+                      </div>
+                      <p className="text-sm font-semibold text-ink md:text-right">{formatCurrency(expense.amount, currency, locale)}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="p-6 text-sm leading-6 text-slate-600">{t("expense.none")}</p>
+                )}
+              </div>
+            </Card>
+
+            <Card className="overflow-hidden p-0">
+              <div className="border-b border-slate-200 p-6">
+                <div className="flex items-center gap-2">
+                  <WalletCards className="h-5 w-5 text-ink" />
+                  <div>
+                    <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.drawerAdjustmentLog")}</h2>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">{selectedRangeLabel}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {filteredMovements.length > 0 ? (
+                  filteredMovements.map((movement) => (
+                    <div key={movement.id} className="grid gap-3 p-4 md:grid-cols-[1fr_1.5fr_auto]">
+                      <div>
+                        <p className="text-sm font-semibold text-ink">
+                          {movement.type === "cash_in" ? t("cashControl.cashIn") : t("cashControl.cashOut")}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">{formatDateTime(movement.createdAt, locale)}</p>
+                      </div>
+                      <p className="text-sm text-slate-600">{movement.reason}</p>
+                      <Badge variant={movement.type === "cash_in" ? "success" : "warning"}>
+                        {formatCurrency(movement.amount, currency, locale)}
+                      </Badge>
+                    </div>
+                  ))
+                ) : (
+                  <p className="p-6 text-sm leading-6 text-slate-600">{t("cashControl.noMovements")}</p>
+                )}
+              </div>
+            </Card>
+          </div>
         </div>
       ) : null}
 

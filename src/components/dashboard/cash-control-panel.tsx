@@ -22,6 +22,10 @@ type Feedback = {
   message: string;
 } | null;
 
+type ExpensePanel = "recordExpense" | "adjustDrawer" | "expenseLog" | "drawerLog";
+
+const LOG_PAGE_SIZE = 8;
+
 function FeedbackText({ feedback }: { feedback: Feedback }) {
   if (!feedback) {
     return null;
@@ -114,6 +118,46 @@ function DashboardMiniMetric({
   );
 }
 
+function PaginationBar({
+  currentPage,
+  onPageChange,
+  pageCount
+}: {
+  currentPage: number;
+  onPageChange: (page: number) => void;
+  pageCount: number;
+}) {
+  if (pageCount <= 1) {
+    return null;
+  }
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+        Page {currentPage} of {pageCount}
+      </p>
+      <div className="flex items-center gap-2">
+        <Button
+          className="h-10 px-4"
+          disabled={currentPage <= 1}
+          onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+          variant="secondary"
+        >
+          Previous
+        </Button>
+        <Button
+          className="h-10 px-4"
+          disabled={currentPage >= pageCount}
+          onClick={() => onPageChange(Math.min(pageCount, currentPage + 1))}
+          variant="secondary"
+        >
+          Next
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function CashControlPanel() {
   const {
     addCashMovement,
@@ -153,6 +197,9 @@ export function CashControlPanel() {
   const [expenseVendorName, setExpenseVendorName] = useState("");
   const [expenseNote, setExpenseNote] = useState("");
   const [activeControl, setActiveControl] = useState<"overview" | "day" | "shift" | "expenses">("overview");
+  const [activeExpensePanel, setActiveExpensePanel] = useState<ExpensePanel>("recordExpense");
+  const [expenseLogPage, setExpenseLogPage] = useState(1);
+  const [movementLogPage, setMovementLogPage] = useState(1);
   const [dayFeedback, setDayFeedback] = useState<Feedback>(null);
   const [shiftFeedback, setShiftFeedback] = useState<Feedback>(null);
   const [movementFeedback, setMovementFeedback] = useState<Feedback>(null);
@@ -320,15 +367,14 @@ export function CashControlPanel() {
     );
   }, [currentShop, state.products]);
 
-  const recentMovements = useMemo(() => {
+  const movementRows = useMemo(() => {
     if (!currentShop) {
       return [];
     }
 
     return state.cashMovements
       .filter((movement) => movement.shopId === currentShop.id)
-      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
-      .slice(0, 5);
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
   }, [currentShop, state.cashMovements]);
 
   const expenseCategories = useMemo(
@@ -339,16 +385,29 @@ export function CashControlPanel() {
     [currentShop?.id, state.expenseCategories]
   );
 
-  const recentExpenses = useMemo(() => {
+  const expenseRows = useMemo(() => {
     if (!currentShop) {
       return [];
     }
 
     return state.expenses
       .filter((expense) => expense.shopId === currentShop.id)
-      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
-      .slice(0, 6);
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
   }, [currentShop, state.expenses]);
+
+  const expenseLogPageCount = Math.max(1, Math.ceil(expenseRows.length / LOG_PAGE_SIZE));
+  const safeExpenseLogPage = Math.min(expenseLogPage, expenseLogPageCount);
+  const paginatedExpenses = expenseRows.slice(
+    (safeExpenseLogPage - 1) * LOG_PAGE_SIZE,
+    safeExpenseLogPage * LOG_PAGE_SIZE
+  );
+
+  const movementLogPageCount = Math.max(1, Math.ceil(movementRows.length / LOG_PAGE_SIZE));
+  const safeMovementLogPage = Math.min(movementLogPage, movementLogPageCount);
+  const paginatedMovements = movementRows.slice(
+    (safeMovementLogPage - 1) * LOG_PAGE_SIZE,
+    safeMovementLogPage * LOG_PAGE_SIZE
+  );
 
   const handleStartDay = () => {
     const result = startBusinessDay({
@@ -913,176 +972,215 @@ export function CashControlPanel() {
 
         {canManageDay ? (
           <div className="mt-6 space-y-5">
-          <div className="grid gap-5 xl:grid-cols-2">
-            <div className="rounded-3xl border border-line bg-white p-5">
-              <div className="mb-5 flex items-center gap-2 text-sm font-semibold text-ink">
-                <Wallet className="h-4 w-4" />
-                {t("expense.title")}
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-ink">{t("common.category")}</label>
-                  <select
-                    className="h-12 w-full rounded-2xl border border-line bg-white px-4 text-sm text-ink outline-none transition focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
-                    value={expenseCategoryId}
-                    onChange={(event) => setExpenseCategoryId(event.target.value)}
+            <div className="grid gap-3 md:grid-cols-4">
+              {([
+                { key: "recordExpense", label: t("expense.recordExpense"), meta: expenseRows.length },
+                { key: "adjustDrawer", label: t("expense.adjustDrawer"), meta: movementRows.length },
+                { key: "expenseLog", label: t("expense.expenseLog"), meta: expenseRows.length },
+                { key: "drawerLog", label: t("expense.drawerLog"), meta: movementRows.length }
+              ] as const).map((panel) => (
+                <button
+                  className={`rounded-3xl border px-4 py-4 text-left transition ${
+                    activeExpensePanel === panel.key
+                      ? "border-slate-950 bg-slate-950 text-white shadow-[0_18px_40px_rgba(15,23,42,0.16)]"
+                      : "border-slate-200 bg-white text-ink hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_18px_40px_rgba(15,23,42,0.08)]"
+                  }`}
+                  key={panel.key}
+                  onClick={() => setActiveExpensePanel(panel.key)}
+                  type="button"
+                >
+                  <span className="block text-sm font-semibold">{panel.label}</span>
+                  <span className={activeExpensePanel === panel.key ? "mt-2 block text-xs text-white/70" : "mt-2 block text-xs text-slate-500"}>
+                    {panel.meta} {t("common.items")}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {activeExpensePanel === "recordExpense" ? (
+              <div className="rounded-3xl border border-line bg-white p-5">
+                <div className="mb-5 flex items-center gap-2 text-sm font-semibold text-ink">
+                  <Wallet className="h-4 w-4" />
+                  {t("expense.title")}
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-ink">{t("common.category")}</label>
+                    <select
+                      className="h-12 w-full rounded-2xl border border-line bg-white px-4 text-sm text-ink outline-none transition focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+                      value={expenseCategoryId}
+                      onChange={(event) => setExpenseCategoryId(event.target.value)}
+                    >
+                      <option value="">{t("common.newCategory")}</option>
+                      {expenseCategories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-ink">{t("common.newCategoryName")}</label>
+                    <Input
+                      disabled={Boolean(expenseCategoryId)}
+                      value={expenseCategoryName}
+                      onChange={(event) => setExpenseCategoryName(event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-ink">{t("common.amount")}</label>
+                    <Input inputMode="decimal" value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)} />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-ink">{t("common.paymentMethod")}</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(["cash", "card", "bank"] as const).map((method) => (
+                        <Button
+                          key={method}
+                          variant={expensePaymentMethod === method ? "primary" : "secondary"}
+                          onClick={() => setExpensePaymentMethod(method)}
+                        >
+                          {method === "cash" ? t("common.cash") : method === "card" ? t("common.card") : t("common.bank")}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-ink">{t("common.vendor")}</label>
+                    <Input value={expenseVendorName} onChange={(event) => setExpenseVendorName(event.target.value)} />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="mb-2 block text-sm font-medium text-ink">{t("common.notes")}</label>
+                    <Textarea value={expenseNote} onChange={(event) => setExpenseNote(event.target.value)} />
+                  </div>
+                  <Button
+                    className="sm:col-span-2"
+                    onClick={handleExpense}
+                    disabled={!currentBusinessDay || !currentShift}
                   >
-                    <option value="">{t("common.newCategory")}</option>
-                    {expenseCategories.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.name}
-                      </option>
-                    ))}
-                  </select>
+                    {t("common.save")}
+                  </Button>
+                  <FeedbackText feedback={expenseFeedback} />
                 </div>
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-ink">{t("common.newCategoryName")}</label>
-                  <Input
-                    disabled={Boolean(expenseCategoryId)}
-                    value={expenseCategoryName}
-                    onChange={(event) => setExpenseCategoryName(event.target.value)}
-                  />
+              </div>
+            ) : null}
+
+            {activeExpensePanel === "adjustDrawer" ? (
+              <div className="rounded-3xl border border-line bg-white p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+                      {movementType === "cash_in" ? <ArrowDownLeft className="h-4 w-4" /> : <ArrowUpRight className="h-4 w-4" />}
+                      {t("cashControl.drawerAdjustmentTitle")}
+                    </div>
+                    <p className="mt-2 text-xs leading-5 text-slate-500">{t("cashControl.drawerAdjustmentHint")}</p>
+                  </div>
+                  <Badge variant="neutral">
+                    {movementType === "cash_in" ? t("cashControl.cashIn") : t("cashControl.cashOut")}
+                  </Badge>
                 </div>
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-ink">{t("common.amount")}</label>
-                  <Input inputMode="decimal" value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)} />
-                </div>
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-ink">{t("common.paymentMethod")}</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {(["cash", "card", "bank"] as const).map((method) => (
+                <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.movementType")}</label>
+                    <div className="grid grid-cols-2 gap-3">
                       <Button
-                        key={method}
-                        variant={expensePaymentMethod === method ? "primary" : "secondary"}
-                        onClick={() => setExpensePaymentMethod(method)}
+                        variant={movementType === "cash_in" ? "primary" : "secondary"}
+                        onClick={() => setMovementType("cash_in")}
                       >
-                        {method === "cash" ? t("common.cash") : method === "card" ? t("common.card") : t("common.bank")}
+                        {t("cashControl.cashIn")}
                       </Button>
-                    ))}
+                      <Button
+                        variant={movementType === "cash_out" ? "primary" : "secondary"}
+                        onClick={() => setMovementType("cash_out")}
+                      >
+                        {t("cashControl.cashOut")}
+                      </Button>
+                    </div>
                   </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.amount")}</label>
+                    <Input inputMode="decimal" value={movementAmount} onChange={(event) => setMovementAmount(event.target.value)} />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="mb-2 block text-sm font-medium text-ink">{t("common.reason")}</label>
+                    <Textarea value={movementReason} onChange={(event) => setMovementReason(event.target.value)} />
+                  </div>
+                  <Button
+                    className="sm:col-span-2"
+                    onClick={handleCashMovement}
+                    disabled={!currentBusinessDay || !currentShift}
+                  >
+                    {t("cashControl.saveMovement")}
+                  </Button>
+                  <FeedbackText feedback={movementFeedback} />
                 </div>
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-ink">{t("common.vendor")}</label>
-                  <Input value={expenseVendorName} onChange={(event) => setExpenseVendorName(event.target.value)} />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="mb-2 block text-sm font-medium text-ink">{t("common.notes")}</label>
-                  <Textarea value={expenseNote} onChange={(event) => setExpenseNote(event.target.value)} />
-                </div>
-                <Button
-                  className="sm:col-span-2"
-                  onClick={handleExpense}
-                  disabled={!currentBusinessDay || !currentShift}
-                >
-                  {t("common.save")}
-                </Button>
-                <FeedbackText feedback={expenseFeedback} />
               </div>
-            </div>
+            ) : null}
 
-            <div className="rounded-3xl border border-line bg-white p-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
+            {activeExpensePanel === "expenseLog" ? (
+              <div className="rounded-3xl bg-cloud p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-sm font-semibold text-ink">
-                    {movementType === "cash_in" ? <ArrowDownLeft className="h-4 w-4" /> : <ArrowUpRight className="h-4 w-4" />}
-                    {t("cashControl.drawerAdjustmentTitle")}
+                    <Wallet className="h-4 w-4" />
+                    {t("expense.expenseLog")}
                   </div>
-                  <p className="mt-2 text-xs leading-5 text-slate-500">{t("cashControl.drawerAdjustmentHint")}</p>
+                  <Badge variant="neutral">{expenseRows.length} {t("common.items")}</Badge>
                 </div>
-                <Badge variant="neutral">
-                  {movementType === "cash_in" ? t("cashControl.cashIn") : t("cashControl.cashOut")}
-                </Badge>
+                <div className="mt-4 overflow-hidden rounded-3xl border border-slate-200 bg-white">
+                  {paginatedExpenses.length > 0 ? (
+                    paginatedExpenses.map((expense) => (
+                      <div key={expense.id} className="grid gap-3 border-b border-slate-100 px-4 py-3 last:border-b-0 md:grid-cols-[1fr_1fr_auto]">
+                        <div>
+                          <p className="text-sm font-semibold text-ink">{expense.categoryName}</p>
+                          <p className="mt-1 text-xs text-slate-500">{formatDateTime(expense.createdAt, locale)}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-slate-600">{expense.vendorName || expense.paymentMethod.toUpperCase()}</p>
+                          {expense.note ? <p className="mt-1 text-xs text-slate-500">{expense.note}</p> : null}
+                        </div>
+                        <p className="text-sm font-semibold text-ink md:text-right">{formatCurrency(expense.amount, currency, locale)}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="p-5 text-sm leading-6 text-slate-600">{t("expense.none")}</p>
+                  )}
+                </div>
+                <PaginationBar currentPage={safeExpenseLogPage} onPageChange={setExpenseLogPage} pageCount={expenseLogPageCount} />
               </div>
-              <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.movementType")}</label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Button
-                      variant={movementType === "cash_in" ? "primary" : "secondary"}
-                      onClick={() => setMovementType("cash_in")}
-                    >
-                      {t("cashControl.cashIn")}
-                    </Button>
-                    <Button
-                      variant={movementType === "cash_out" ? "primary" : "secondary"}
-                      onClick={() => setMovementType("cash_out")}
-                    >
-                      {t("cashControl.cashOut")}
-                    </Button>
+            ) : null}
+
+            {activeExpensePanel === "drawerLog" ? (
+              <div className="rounded-3xl bg-cloud p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+                    <Wallet className="h-4 w-4" />
+                    {t("expense.drawerLog")}
                   </div>
+                  <Badge variant="neutral">{movementRows.length} {t("common.items")}</Badge>
                 </div>
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.amount")}</label>
-                  <Input inputMode="decimal" value={movementAmount} onChange={(event) => setMovementAmount(event.target.value)} />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="mb-2 block text-sm font-medium text-ink">{t("common.reason")}</label>
-                  <Textarea value={movementReason} onChange={(event) => setMovementReason(event.target.value)} />
-                </div>
-                <Button
-                  className="sm:col-span-2"
-                  onClick={handleCashMovement}
-                  disabled={!currentBusinessDay || !currentShift}
-                >
-                  {t("cashControl.saveMovement")}
-                </Button>
-                <FeedbackText feedback={movementFeedback} />
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-5 xl:grid-cols-2">
-            <div className="rounded-3xl bg-cloud p-5">
-              <div className="flex items-center gap-2 text-sm font-semibold text-ink">
-                <Wallet className="h-4 w-4" />
-                {t("expense.recent")}
-              </div>
-              <div className="mt-4 space-y-3">
-                {recentExpenses.length > 0 ? (
-                  recentExpenses.map((expense) => (
-                    <div key={expense.id} className="rounded-2xl bg-white px-4 py-3">
-                      <div className="flex items-center justify-between gap-3 text-sm">
-                        <span className="font-medium text-ink">{expense.categoryName}</span>
-                        <span className="text-ink">{formatCurrency(expense.amount, currency, locale)}</span>
+                <div className="mt-4 overflow-hidden rounded-3xl border border-slate-200 bg-white">
+                  {paginatedMovements.length > 0 ? (
+                    paginatedMovements.map((movement) => (
+                      <div key={movement.id} className="grid gap-3 border-b border-slate-100 px-4 py-3 last:border-b-0 md:grid-cols-[1fr_1.5fr_auto]">
+                        <div>
+                          <p className="text-sm font-semibold text-ink">
+                            {movement.type === "cash_in" ? t("cashControl.cashIn") : t("cashControl.cashOut")}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">{formatDateTime(movement.createdAt, locale)}</p>
+                        </div>
+                        <p className="text-sm text-slate-600">{movement.reason}</p>
+                        <Badge variant={movement.type === "cash_in" ? "success" : "warning"}>
+                          {formatCurrency(movement.amount, currency, locale)}
+                        </Badge>
                       </div>
-                      <p className="mt-1 text-sm text-slate-600">
-                        {expense.vendorName || expense.paymentMethod.toUpperCase()}
-                      </p>
-                      {expense.note ? <p className="mt-1 text-sm text-slate-500">{expense.note}</p> : null}
-                      <p className="mt-1 text-xs text-slate-500">{formatDateTime(expense.createdAt, locale)}</p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm leading-6 text-slate-600">{t("expense.none")}</p>
-                )}
+                    ))
+                  ) : (
+                    <p className="p-5 text-sm leading-6 text-slate-600">{t("cashControl.noMovements")}</p>
+                  )}
+                </div>
+                <PaginationBar currentPage={safeMovementLogPage} onPageChange={setMovementLogPage} pageCount={movementLogPageCount} />
               </div>
-            </div>
-
-            <div className="rounded-3xl bg-cloud p-5">
-              <div className="flex items-center gap-2 text-sm font-semibold text-ink">
-                <Wallet className="h-4 w-4" />
-                {t("cashControl.recentMovements")}
-              </div>
-              <div className="mt-4 space-y-3">
-                {recentMovements.length > 0 ? (
-                  recentMovements.map((movement) => (
-                    <div key={movement.id} className="rounded-2xl bg-white px-4 py-3">
-                      <div className="flex items-center justify-between gap-3 text-sm">
-                        <span className="font-medium text-ink">
-                          {movement.type === "cash_in" ? t("cashControl.cashIn") : t("cashControl.cashOut")}
-                        </span>
-                        <span className="text-ink">{formatCurrency(movement.amount, currency, locale)}</span>
-                      </div>
-                      <p className="mt-1 text-sm text-slate-600">{movement.reason}</p>
-                      <p className="mt-1 text-xs text-slate-500">{formatDateTime(movement.createdAt, locale)}</p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm leading-6 text-slate-600">{t("cashControl.noMovements")}</p>
-                )}
-              </div>
-            </div>
-          </div>
+            ) : null}
           </div>
         ) : (
           <p className="mt-6 text-sm leading-6 text-slate-600">{t("expense.adminOnly")}</p>
