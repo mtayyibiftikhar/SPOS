@@ -1254,23 +1254,25 @@ export function BillingWorkspace() {
 
           <div className="min-h-0 overflow-y-auto px-4 py-4">{renderCartRows()}</div>
 
-          <div className="border-t border-slate-200 px-4 py-4">
-            <div className="grid gap-3 xl:grid-cols-[150px_minmax(0,1fr)_320px] xl:items-center">
+          <div className="border-t border-slate-200 px-4 py-3">
+            <div className="grid gap-3 xl:grid-cols-[170px_minmax(0,1fr)_320px] xl:items-stretch">
               <Button
                 asChild
-                className="h-12 rounded-[18px] border border-slate-200 bg-white text-sm font-semibold text-slate-800 shadow-[0_10px_24px_rgba(15,23,42,0.05)] hover:bg-slate-50"
+                className="group h-[68px] justify-start rounded-[20px] border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-950 shadow-[0_12px_28px_rgba(15,23,42,0.06)] hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50/70 hover:shadow-[0_16px_34px_rgba(5,150,105,0.13)]"
                 variant="secondary"
               >
                 <Link href="/bills">
-                  <span className="inline-flex items-center gap-2">
-                    <ReceiptText className="h-4 w-4" />
-                    {t("nav.bills")}
+                  <span className="inline-flex items-center gap-3">
+                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-[14px] bg-slate-950 text-white shadow-[0_10px_20px_rgba(15,23,42,0.16)] transition group-hover:bg-emerald-600">
+                      <ReceiptText className="h-4 w-4" />
+                    </span>
+                    <span>{t("nav.bills")}</span>
                   </span>
                 </Link>
               </Button>
 
-              <div className="rounded-[20px] border border-emerald-200 bg-emerald-50 px-4 py-3 shadow-inner shadow-emerald-100">
-                <div className="flex items-center justify-between gap-4">
+              <div className="flex min-h-[68px] items-center rounded-[20px] border border-emerald-200 bg-emerald-50 px-4 shadow-inner shadow-emerald-100">
+                <div className="flex w-full items-center justify-between gap-4">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-700">
                       {t("common.total")}
@@ -1286,7 +1288,7 @@ export function BillingWorkspace() {
               </div>
 
               <Button
-                className="h-12 rounded-[18px] bg-emerald-600 text-base font-semibold text-white hover:bg-emerald-700"
+                className="h-[68px] rounded-[20px] bg-emerald-600 text-base font-semibold text-white shadow-[0_16px_34px_rgba(5,150,105,0.18)] hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-[0_20px_42px_rgba(5,150,105,0.24)]"
                 disabled={cartProducts.length === 0 || checkoutBlocked}
                 onClick={proceedToCustomerStep}
               >
