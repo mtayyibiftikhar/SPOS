@@ -298,18 +298,23 @@ function SectionButton({
       className={cn(
         "group flex w-full items-center gap-3 rounded-[22px] border px-3 py-3 text-left transition hover:-translate-y-0.5",
         active
-          ? "border-white/10 bg-white text-slate-950 shadow-[0_20px_44px_rgba(0,0,0,0.24)]"
-          : "border-white/10 bg-white/6 text-white/78 hover:border-white/22 hover:bg-white/10"
+          ? "border-white/80 bg-[linear-gradient(135deg,#ffffff_0%,#f4fff9_46%,#f6f1ff_100%)] text-slate-950 shadow-[0_20px_46px_rgba(16,185,129,0.18)]"
+          : "border-white/70 bg-white/58 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] hover:border-emerald-200 hover:bg-white/86 hover:shadow-[0_16px_34px_rgba(88,28,135,0.08)]"
       )}
       onClick={onClick}
       type="button"
     >
-      <span className={cn("inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[17px]", active ? "bg-slate-950 text-white" : "bg-white/10 text-emerald-100")}>
+      <span className={cn(
+        "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[17px]",
+        active
+          ? "bg-[linear-gradient(135deg,#059669_0%,#7c3aed_100%)] text-white shadow-[0_14px_30px_rgba(124,58,237,0.22)]"
+          : "bg-[linear-gradient(135deg,#ecfdf5_0%,#f5f3ff_100%)] text-slate-700"
+      )}>
         <Icon className="h-4 w-4" />
       </span>
       <span className="min-w-0">
-        <span className={cn("block text-sm font-semibold", active ? "text-slate-950" : "text-white")}>{label}</span>
-        <span className={cn("mt-0.5 block truncate text-xs", active ? "text-slate-500" : "text-white/48")}>{description}</span>
+        <span className="block text-sm font-semibold text-slate-950">{label}</span>
+        <span className={cn("mt-0.5 block truncate text-xs", active ? "text-slate-500" : "text-slate-500")}>{description}</span>
       </span>
     </button>
   );
@@ -329,14 +334,16 @@ function StoreFilterButton({
   return (
     <button
       className={cn(
-        "rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition",
-        active ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-emerald-200"
+        "rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition hover:-translate-y-0.5",
+        active
+          ? "border-white/80 bg-[linear-gradient(135deg,#ecfdf5_0%,#f5f3ff_100%)] text-slate-950 shadow-[0_16px_36px_rgba(124,58,237,0.12)]"
+          : "border-white/70 bg-white/72 text-slate-700 hover:border-emerald-200 hover:bg-white"
       )}
       onClick={onClick}
       type="button"
     >
       {label}
-      <span className={cn("ml-2 rounded-full px-2 py-0.5 text-xs", active ? "bg-white/15" : "bg-slate-100")}>{count}</span>
+      <span className={cn("ml-2 rounded-full px-2 py-0.5 text-xs", active ? "bg-emerald-100 text-emerald-800" : "bg-slate-100")}>{count}</span>
     </button>
   );
 }
@@ -1105,7 +1112,7 @@ export default function OwnerPage() {
             className={cn(
               "rounded-[22px] border p-4 text-left transition",
               selectedShopSafeId === row.shop.id
-                ? "border-slate-950 bg-slate-950 text-white"
+                ? "border-emerald-200 bg-[linear-gradient(135deg,#ecfdf5_0%,#ffffff_46%,#f5f3ff_100%)] text-slate-950 shadow-[0_18px_38px_rgba(16,185,129,0.12)]"
                 : "border-slate-200 bg-white text-slate-950 hover:border-emerald-200"
             )}
             key={row.shop.id}
@@ -1116,7 +1123,7 @@ export default function OwnerPage() {
               <p className="font-semibold">{row.shop.name}</p>
               <Badge variant={licenseVariant(row.status)}>{row.status}</Badge>
             </div>
-            <p className={cn("mt-2 text-xs leading-5", selectedShopSafeId === row.shop.id ? "text-white/70" : "text-slate-500")}>
+            <p className={cn("mt-2 text-xs leading-5", selectedShopSafeId === row.shop.id ? "text-slate-600" : "text-slate-500")}>
               {row.shop.planName} | {row.users.length} users | {row.devices.length} devices
             </p>
           </button>
@@ -1172,7 +1179,7 @@ export default function OwnerPage() {
             icon: Building2,
             label: "Stores live",
             value: ownerMetrics.counts.all,
-            tone: "bg-slate-950 text-white"
+            tone: "bg-[linear-gradient(135deg,#059669_0%,#7c3aed_100%)] text-white shadow-[0_14px_34px_rgba(124,58,237,0.18)]"
           },
           {
             icon: ShieldCheck,
@@ -1232,7 +1239,7 @@ export default function OwnerPage() {
 
                 return (
                   <button
-                    className="group rounded-[26px] border border-slate-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-slate-950 hover:shadow-[0_18px_38px_rgba(15,23,42,0.08)]"
+                    className="group rounded-[26px] border border-white/80 bg-white/82 p-4 text-left transition hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-white hover:shadow-[0_18px_38px_rgba(124,58,237,0.10)]"
                     key={action.label}
                     onClick={() => {
                       setActiveSection(action.section);
@@ -1242,7 +1249,7 @@ export default function OwnerPage() {
                     }}
                     type="button"
                   >
-                    <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-950 text-white">
+                    <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#059669_0%,#7c3aed_100%)] text-white shadow-[0_14px_30px_rgba(124,58,237,0.18)]">
                       <Icon className="h-5 w-5" />
                     </span>
                     <p className="mt-4 font-display text-xl font-semibold text-slate-950">{action.label}</p>
@@ -1259,7 +1266,7 @@ export default function OwnerPage() {
           <div className="mt-5 grid gap-3">
             {ownerMetrics.rows.slice(0, 5).map((row) => (
               <button
-                className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-slate-950 hover:bg-white"
+                className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-emerald-200 hover:bg-white"
                 key={row.shop.id}
                 onClick={() => {
                   setSelectedShopId(row.shop.id);
@@ -1433,7 +1440,7 @@ export default function OwnerPage() {
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {filteredStoreRows.map((row) => (
               <button
-                className="rounded-[28px] border border-slate-200 bg-white p-5 text-left shadow-[0_18px_48px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-slate-950"
+                className="rounded-[28px] border border-white/80 bg-white/86 p-5 text-left shadow-[0_18px_48px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_20px_46px_rgba(124,58,237,0.10)]"
                 key={row.shop.id}
                 onClick={() => {
                   setSelectedShopId(row.shop.id);
@@ -2066,7 +2073,7 @@ export default function OwnerPage() {
 
               return (
                 <button
-                  className="rounded-[28px] border border-slate-200 bg-white p-5 text-left shadow-[0_18px_48px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-slate-950"
+                  className="rounded-[28px] border border-white/80 bg-white/86 p-5 text-left shadow-[0_18px_48px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_20px_46px_rgba(124,58,237,0.10)]"
                   key={section.id}
                   onClick={() => setBrandingView(section.id)}
                   type="button"
@@ -2138,7 +2145,7 @@ export default function OwnerPage() {
                 {companyLogoUrl ? (
                   <img alt={companyName} className="mx-auto h-28 w-28 rounded-[28px] object-cover shadow-[0_18px_40px_rgba(15,23,42,0.12)]" src={companyLogoUrl} />
                 ) : (
-                  <div className="mx-auto flex h-28 w-28 items-center justify-center rounded-[28px] bg-slate-950 font-display text-3xl font-semibold text-white">
+                  <div className="mx-auto flex h-28 w-28 items-center justify-center rounded-[28px] bg-[linear-gradient(135deg,#059669_0%,#7c3aed_100%)] font-display text-3xl font-semibold text-white shadow-[0_18px_40px_rgba(124,58,237,0.18)]">
                     {posName.slice(0, 2).toUpperCase()}
                   </div>
                 )}
@@ -2382,7 +2389,7 @@ export default function OwnerPage() {
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {filteredStoreRows.map((row) => (
               <button
-                className="rounded-[28px] border border-slate-200 bg-white p-5 text-left shadow-[0_18px_48px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-slate-950"
+                className="rounded-[28px] border border-white/80 bg-white/86 p-5 text-left shadow-[0_18px_48px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_20px_46px_rgba(124,58,237,0.10)]"
                 key={row.shop.id}
                 onClick={() => {
                   setSelectedShopId(row.shop.id);
@@ -2538,14 +2545,15 @@ export default function OwnerPage() {
   return (
     <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
       <aside className="xl:sticky xl:top-4 xl:self-start">
-        <Card className="overflow-hidden border-slate-900/20 bg-slate-950 p-3 text-white shadow-[0_28px_70px_rgba(15,23,42,0.18)]">
-          <div className="rounded-[26px] bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.26),transparent_42%),linear-gradient(135deg,rgba(255,255,255,0.1),rgba(255,255,255,0.03))] p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-emerald-200">Owner menu</p>
-            <h2 className="mt-2 font-display text-2xl font-semibold text-white">Command center</h2>
-            <p className="mt-2 text-sm leading-5 text-white/58">Create shops, control licenses, branding, access, and audit from one rail.</p>
+        <Card className="overflow-hidden border-white/70 bg-white/58 p-3 text-slate-950 shadow-[0_28px_70px_rgba(15,23,42,0.10)] backdrop-blur-2xl">
+          <div className="relative overflow-hidden rounded-[26px] border border-white/70 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.24),transparent_42%),radial-gradient(circle_at_88%_18%,rgba(124,58,237,0.20),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
+            <div className="pointer-events-none absolute -right-10 -top-12 h-28 w-28 rounded-full bg-purple-300/30 blur-2xl" />
+            <p className="relative text-[11px] font-semibold uppercase tracking-[0.28em] text-emerald-700">Owner menu</p>
+            <h2 className="relative mt-2 font-display text-2xl font-semibold text-slate-950">Command center</h2>
+            <p className="relative mt-2 text-sm leading-5 text-slate-600">Create shops, control licenses, branding, access, and audit from one calm owner workspace.</p>
           </div>
 
-          <div className="mt-3 grid max-h-[calc(100dvh-310px)] gap-2 overflow-y-auto pr-1">
+          <div className="mt-3 grid gap-2">
             {ownerSections.map((section) => (
               <SectionButton
                 active={activeSection === section.id}
