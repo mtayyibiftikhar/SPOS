@@ -16,37 +16,67 @@ function isValidPassword(password: string) {
   return password.trim().length >= 8;
 }
 
-export async function POST(request: Request) {
-  const ownerEmail = clean(request.headers.get("x-owner-email")).toLowerCase();
+async function isAuthorizedOwnerUser(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  ownerEmail: string
+) {
   const expectedOwnerEmail = clean(process.env.POS_OWNER_EMAIL).toLowerCase();
 
-  if (!ownerEmail || (expectedOwnerEmail && ownerEmail !== expectedOwnerEmail)) {
-    return NextResponse.json({ ok: false, message: "Owner password reset is not authorized." }, { status: 401 });
+  if (!ownerEmail) {
+    return false;
   }
 
-  let body: ResetShopUserPasswordRequest;
-
-  try {
-    body = (await request.json()) as ResetShopUserPasswordRequest;
-  } catch {
-    return NextResponse.json({ ok: false, message: "Invalid password reset payload." }, { status: 400 });
+  if (expectedOwnerEmail && ownerEmail === expectedOwnerEmail) {
+    return true;
   }
 
-  const password = clean(body.password);
-  const shopId = clean(body.shopId);
-  const userEmail = clean(body.userEmail).toLowerCase();
-  const userId = clean(body.userId);
+  const { data: ownerProfile, error } = await supabase
+    .from("profiles")
+    .select("id, shop_id, role, is_active")
+    .eq("email", ownerEmail)
+    .eq("is_active", true)
+    .in("role", ["super_admin", "support"])
+    .maybeSingle();
 
-  if (!userId && !userEmail) {
-    return NextResponse.json({ ok: false, message: "Store user is required." }, { status: 400 });
+  if (error) {
+    throw error;
   }
 
-  if (!isValidPassword(password)) {
-    return NextResponse.json({ ok: false, message: "Temporary password must be at least 8 characters." }, { status: 400 });
-  }
+  return Boolean(ownerProfile && !ownerProfile.shop_id);
+}
+
+export async function POST(request: Request) {
+  const ownerEmail = clean(request.headers.get("x-owner-email")).toLowerCase();
 
   try {
     const supabase = createSupabaseAdminClient();
+    const isAuthorized = await isAuthorizedOwnerUser(supabase, ownerEmail);
+
+    if (!isAuthorized) {
+      return NextResponse.json({ ok: false, message: "Owner password reset is not authorized." }, { status: 401 });
+    }
+
+    let body: ResetShopUserPasswordRequest;
+
+    try {
+      body = (await request.json()) as ResetShopUserPasswordRequest;
+    } catch {
+      return NextResponse.json({ ok: false, message: "Invalid password reset payload." }, { status: 400 });
+    }
+
+    const password = clean(body.password);
+    const shopId = clean(body.shopId);
+    const userEmail = clean(body.userEmail).toLowerCase();
+    const userId = clean(body.userId);
+
+    if (!userId && !userEmail) {
+      return NextResponse.json({ ok: false, message: "Store user is required." }, { status: 400 });
+    }
+
+    if (!isValidPassword(password)) {
+      return NextResponse.json({ ok: false, message: "Temporary password must be at least 8 characters." }, { status: 400 });
+    }
+
     let query = supabase
       .from("profiles")
       .select("id, shop_id, name, email, phone, role, is_active, last_login_at, created_at")

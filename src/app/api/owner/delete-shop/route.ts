@@ -17,6 +17,10 @@ function getCandidateShopIds(shopId: string) {
   return Array.from(new Set([shopId, stableUuid(`shop:${shopId}`)]));
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 function isMissingTableOrColumn(error: { code?: string; message?: string }) {
   return (
     ["42P01", "42703", "PGRST204", "PGRST205"].includes(error.code ?? "") ||
@@ -38,7 +42,7 @@ async function deleteFromTable(
 }
 
 async function resolveCloudShopId(supabase: ReturnType<typeof createSupabaseAdminClient>, shopId: string) {
-  const candidateIds = getCandidateShopIds(shopId);
+  const candidateIds = getCandidateShopIds(shopId).filter(isUuid);
   const { data, error } = await supabase.from("shops").select("id").in("id", candidateIds).limit(1);
 
   if (error) {
@@ -46,6 +50,35 @@ async function resolveCloudShopId(supabase: ReturnType<typeof createSupabaseAdmi
   }
 
   return data?.[0]?.id ?? candidateIds[0];
+}
+
+async function isAuthorizedOwnerUser(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  ownerEmail: string
+) {
+  const expectedOwnerEmail = clean(process.env.POS_OWNER_EMAIL).toLowerCase();
+
+  if (!ownerEmail) {
+    return false;
+  }
+
+  if (expectedOwnerEmail && ownerEmail === expectedOwnerEmail) {
+    return true;
+  }
+
+  const { data: ownerProfile, error } = await supabase
+    .from("profiles")
+    .select("id, shop_id, role, is_active")
+    .eq("email", ownerEmail)
+    .eq("is_active", true)
+    .in("role", ["super_admin", "support"])
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return Boolean(ownerProfile && !ownerProfile.shop_id);
 }
 
 async function listStorageObjectsRecursively(
@@ -150,11 +183,6 @@ async function deleteShopRows(supabase: ReturnType<typeof createSupabaseAdminCli
 
 export async function POST(request: Request) {
   const ownerEmail = request.headers.get("x-owner-email")?.trim().toLowerCase();
-  const expectedOwnerEmail = process.env.POS_OWNER_EMAIL?.trim().toLowerCase();
-
-  if (expectedOwnerEmail && ownerEmail !== expectedOwnerEmail) {
-    return NextResponse.json({ ok: false, message: "Owner shop delete is not authorized." }, { status: 401 });
-  }
 
   let body: DeleteShopRequest;
 
@@ -172,6 +200,12 @@ export async function POST(request: Request) {
 
   try {
     const supabase = createSupabaseAdminClient();
+    const isAuthorized = await isAuthorizedOwnerUser(supabase, ownerEmail ?? "");
+
+    if (!isAuthorized) {
+      return NextResponse.json({ ok: false, message: "Owner shop delete is not authorized." }, { status: 401 });
+    }
+
     const cloudShopId = await resolveCloudShopId(supabase, requestedShopId);
     const candidateShopIds = getCandidateShopIds(requestedShopId);
     const { data: profiles, error: profileError } = await supabase

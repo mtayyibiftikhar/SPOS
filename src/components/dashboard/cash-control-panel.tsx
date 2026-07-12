@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDownLeft, ArrowUpRight, Clock3, RefreshCcw, Wallet } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Clock3, Laptop, RefreshCcw, ShieldAlert, Wallet } from "lucide-react";
 import {
   calculateBusinessDaySummary,
   calculateShiftSummary,
@@ -167,6 +167,7 @@ export function CashControlPanel() {
     currentBusinessDay,
     currentShift,
     currentShop,
+    forceCloseShiftAndStart,
     locale,
     session,
     startBusinessDay,
@@ -200,6 +201,9 @@ export function CashControlPanel() {
   const [activeExpensePanel, setActiveExpensePanel] = useState<ExpensePanel>("recordExpense");
   const [expenseLogPage, setExpenseLogPage] = useState(1);
   const [movementLogPage, setMovementLogPage] = useState(1);
+  const [forceCloseAdminPassword, setForceCloseAdminPassword] = useState("");
+  const [forceCloseOpeningCash, setForceCloseOpeningCash] = useState("");
+  const [selectedForceShiftId, setSelectedForceShiftId] = useState("");
   const [dayFeedback, setDayFeedback] = useState<Feedback>(null);
   const [shiftFeedback, setShiftFeedback] = useState<Feedback>(null);
   const [movementFeedback, setMovementFeedback] = useState<Feedback>(null);
@@ -285,6 +289,19 @@ export function CashControlPanel() {
 
     return Math.max(1, keyLimit);
   }, [currentShop, state.productKeys]);
+
+  const isShiftCapacityFull = Boolean(
+    currentBusinessDay && !currentShift && openShiftsForDay.length >= deviceShiftLimit
+  );
+
+  useEffect(() => {
+    if (!isShiftCapacityFull) {
+      setSelectedForceShiftId("");
+      return;
+    }
+
+    setSelectedForceShiftId((current) => current || openShiftsForDay[0]?.id || "");
+  }, [isShiftCapacityFull, openShiftsForDay]);
 
   const todaySummary = useMemo(() => {
     if (!currentShop) {
@@ -492,6 +509,43 @@ export function CashControlPanel() {
 
     if (result.ok) {
       setOpeningCash("");
+    }
+  };
+
+  const handleForceCloseAndStartShift = () => {
+    const cash = Number(forceCloseOpeningCash || 0);
+
+    if (!selectedForceShiftId) {
+      setShiftFeedback({
+        kind: "error",
+        message: "Select an open shift to close first."
+      });
+      return;
+    }
+
+    if (Number.isNaN(cash) || cash < 0) {
+      setShiftFeedback({
+        kind: "error",
+        message: t("cashControl.invalidCashValue")
+      });
+      return;
+    }
+
+    const result = forceCloseShiftAndStart({
+      adminPassword: forceCloseAdminPassword,
+      openingCash: cash,
+      shiftId: selectedForceShiftId
+    });
+
+    setShiftFeedback({
+      kind: result.ok ? "success" : "error",
+      message: result.message ?? (result.ok ? t("cashControl.shiftStarted") : t("cashControl.shiftStartError"))
+    });
+
+    if (result.ok) {
+      setForceCloseAdminPassword("");
+      setForceCloseOpeningCash("");
+      setSelectedForceShiftId("");
     }
   };
 
@@ -922,18 +976,96 @@ export function CashControlPanel() {
           </div>
         ) : canUseShift ? (
           <div className="mt-6 space-y-5">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.openingCash")}</label>
-                <Input inputMode="decimal" value={openingCash} onChange={(event) => setOpeningCash(event.target.value)} />
+            {isShiftCapacityFull ? (
+              <div className="rounded-[30px] border border-amber-200 bg-amber-50/80 p-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="flex gap-3">
+                    <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
+                      <ShieldAlert className="h-5 w-5" />
+                    </span>
+                    <div>
+                      <h3 className="font-display text-xl font-semibold text-ink">All allowed shifts are already open</h3>
+                      <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
+                        This shop allows {deviceShiftLimit} open shift{deviceShiftLimit === 1 ? "" : "s"}. Select a stale shift, confirm with the admin password, and this device will start a fresh shift.
+                      </p>
+                    </div>
+                  </div>
+                  <Badge variant="warning">{openShiftsForDay.length}/{deviceShiftLimit}</Badge>
+                </div>
+
+                <div className="mt-5 grid gap-3 lg:grid-cols-2">
+                  {openShiftsForDay.map((shift) => {
+                    const cashier = state.users.find((user) => user.id === shift.cashierId);
+
+                    return (
+                      <button
+                        className={`rounded-3xl border p-4 text-left transition ${
+                          selectedForceShiftId === shift.id
+                            ? "border-slate-950 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.12)]"
+                            : "border-amber-200 bg-white/70 hover:border-slate-300 hover:bg-white"
+                        }`}
+                        key={shift.id}
+                        onClick={() => setSelectedForceShiftId(shift.id)}
+                        type="button"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-ink">{cashier?.name ?? "Unknown cashier"}</p>
+                            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                              {formatDateTime(shift.startedAt, locale)}
+                            </p>
+                          </div>
+                          <Laptop className="h-5 w-5 text-slate-400" />
+                        </div>
+                        <p className="mt-3 line-clamp-2 text-sm text-slate-600">
+                          {shift.deviceBrowserInfo ?? "Device details not recorded yet"}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-5 grid gap-4 sm:grid-cols-3">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-ink">Opening cash for this device</label>
+                    <Input
+                      inputMode="decimal"
+                      value={forceCloseOpeningCash}
+                      onChange={(event) => setForceCloseOpeningCash(event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-ink">Admin password</label>
+                    <Input
+                      type="password"
+                      value={forceCloseAdminPassword}
+                      onChange={(event) => setForceCloseAdminPassword(event.target.value)}
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <Button className="w-full" onClick={handleForceCloseAndStartShift}>
+                      Force close and start
+                    </Button>
+                  </div>
+                  <div className="sm:col-span-3">
+                    <FeedbackText feedback={shiftFeedback} />
+                  </div>
+                </div>
               </div>
-              <div className="sm:col-span-2">
-                <Button className="w-full" onClick={handleStartShift}>
-                  {t("cashControl.startShift")}
-                </Button>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.openingCash")}</label>
+                  <Input inputMode="decimal" value={openingCash} onChange={(event) => setOpeningCash(event.target.value)} />
+                </div>
+                <div className="sm:col-span-2">
+                  <Button className="w-full" onClick={handleStartShift}>
+                    {t("cashControl.startShift")}
+                  </Button>
+                </div>
+                <FeedbackText feedback={shiftFeedback} />
               </div>
-              <FeedbackText feedback={shiftFeedback} />
-            </div>
+            )}
 
             {latestClosedShift && latestClosedShiftSummary ? (
               <div className="rounded-3xl border border-line bg-white p-5">

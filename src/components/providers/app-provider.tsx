@@ -517,6 +517,9 @@ interface AppContextValue {
     deviceActivationId: string;
     shopId?: string;
   }) => { ok: boolean; message?: string };
+  ownerLogoutAllShopDevices: (payload: {
+    shopId: string;
+  }) => { ok: boolean; message?: string };
   activateProductKey: (payload: {
     key: string;
     browserInfo?: string;
@@ -646,6 +649,11 @@ interface AppContextValue {
   closeBusinessDay: (payload: { countedCash: number; note?: string }) => { ok: boolean; message?: string };
   autoCloseAndStartNextBusinessDay: (payload?: { note?: string; startShift?: boolean }) => { ok: boolean; message?: string };
   startShift: (payload: { openingCash: number }) => { ok: boolean; message?: string };
+  forceCloseShiftAndStart: (payload: {
+    adminPassword: string;
+    openingCash: number;
+    shiftId: string;
+  }) => { ok: boolean; message?: string };
   endShift: (payload: { countedCash: number; note?: string }) => { ok: boolean; message?: string };
   addCashMovement: (payload: { type: "cash_in" | "cash_out"; amount: number; reason: string }) => { ok: boolean; message?: string };
   createExpense: (payload: {
@@ -1014,6 +1022,21 @@ function deleteOwnerDeviceActivationFromCloud(deviceActivationId: string, ownerE
       "x-owner-email": ownerEmail
     },
     body: JSON.stringify({ deviceActivationId })
+  }).catch(() => undefined);
+}
+
+function deleteOwnerShopDevicesFromCloud(shopId: string, ownerEmail?: string) {
+  if (typeof window === "undefined" || !ownerEmail) {
+    return;
+  }
+
+  void fetch("/api/owner/delete-device-activation", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-owner-email": ownerEmail
+    },
+    body: JSON.stringify({ allForShop: true, shopId })
   }).catch(() => undefined);
 }
 
@@ -1732,6 +1755,17 @@ export function AppProvider({
   const currentUsers = state.users.filter((user) => user.shopId === currentShopId);
   const currentBusinessDay = getActiveBusinessDay(state.businessDays, currentShopId);
   const currentShift = getActiveShift(state.shifts, currentShopId, session?.id ?? null);
+  const currentBrowserInfo = typeof window === "undefined" ? "" : getCurrentBrowserInfo();
+  const currentDeviceActivation =
+    currentShopId
+      ? state.deviceActivations.find(
+          (activation) => activation.shopId === currentShopId && activation.browserInfo === currentBrowserInfo
+        ) ??
+        state.deviceActivations
+          .filter((activation) => activation.shopId === currentShopId)
+          .sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt))[0] ??
+        null
+      : null;
   const activatedCloudShopId =
     state.deviceActivations.reduce<DeviceActivation | null>((latest, activation) => {
       const productKey = state.productKeys.find((key) => key.id === activation.productKeyId);
@@ -2078,6 +2112,8 @@ export function AppProvider({
                 businessDayId: todayDayId,
                 businessDate: businessDateNow,
                 cashierId: session.id,
+                deviceActivationId: currentDeviceActivation?.id,
+                deviceBrowserInfo: currentDeviceActivation?.browserInfo ?? getCurrentBrowserInfo(),
                 openingCash: openingCashForNewShift,
                 startedAt: automatedAt,
                 note: "Auto started by rollover setting."
@@ -2107,13 +2143,27 @@ export function AppProvider({
       return;
     }
 
-    if (getShopAccessBlock(state, session.shopId) || !hasActivatedDeviceAccess(state, session.shopId)) {
+    const signedInAt = session.signedInAt ?? state.users.find((user) => user.id === session.id)?.lastLoginAt ?? "";
+    const passwordWasResetAfterSignin = state.auditLogs.some(
+      (log) =>
+        log.shopId === session.shopId &&
+        log.action === "owner.user_password.reset" &&
+        log.targetId === session.id &&
+        Boolean(signedInAt) &&
+        log.createdAt.localeCompare(signedInAt) > 0
+    );
+
+    if (
+      getShopAccessBlock(state, session.shopId) ||
+      !hasActivatedDeviceAccess(state, session.shopId) ||
+      passwordWasResetAfterSignin
+    ) {
       setState((current) => ({
         ...current,
         session: null
       }));
     }
-  }, [isHydrated, session?.role, session?.shopId, session?.workspace, state]);
+  }, [isHydrated, session?.id, session?.role, session?.shopId, session?.signedInAt, session?.workspace, state]);
 
   useEffect(() => {
     if (!session?.supportSessionId) {
@@ -2263,7 +2313,8 @@ export function AppProvider({
             name: account.name,
             email: account.email,
             role: account.role,
-            workspace
+            workspace,
+            signedInAt: lastLoginAt
           },
           users: current.users.map((user) =>
             user.id === account.id
@@ -2329,7 +2380,8 @@ export function AppProvider({
               name: sessionUser.name,
               email: sessionUser.email,
               role: sessionUser.role,
-              workspace
+              workspace,
+              signedInAt: lastLoginAt
             },
             users
           };
@@ -2697,7 +2749,8 @@ export function AppProvider({
               name: normalizedAdminName,
               email: normalizedAdminEmail,
               role: "shop_admin",
-              workspace: "shop"
+              workspace: "shop",
+              signedInAt: createdAt
             },
             shops: existingShop
               ? working.shops.map((shop) =>
@@ -3124,10 +3177,23 @@ export function AppProvider({
           }
 
           const updatedAt = new Date().toISOString();
-          result = { ok: true, message: "Store profile and setup access saved." };
+          const shouldLogoutDevices = Boolean(normalizedSetupPassword);
+          const ownerEmail = current.users.find((user) => user.role === "super_admin" && user.isActive)?.email;
+
+          if (shouldLogoutDevices) {
+            deleteOwnerShopDevicesFromCloud(shopId, ownerEmail);
+          }
+
+          result = {
+            ok: true,
+            message: shouldLogoutDevices
+              ? "Store profile saved. Connected devices were logged out because the setup password changed."
+              : "Store profile and setup access saved."
+          };
 
           const nextState = {
             ...current,
+            session: shouldLogoutDevices && current.session?.shopId === shopId ? null : current.session,
             shops: current.shops.map((entry) =>
               entry.id === shopId
                 ? {
@@ -3154,6 +3220,9 @@ export function AppProvider({
                 }
               }
             },
+            deviceActivations: shouldLogoutDevices
+              ? current.deviceActivations.filter((entry) => entry.shopId !== shopId)
+              : current.deviceActivations,
             auditLogs: [
               {
                 id: createId("audit"),
@@ -3161,7 +3230,9 @@ export function AppProvider({
                 actorId: session.id,
                 action: "owner.shop_profile.update",
                 targetId: shopId,
-                detail: `Updated store profile and setup access for ${normalizedShopName}.`,
+                detail: shouldLogoutDevices
+                  ? `Updated store profile and setup password for ${normalizedShopName}; connected devices must activate again.`
+                  : `Updated store profile and setup access for ${normalizedShopName}.`,
                 createdAt: updatedAt
               },
               ...current.auditLogs
@@ -3181,7 +3252,8 @@ export function AppProvider({
         }
 
         const shopToDelete = state.shops.find((entry) => entry.id === shopId);
-        const ownerEmail = state.users.find((user) => user.role === "super_admin" && user.isActive)?.email;
+        const ownerEmail =
+          state.users.find((user) => user.role === "super_admin" && user.isActive)?.email ?? session.email;
         let result: { ok: boolean; message?: string } = {
           ok: false,
           message: "Unable to delete store."
@@ -3299,7 +3371,8 @@ export function AppProvider({
         }
 
         const clearedAt = new Date().toISOString();
-        const ownerEmail = state.users.find((user) => user.role === "super_admin" && user.isActive)?.email;
+        const ownerEmail =
+          state.users.find((user) => user.role === "super_admin" && user.isActive)?.email ?? session.email;
 
         setState((current) => {
           const nextState = clearShopDataScope(current, shopId, scope, {
@@ -3498,6 +3571,66 @@ export function AppProvider({
                 action: "owner.device.remove",
                 targetId: deviceActivationId,
                 detail: `Removed connected device ${device?.browserInfo ?? browserInfo ?? deviceActivationId}.`,
+                createdAt: removedAt
+              },
+              ...current.auditLogs
+            ]
+          };
+
+          persistLocalOwnerStateSnapshot(nextState);
+
+          return nextState;
+        });
+
+        return result;
+      },
+      ownerLogoutAllShopDevices: ({ shopId }) => {
+        if (!session || session.role !== "super_admin") {
+          return { ok: false, message: "Only the POS owner can log out connected devices." };
+        }
+
+        let result: { ok: boolean; message?: string } = {
+          ok: false,
+          message: "Unable to log out connected devices."
+        };
+
+        setState((current) => {
+          const shop = current.shops.find((entry) => entry.id === shopId);
+
+          if (!shop) {
+            result = { ok: false, message: "Shop not found." };
+            return current;
+          }
+
+          const removedDevices = current.deviceActivations.filter((entry) => entry.shopId === shopId);
+
+          if (removedDevices.length === 0) {
+            result = { ok: false, message: "No connected devices to log out." };
+            return current;
+          }
+
+          const ownerEmail = current.users.find((user) => user.role === "super_admin" && user.isActive)?.email;
+          const removedAt = new Date().toISOString();
+
+          result = {
+            ok: true,
+            message: `Logged out ${removedDevices.length} connected device${removedDevices.length === 1 ? "" : "s"}.`
+          };
+
+          deleteOwnerShopDevicesFromCloud(shopId, ownerEmail);
+
+          const nextState = {
+            ...current,
+            session: current.session?.shopId === shopId ? null : current.session,
+            deviceActivations: current.deviceActivations.filter((entry) => entry.shopId !== shopId),
+            auditLogs: [
+              {
+                id: createId("audit"),
+                shopId,
+                actorId: session.id,
+                action: "owner.devices.logout_all",
+                targetId: shopId,
+                detail: `Owner logged out all connected POS devices for ${shop.name}.`,
                 createdAt: removedAt
               },
               ...current.auditLogs
@@ -3863,6 +3996,7 @@ export function AppProvider({
               email: session.email,
               role: "support",
               workspace: "shop",
+              signedInAt: startedAt.toISOString(),
               supportSessionId
             },
             supportSessions: [
@@ -3905,7 +4039,8 @@ export function AppProvider({
           return { ok: false, message: passwordError };
         }
 
-        const ownerEmail = state.users.find((user) => user.role === "super_admin" && user.isActive)?.email;
+        const ownerEmail =
+          state.users.find((user) => user.role === "super_admin" && user.isActive)?.email ?? session.email;
         const localTarget = state.users.find((user) => user.id === userId && user.role !== "super_admin");
         const shouldResetCloud = isLikelyCloudUserId(userId) || !localTarget;
         let cloudUser: User | undefined;
@@ -5973,6 +6108,8 @@ export function AppProvider({
                     businessDayId: nextDayId,
                     businessDate: nextBusinessDate,
                     cashierId: session.id,
+                    deviceActivationId: currentDeviceActivation?.id,
+                    deviceBrowserInfo: currentDeviceActivation?.browserInfo ?? getCurrentBrowserInfo(),
                     openingCash: summary.expectedCash,
                     startedAt: closedAt,
                     note: "Auto started after day rollover."
@@ -6060,10 +6197,134 @@ export function AppProvider({
                 businessDayId: openDay.id,
                 businessDate: openDay.businessDate,
                 cashierId: session.id,
+                deviceActivationId: currentDeviceActivation?.id,
+                deviceBrowserInfo: currentDeviceActivation?.browserInfo ?? getCurrentBrowserInfo(),
                 openingCash,
                 startedAt: new Date().toISOString()
               },
               ...current.shifts
+            ]
+          };
+        });
+
+        return result;
+      },
+      forceCloseShiftAndStart: ({ adminPassword, openingCash, shiftId }) => {
+        if (!currentShopId || !session) {
+          return { ok: false, message: "Session unavailable." };
+        }
+
+        if (!["shop_admin", "cashier"].includes(session.role)) {
+          return { ok: false, message: "Only shop users can start shifts." };
+        }
+
+        const normalizedPassword = adminPassword.trim();
+
+        if (!normalizedPassword) {
+          return { ok: false, message: "Admin password is required to force close another shift." };
+        }
+
+        if (Number.isNaN(openingCash) || openingCash < 0) {
+          return { ok: false, message: "Enter a valid opening cash amount." };
+        }
+
+        let result: { ok: boolean; message?: string } = {
+          ok: false,
+          message: "Unable to force close the shift."
+        };
+
+        setState((current) => {
+          const openDay = getActiveBusinessDay(current.businessDays, currentShopId);
+
+          if (!openDay) {
+            result = { ok: false, message: "Start the business day before starting a shift." };
+            return current;
+          }
+
+          const admin = current.users.find(
+            (user) =>
+              user.shopId === currentShopId &&
+              user.role === "shop_admin" &&
+              user.isActive &&
+              user.passwordHash === hashSecret(normalizedPassword)
+          );
+
+          if (!admin) {
+            result = { ok: false, message: "Admin password is incorrect." };
+            return current;
+          }
+
+          const openShift = getActiveShift(current.shifts, currentShopId, session.id);
+
+          if (openShift) {
+            result = { ok: false, message: "Close the current shift before starting a new one." };
+            return current;
+          }
+
+          const targetShift = current.shifts.find(
+            (shift) =>
+              shift.id === shiftId &&
+              shift.shopId === currentShopId &&
+              shift.businessDate === openDay.businessDate &&
+              !shift.endedAt
+          );
+
+          if (!targetShift) {
+            result = { ok: false, message: "That open shift is no longer available." };
+            return current;
+          }
+
+          const summary = calculateShiftSummary({
+            shift: targetShift,
+            bills: current.bills,
+            cashMovements: current.cashMovements,
+            refunds: current.refunds
+          });
+          const now = new Date().toISOString();
+
+          result = { ok: true, message: "Previous shift was force closed and this device shift is now open." };
+
+          return {
+            ...current,
+            shifts: [
+              {
+                id: createId("shift"),
+                shopId: currentShopId,
+                businessDayId: openDay.id,
+                businessDate: openDay.businessDate,
+                cashierId: session.id,
+                deviceActivationId: currentDeviceActivation?.id,
+                deviceBrowserInfo: currentDeviceActivation?.browserInfo ?? getCurrentBrowserInfo(),
+                openingCash,
+                startedAt: now
+              },
+              ...current.shifts.map((shift) =>
+                shift.id === targetShift.id
+                  ? {
+                      ...shift,
+                      countedCash: summary.expectedCash,
+                      expectedCash: summary.expectedCash,
+                      difference: 0,
+                      note: shift.note ?? "Force closed by admin to free an active device shift.",
+                      forcedClosedBy: admin.id,
+                      forceClosedAt: now,
+                      forceCloseReason: "Device shift limit reached.",
+                      endedAt: now
+                    }
+                  : shift
+              )
+            ],
+            auditLogs: [
+              {
+                id: createId("audit"),
+                shopId: currentShopId,
+                actorId: admin.id,
+                action: "shift.force_close_for_device",
+                targetId: targetShift.id,
+                detail: `Force closed an open shift for ${targetShift.deviceBrowserInfo ?? "another device"} and opened a new shift for ${session.name}.`,
+                createdAt: now
+              },
+              ...current.auditLogs
             ]
           };
         });
@@ -7114,6 +7375,7 @@ export function AppProvider({
     }),
     [
       currentBusinessDay,
+      currentDeviceActivation,
       currentLicense,
       currentSettings,
       currentShift,

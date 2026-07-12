@@ -100,6 +100,10 @@ type OwnerCloudSummary = {
   }>;
 };
 
+type OwnerStoreUser = User & {
+  cloudShopId?: string;
+};
+
 function dateInputValue(value?: string) {
   return value ? value.slice(0, 10) : "";
 }
@@ -235,9 +239,19 @@ function normalizedMatch(value?: string | null) {
   return value?.trim().toLowerCase() ?? "";
 }
 
-function mergeUsers(localUsers: User[], cloudUsers: User[]) {
+function mergeUsers(localUsers: User[], cloudUsers: OwnerStoreUser[]): OwnerStoreUser[] {
+  const usersByEmailOrId = new Map<string, OwnerStoreUser>();
+
+  for (const user of localUsers) {
+    usersByEmailOrId.set(user.email.trim().toLowerCase() || user.id, user);
+  }
+
+  for (const user of cloudUsers) {
+    usersByEmailOrId.set(user.email.trim().toLowerCase() || user.id, user);
+  }
+
   return Array.from(
-    new Map([...cloudUsers, ...localUsers].map((user) => [user.email.trim().toLowerCase() || user.id, user])).values()
+    usersByEmailOrId.values()
   );
 }
 
@@ -356,6 +370,7 @@ export default function OwnerPage() {
     ownerDeleteShop,
     ownerDeleteProductKey,
     ownerGenerateProductKey,
+    ownerLogoutAllShopDevices,
     ownerRemoveDeviceActivation,
     ownerResetShopUserPassword,
     ownerSetLicense,
@@ -556,10 +571,11 @@ export default function OwnerPage() {
   const getStoreUsers = (shop: Shop) => {
     const cloudShopIds = getCloudShopIds(shop);
     const localUsers = state.users.filter((user) => user.shopId === shop.id);
-    const cloudUsers: User[] =
+    const cloudUsers: OwnerStoreUser[] =
       cloudSummary?.profiles
         .filter((profile) => profile.shop_id && cloudShopIds.includes(profile.shop_id))
         .map((profile) => ({
+          cloudShopId: profile.shop_id ?? undefined,
           id: profile.id,
           shopId: shop.id,
           name: profile.name,
@@ -681,6 +697,23 @@ export default function OwnerPage() {
           ? {
               ...current,
               devices: current.devices.filter((entry) => entry.id !== device.id)
+            }
+          : current
+      );
+    }
+
+    showResult(result);
+  };
+
+  const logoutAllConnectedDevices = (shopId: string) => {
+    const result = ownerLogoutAllShopDevices({ shopId });
+
+    if (result.ok) {
+      setCloudSummary((current) =>
+        current
+          ? {
+              ...current,
+              devices: current.devices.filter((entry) => entry.shop_id !== shopId)
             }
           : current
       );
@@ -1614,7 +1647,14 @@ export default function OwnerPage() {
 
             <div className="grid gap-5 lg:grid-cols-2">
               <Card className="p-5">
-                <h3 className="font-display text-2xl font-semibold text-slate-950">Connected devices</h3>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="font-display text-2xl font-semibold text-slate-950">Connected devices</h3>
+                  {selectedShop && selectedDevices.length > 0 ? (
+                    <Button size="sm" onClick={() => logoutAllConnectedDevices(selectedShop.id)} variant="danger">
+                      Log out all devices
+                    </Button>
+                  ) : null}
+                </div>
                 <div className="mt-4 grid max-h-[360px] gap-3 overflow-y-auto pr-1">
                   {selectedDevices.length > 0 ? (
                     selectedDevices.map((device) => (
@@ -2486,7 +2526,7 @@ export default function OwnerPage() {
                         const result = await ownerResetShopUserPassword({
                           email: selectedResetUser.email,
                           password: temporaryPassword,
-                          shopId: selectedShop.id,
+                          shopId: selectedResetUser.cloudShopId ?? selectedShop.id,
                           userId: selectedResetUser.id
                         });
                         showResult(result);

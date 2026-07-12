@@ -46,6 +46,19 @@ type CartLine = {
   unitPriceInput: string;
 };
 
+type HeldBill = {
+  cart: CartLine[];
+  createdAt: string;
+  customerForm?: CustomerForm;
+  discountType?: DiscountType;
+  discountValue?: string;
+  id: string;
+  itemCount: number;
+  label: string;
+  paymentMethod?: PaymentMethod;
+  total: number;
+};
+
 type CustomerForm = {
   id?: string;
   email: string;
@@ -80,6 +93,8 @@ const paymentOptions: Array<{
 ];
 
 const UNCATEGORIZED_QUICK_CATEGORY_ID = "__quick_uncategorized__";
+const HELD_BILLS_STORAGE_PREFIX = "simple-pos-held-bills";
+const MAX_HELD_BILLS = 2;
 
 function createEmptyCustomerForm(): CustomerForm {
   return {
@@ -137,6 +152,12 @@ function getCartLineDiscountLimit(line: Pick<CartLine, "quantity" | "unitPriceIn
   const unitPrice = Number.isFinite(parsedUnitPrice) ? Math.max(0, Math.round(parsedUnitPrice * 100) / 100) : 0;
 
   return Math.round(unitPrice * line.quantity * 100) / 100;
+}
+
+function productMatchesSearch(product: Product, query: string) {
+  return [product.name.en, product.name.ar, product.name.ur, product.barcode]
+    .filter(Boolean)
+    .some((value) => value!.toLowerCase().includes(query));
 }
 
 function StatusChip({ icon: Icon, label, tone }: StatusChipProps) {
@@ -242,8 +263,13 @@ export function BillingWorkspace() {
   const [setupFeedback, setSetupFeedback] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedQuickCategoryId, setSelectedQuickCategoryId] = useState<string | null>(null);
+  const [quickSearch, setQuickSearch] = useState("");
+  const [heldBills, setHeldBills] = useState<HeldBill[]>([]);
+  const [heldBillsLoaded, setHeldBillsLoaded] = useState(false);
+  const [showHeldBills, setShowHeldBills] = useState(false);
 
   const deferredCustomerSearch = useDeferredValue(customerSearch);
+  const deferredQuickSearch = useDeferredValue(quickSearch);
 
   const shopProducts = state.products.filter(
     (product) => product.shopId === currentShopId && product.status === "active"
@@ -260,6 +286,8 @@ export function BillingWorkspace() {
   const checkoutBlocked = !currentBusinessDay || !currentShift;
   const customerSearchHasValue = deferredCustomerSearch.trim().length > 0;
   const productSearchHasValue = productSearch.trim().length > 0;
+  const quickSearchTerm = deferredQuickSearch.trim().toLowerCase();
+  const heldBillsStorageKey = currentShopId ? `${HELD_BILLS_STORAGE_PREFIX}:${currentShopId}` : null;
 
   const productById = useMemo(
     () =>
@@ -312,7 +340,36 @@ export function BillingWorkspace() {
   const selectedQuickCategory = selectedQuickCategoryId
     ? quickCategories.find((category) => category.id === selectedQuickCategoryId) ?? null
     : null;
-  const selectedQuickProducts = selectedQuickCategory?.products ?? [];
+  const selectedQuickProducts = useMemo(() => {
+    const products = selectedQuickCategory?.products ?? [];
+
+    if (!quickSearchTerm) {
+      return products;
+    }
+
+    return products.filter((product) => productMatchesSearch(product, quickSearchTerm));
+  }, [quickSearchTerm, selectedQuickCategory]);
+  const quickSearchProducts = useMemo(() => {
+    if (!quickSearchTerm || selectedQuickCategory) {
+      return [];
+    }
+
+    return favoriteProducts
+      .filter((product) => productMatchesSearch(product, quickSearchTerm))
+      .slice(0, 18);
+  }, [favoriteProducts, quickSearchTerm, selectedQuickCategory]);
+  const visibleQuickCategories = useMemo(() => {
+    if (!quickSearchTerm || selectedQuickCategory) {
+      return quickCategories;
+    }
+
+    return quickCategories.filter(
+      (category) =>
+        category.name.toLowerCase().includes(quickSearchTerm) ||
+        category.products.some((product) => productMatchesSearch(product, quickSearchTerm))
+    );
+  }, [quickCategories, quickSearchTerm, selectedQuickCategory]);
+  const showQuickSearchProducts = Boolean(quickSearchTerm && !selectedQuickCategory);
 
   const matchedCustomers = useMemo(() => {
     const query = deferredCustomerSearch.trim().toLowerCase();
@@ -339,11 +396,7 @@ export function BillingWorkspace() {
 
     return [...shopProducts]
       .sort((left, right) => Number(right.quickTab) - Number(left.quickTab))
-      .filter((product) =>
-        [product.name.en, product.name.ar, product.name.ur, product.barcode]
-          .filter(Boolean)
-          .some((value) => value!.toLowerCase().includes(query))
-      )
+      .filter((product) => productMatchesSearch(product, query))
       .slice(0, 8);
   }, [productSearch, shopProducts]);
 
@@ -502,6 +555,38 @@ export function BillingWorkspace() {
       setSelectedQuickCategoryId(null);
     }
   }, [quickCategories, selectedQuickCategoryId]);
+
+  useEffect(() => {
+    setHeldBillsLoaded(false);
+
+    if (!heldBillsStorageKey || typeof window === "undefined") {
+      setHeldBills([]);
+      setHeldBillsLoaded(true);
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(heldBillsStorageKey) ?? "[]");
+
+      if (Array.isArray(parsed)) {
+        setHeldBills(parsed.slice(0, MAX_HELD_BILLS) as HeldBill[]);
+      } else {
+        setHeldBills([]);
+      }
+    } catch {
+      setHeldBills([]);
+    }
+
+    setHeldBillsLoaded(true);
+  }, [heldBillsStorageKey]);
+
+  useEffect(() => {
+    if (!heldBillsLoaded || !heldBillsStorageKey || typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(heldBillsStorageKey, JSON.stringify(heldBills.slice(0, MAX_HELD_BILLS)));
+  }, [heldBills, heldBillsLoaded, heldBillsStorageKey]);
 
   const isProductStockBlocked = (product: Product) =>
     product.kind === "product" && (cartQuantityByProductId[product.id] ?? 0) >= product.stockQuantity;
@@ -772,6 +857,78 @@ export function BillingWorkspace() {
     }
 
     addProductToCart(searchResults[0]);
+  };
+
+  const holdCurrentBill = () => {
+    setError(null);
+    setSetupFeedback(null);
+
+    if (cartProducts.length === 0) {
+      setError(t("billing.holdEmpty"));
+      return;
+    }
+
+    if (heldBills.length >= MAX_HELD_BILLS) {
+      setError(t("billing.holdLimit"));
+      setShowHeldBills(true);
+      return;
+    }
+
+    const visibleItemNames = cartProducts
+      .slice(0, 2)
+      .map((line) => getLocalizedProductName(line.product, locale))
+      .join(", ");
+    const extraItemCount = Math.max(0, cartProducts.length - 2);
+    const heldBill: HeldBill = {
+      cart: cart.map((line) => ({ ...line })),
+      createdAt: new Date().toISOString(),
+      customerForm: { ...customerForm },
+      discountType,
+      discountValue,
+      id: crypto.randomUUID(),
+      itemCount: cartItemCount,
+      label: extraItemCount > 0 ? `${visibleItemNames} +${extraItemCount}` : visibleItemNames,
+      paymentMethod,
+      total: totals.total
+    };
+
+    setHeldBills((current) => [heldBill, ...current].slice(0, MAX_HELD_BILLS));
+    setCart([]);
+    setProductSearch("");
+    setWorkflowStep("build");
+    setSetupFeedback(t("billing.holdSaved"));
+    setShowHeldBills(true);
+  };
+
+  const restoreHeldBill = (heldBillId: string) => {
+    setError(null);
+    setSetupFeedback(null);
+
+    if (cartProducts.length > 0) {
+      setError(t("billing.holdRestoreBlocked"));
+      return;
+    }
+
+    const heldBill = heldBills.find((entry) => entry.id === heldBillId);
+
+    if (!heldBill) {
+      return;
+    }
+
+    setCart(heldBill.cart.map((line) => ({ ...line })));
+    setCustomerForm(heldBill.customerForm ?? createEmptyCustomerForm());
+    setDiscountType(heldBill.discountType ?? "fixed");
+    setDiscountValue(heldBill.discountValue ?? "0");
+    setPaymentMethod(heldBill.paymentMethod ?? "cash");
+    setHeldBills((current) => current.filter((entry) => entry.id !== heldBillId));
+    setProductSearch("");
+    setWorkflowStep("build");
+    setSetupFeedback(t("billing.holdRestored"));
+    setShowHeldBills(false);
+  };
+
+  const discardHeldBill = (heldBillId: string) => {
+    setHeldBills((current) => current.filter((entry) => entry.id !== heldBillId));
   };
 
   const proceedToCustomerStep = () => {
@@ -1069,6 +1226,91 @@ export function BillingWorkspace() {
     );
   };
 
+  const renderQuickProductCard = (product: Product) => {
+    const quantityInCart = cartQuantityByProductId[product.id] ?? 0;
+    const stockBlocked = isProductStockBlocked(product);
+    const productName = getLocalizedProductName(product, locale);
+
+    return (
+      <div
+        key={product.id}
+        className={cn(
+          "group grid w-full grid-cols-[64px_minmax(0,1fr)] gap-3 rounded-[22px] border border-slate-200 bg-white p-3 text-left shadow-[0_12px_26px_rgba(15,23,42,0.05)] transition sm:grid-cols-[72px_minmax(0,1fr)_auto] sm:items-center",
+          stockBlocked
+            ? "opacity-70"
+            : "hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_16px_34px_rgba(15,23,42,0.08)]"
+        )}
+      >
+        <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-[18px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.18),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)] sm:h-[72px] sm:w-[72px]">
+          {product.imageUrl ? (
+            <img src={product.imageUrl} alt={productName} className="h-full w-full object-cover" />
+          ) : (
+            <span className="font-display text-2xl font-semibold tracking-[-0.04em] text-slate-300">
+              {productName.slice(0, 2).toUpperCase()}
+            </span>
+          )}
+        </div>
+
+        <div className="min-w-0">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="line-clamp-1 text-base font-semibold text-slate-950">{productName}</p>
+              <p className="mt-1 truncate text-xs text-slate-500">
+                {product.barcode || t("billing.manualSearchOnly")}
+              </p>
+            </div>
+            {quantityInCart > 0 ? (
+              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200 sm:hidden">
+                {quantityInCart}
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-2 text-lg font-semibold leading-none tracking-[-0.03em] text-slate-950">
+            {formatCurrency(product.salePrice, currency, locale)}
+          </p>
+        </div>
+
+        <div className="col-span-2 flex justify-end sm:col-span-1">
+          {quantityInCart > 0 ? (
+            <div className="inline-flex h-10 min-w-[128px] items-center justify-between rounded-full border border-emerald-200 bg-emerald-50 px-1.5 shadow-inner shadow-emerald-100/60">
+              <button
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-emerald-700 transition hover:bg-white"
+                onClick={() => {
+                  updateLineQuantity(product.id, quantityInCart - 1);
+                }}
+                type="button"
+              >
+                <Minus className="h-4 w-4" />
+              </button>
+              <span className="min-w-[2rem] text-center text-base font-semibold text-emerald-950">
+                {quantityInCart}
+              </span>
+              <button
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-emerald-700 transition hover:bg-white disabled:opacity-40"
+                disabled={stockBlocked}
+                onClick={() => addProductToCart(product)}
+                type="button"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <Button
+              className="h-10 min-w-[108px] rounded-full bg-emerald-600 px-4 text-sm font-semibold text-white shadow-[0_10px_20px_rgba(5,150,105,0.2)] hover:bg-emerald-700"
+              disabled={stockBlocked}
+              onClick={() => addProductToCart(product)}
+            >
+              <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                <Plus className="h-4 w-4" />
+                {stockBlocked ? t("products.reorderNeeded") : t("common.add")}
+              </span>
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderStepHeader = ({
     backAction,
     backLabel,
@@ -1133,6 +1375,32 @@ export function BillingWorkspace() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              className="h-10 rounded-[14px] border border-amber-200 bg-amber-50 px-4 text-amber-900 hover:bg-amber-100"
+              onClick={holdCurrentBill}
+              variant="secondary"
+            >
+              <span className="inline-flex items-center gap-2">
+                <Clock3 className="h-4 w-4" />
+                {t("billing.holdOrder")}
+              </span>
+            </Button>
+            <Button
+              className={cn(
+                "h-10 rounded-[14px] border px-4 transition",
+                showHeldBills
+                  ? "border-slate-950 bg-slate-950 text-white hover:bg-slate-900"
+                  : "border-slate-200 bg-white text-slate-950 hover:border-emerald-200 hover:bg-emerald-50"
+              )}
+              onClick={() => setShowHeldBills((current) => !current)}
+              variant="secondary"
+            >
+              <span className="inline-flex items-center gap-2">
+                <ReceiptText className="h-4 w-4" />
+                {t("billing.heldBills")} {heldBills.length}/{MAX_HELD_BILLS}
+              </span>
+            </Button>
+
             {!currentBusinessDay ? (
               session?.role === "shop_admin" ? (
                 <Button
@@ -1187,6 +1455,62 @@ export function BillingWorkspace() {
             >
               {headerMessage}
             </span>
+          </div>
+        ) : null}
+
+        {showHeldBills ? (
+          <div className="mt-3 rounded-[22px] border border-slate-200 bg-white p-3 shadow-[0_18px_40px_rgba(15,23,42,0.08)]">
+            {heldBills.length > 0 ? (
+              <div className="grid gap-2 md:grid-cols-2">
+                {heldBills.map((heldBill, index) => (
+                  <div
+                    key={heldBill.id}
+                    className="rounded-[18px] border border-slate-200 bg-slate-50 p-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+                          {t("billing.holdSlot", { slot: index + 1 })}
+                        </p>
+                        <p className="mt-1 line-clamp-1 text-sm font-semibold text-slate-950">
+                          {heldBill.label}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {heldBill.itemCount} {t("common.items")} -{" "}
+                          {new Date(heldBill.createdAt).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          })}
+                        </p>
+                      </div>
+                      <p className="shrink-0 text-sm font-semibold text-slate-950">
+                        {formatCurrency(heldBill.total, currency, locale)}
+                      </p>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <Button
+                        className="h-9 rounded-[13px] bg-emerald-600 text-xs font-semibold text-white hover:bg-emerald-700"
+                        onClick={() => restoreHeldBill(heldBill.id)}
+                      >
+                        {t("common.restore")}
+                      </Button>
+                      <Button
+                        className="h-9 rounded-[13px] border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        onClick={() => discardHeldBill(heldBill.id)}
+                        variant="secondary"
+                      >
+                        {t("common.remove")}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-[18px] border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center text-sm font-medium text-slate-600">
+                {t("billing.heldBillsEmpty")}
+              </div>
+            )}
           </div>
         ) : null}
       </Card>
@@ -1307,7 +1631,11 @@ export function BillingWorkspace() {
             <div className="mt-1 flex items-start justify-between gap-3">
               <div>
                 <h2 className="font-display text-[1.5rem] font-semibold tracking-[-0.04em] text-slate-950">
-                  {selectedQuickCategory ? selectedQuickCategory.name : t("billing.quickCategoriesTitle")}
+                  {showQuickSearchProducts
+                    ? t("billing.quickSearchResults")
+                    : selectedQuickCategory
+                      ? selectedQuickCategory.name
+                      : t("billing.quickCategoriesTitle")}
                 </h2>
               </div>
               {selectedQuickCategory ? (
@@ -1321,129 +1649,68 @@ export function BillingWorkspace() {
                 </button>
               ) : null}
             </div>
+
+            <div className="relative mt-3">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                className="h-11 rounded-[16px] border-slate-200 bg-slate-50 pl-11 text-sm text-slate-950"
+                placeholder={t("billing.quickSearchPlaceholder")}
+                value={quickSearch}
+                onChange={(event) => setQuickSearch(event.target.value)}
+              />
+            </div>
           </div>
 
           <div className="min-h-0 overflow-y-auto px-4 py-4">
-            {quickCategories.length > 0 && !selectedQuickCategory ? (
-              <div className="grid grid-cols-2 gap-3">
-                {quickCategories.map((category) => (
-                  <button
-                    key={category.id}
-                    className="group overflow-hidden rounded-[22px] border border-slate-200 bg-white p-1.5 text-left shadow-[0_12px_26px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_16px_32px_rgba(15,23,42,0.08)]"
-                    onClick={() => setSelectedQuickCategoryId(category.id)}
-                    type="button"
-                  >
-                    <div className="relative h-[6.8rem] overflow-hidden rounded-[17px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.22),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)]">
-                      {category.imageUrl ? (
-                        <img src={category.imageUrl} alt={category.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
-                      ) : (
-                        <div className="flex h-full items-center justify-center">
-                          <span className="font-display text-4xl font-semibold tracking-[-0.04em] text-slate-300">
-                            {category.name.slice(0, 2).toUpperCase()}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    <div className="px-1.5 pb-2 pt-2">
-                      <p className="line-clamp-1 text-center text-sm font-semibold text-slate-950">{category.name}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
+            {showQuickSearchProducts ? (
+              quickSearchProducts.length > 0 ? (
+                <div className="space-y-2.5">{quickSearchProducts.map((product) => renderQuickProductCard(product))}</div>
+              ) : (
+                <EmptyState label={t("billing.quickNoResults")} />
+              )
+            ) : quickCategories.length > 0 && !selectedQuickCategory ? (
+              visibleQuickCategories.length > 0 ? (
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  {visibleQuickCategories.map((category) => (
+                    <button
+                      key={category.id}
+                      className="group grid grid-cols-[68px_minmax(0,1fr)] items-center gap-3 rounded-[22px] border border-slate-200 bg-white p-2 text-left shadow-[0_12px_26px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_16px_32px_rgba(15,23,42,0.08)]"
+                      onClick={() => {
+                        setSelectedQuickCategoryId(category.id);
+                        setQuickSearch("");
+                      }}
+                      type="button"
+                    >
+                      <div className="relative h-[68px] overflow-hidden rounded-[18px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.22),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)]">
+                        {category.imageUrl ? (
+                          <img
+                            src={category.imageUrl}
+                            alt={category.name}
+                            className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center">
+                            <span className="font-display text-2xl font-semibold tracking-[-0.04em] text-slate-300">
+                              {category.name.slice(0, 2).toUpperCase()}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="line-clamp-1 text-base font-semibold text-slate-950">{category.name}</p>
+                        <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-700">
+                          {t("billing.quickCategoryItems", { count: category.products.length })}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState label={t("billing.quickNoResults")} />
+              )
             ) : quickCategories.length > 0 && selectedQuickCategory ? (
               selectedQuickProducts.length > 0 ? (
-                <div className="space-y-2.5">
-                  {selectedQuickProducts.map((product) => {
-                    const quantityInCart = cartQuantityByProductId[product.id] ?? 0;
-                    const stockBlocked = isProductStockBlocked(product);
-
-                    return (
-                      <div
-                        key={product.id}
-                        className={cn(
-                          "grid w-full grid-cols-[68px_minmax(0,1fr)] gap-3 rounded-[22px] border border-slate-200 bg-white p-3 text-left shadow-[0_12px_26px_rgba(15,23,42,0.05)] transition",
-                          stockBlocked
-                            ? "opacity-70"
-                            : "hover:-translate-y-0.5 hover:shadow-[0_16px_30px_rgba(15,23,42,0.08)]"
-                        )}
-                      >
-                        <div className="flex h-[68px] items-center justify-center overflow-hidden rounded-[18px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.18),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)]">
-                          {product.imageUrl ? (
-                            <img
-                              src={product.imageUrl}
-                              alt={getLocalizedProductName(product, locale)}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <span className="font-display text-2xl font-semibold tracking-[-0.04em] text-slate-300">
-                              {getLocalizedProductName(product, locale).slice(0, 2).toUpperCase()}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex min-w-0 flex-col justify-between">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="line-clamp-2 text-sm font-semibold text-slate-950">
-                                {getLocalizedProductName(product, locale)}
-                              </p>
-                              <p className="mt-1 text-xs text-slate-500">
-                                {product.barcode || t("billing.manualSearchOnly")}
-                              </p>
-                            </div>
-                            {quantityInCart > 0 ? (
-                              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-700 ring-1 ring-emerald-200">
-                                {quantityInCart}
-                              </span>
-                            ) : null}
-                          </div>
-
-                          <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-                            <p className="self-start pt-1 text-[0.95rem] font-semibold leading-none text-slate-950">
-                              {formatCurrency(product.salePrice, currency, locale)}
-                            </p>
-
-                            {quantityInCart > 0 ? (
-                              <div className="inline-flex h-8 w-[96px] items-center justify-between rounded-full border border-emerald-200 bg-emerald-50 px-1 shadow-inner shadow-emerald-100/60">
-                                <button
-                                  className="inline-flex h-6 w-6 items-center justify-center rounded-full text-emerald-700 transition hover:bg-white"
-                                  onClick={() => {
-                                    updateLineQuantity(product.id, quantityInCart - 1);
-                                  }}
-                                  type="button"
-                                >
-                                  <Minus className="h-3.5 w-3.5" />
-                                </button>
-                                <span className="min-w-[1.4rem] text-center text-sm font-semibold text-emerald-900">
-                                  {quantityInCart}
-                                </span>
-                                <button
-                                  className="inline-flex h-6 w-6 items-center justify-center rounded-full text-emerald-700 transition hover:bg-white disabled:opacity-40"
-                                  disabled={stockBlocked}
-                                  onClick={() => addProductToCart(product)}
-                                  type="button"
-                                >
-                                  <Plus className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            ) : (
-                              <Button
-                                className="h-8 min-w-[78px] rounded-full bg-emerald-600 px-3 text-xs font-semibold text-white shadow-[0_10px_20px_rgba(5,150,105,0.2)] hover:bg-emerald-700"
-                                disabled={stockBlocked}
-                                onClick={() => addProductToCart(product)}
-                              >
-                                <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                                  <Plus className="h-3.5 w-3.5" />
-                                  {stockBlocked ? t("products.reorderNeeded") : t("common.add")}
-                                </span>
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                <div className="space-y-2.5">{selectedQuickProducts.map((product) => renderQuickProductCard(product))}</div>
               ) : (
                 <EmptyState label={t("billing.quickCategoryEmpty")} />
               )

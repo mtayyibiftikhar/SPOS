@@ -3,6 +3,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type DeleteDeviceActivationRequest = {
   deviceActivationId?: string;
+  shopId?: string;
+  allForShop?: boolean;
 };
 
 export async function POST(request: Request) {
@@ -22,14 +24,16 @@ export async function POST(request: Request) {
   }
 
   const deviceActivationId = body.deviceActivationId?.trim();
+  const shopId = body.shopId?.trim();
 
-  if (!deviceActivationId) {
+  if (!deviceActivationId && !(body.allForShop && shopId)) {
     return NextResponse.json({ ok: false, message: "Connected device id is required." }, { status: 400 });
   }
 
   try {
     const supabase = createSupabaseAdminClient();
-    const { error } = await supabase.from("device_activations").delete().eq("id", deviceActivationId);
+    const query = supabase.from("device_activations").delete();
+    const { error } = body.allForShop && shopId ? await query.eq("shop_id", shopId) : await query.eq("id", deviceActivationId);
 
     if (error) {
       throw error;

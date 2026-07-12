@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { stableUuid } from "@/lib/cloud-sync";
+import { POS_ASSETS_BUCKET } from "@/lib/supabase/storage-assets";
 import { clearShopDataScope, ownerClearShopDataScopeLabels, type OwnerClearShopDataScope } from "@/lib/shop-data-reset";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { DemoAppState } from "@/types/pos";
@@ -20,8 +21,44 @@ function clean(value: string | null | undefined) {
   return value?.trim() ?? "";
 }
 
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message ?? fallback);
+  }
+
+  return fallback;
+}
+
 function getCandidateShopIds(shopId: string) {
   return Array.from(new Set([shopId, stableUuid(`shop:${shopId}`)]));
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isMissingTableOrColumn(error: { code?: string; message?: string }) {
+  return (
+    ["42P01", "42703", "PGRST204", "PGRST205"].includes(error.code ?? "") ||
+    /could not find|does not exist|schema cache/i.test(error.message ?? "")
+  );
+}
+
+async function deleteFromTable(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  table: string,
+  column: string,
+  value: string
+) {
+  const { error } = await supabase.from(table).delete().eq(column, value);
+
+  if (error && !isMissingTableOrColumn(error)) {
+    throw error;
+  }
 }
 
 async function ensureSnapshotBucket(supabase: ReturnType<typeof createSupabaseAdminClient>) {
@@ -68,7 +105,7 @@ async function saveSnapshotToStorage(
 }
 
 async function resolveCloudShopId(supabase: ReturnType<typeof createSupabaseAdminClient>, shopId: string) {
-  const candidateIds = getCandidateShopIds(shopId);
+  const candidateIds = getCandidateShopIds(shopId).filter(isUuid);
   const { data, error } = await supabase.from("shops").select("id").in("id", candidateIds).limit(1);
 
   if (error) {
@@ -76,6 +113,171 @@ async function resolveCloudShopId(supabase: ReturnType<typeof createSupabaseAdmi
   }
 
   return data?.[0]?.id ?? candidateIds[0];
+}
+
+async function isAuthorizedOwnerUser(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  ownerEmail: string
+) {
+  const expectedOwnerEmail = clean(process.env.POS_OWNER_EMAIL).toLowerCase();
+
+  if (!ownerEmail) {
+    return false;
+  }
+
+  if (expectedOwnerEmail && ownerEmail === expectedOwnerEmail) {
+    return true;
+  }
+
+  const { data: ownerProfile, error } = await supabase
+    .from("profiles")
+    .select("id, shop_id, role, is_active")
+    .eq("email", ownerEmail)
+    .eq("is_active", true)
+    .in("role", ["super_admin", "support"])
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return Boolean(ownerProfile && !ownerProfile.shop_id);
+}
+
+async function listStorageObjectsRecursively(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  bucket: string,
+  prefix: string
+) {
+  const paths: string[] = [];
+
+  async function walk(currentPrefix: string) {
+    const { data, error } = await supabase.storage.from(bucket).list(currentPrefix, {
+      limit: 1000,
+      sortBy: { column: "name", order: "asc" }
+    });
+
+    if (error) {
+      if (/not found|does not exist|bucket/i.test(error.message)) {
+        return;
+      }
+
+      throw error;
+    }
+
+    for (const item of data ?? []) {
+      const path = `${currentPrefix}/${item.name}`.replace(/^\/+/, "");
+
+      if (item.metadata) {
+        paths.push(path);
+      } else {
+        await walk(path);
+      }
+    }
+  }
+
+  await walk(prefix.replace(/\/+$/, ""));
+
+  return paths;
+}
+
+async function removeStoragePrefix(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  bucket: string,
+  prefix: string
+) {
+  const paths = await listStorageObjectsRecursively(supabase, bucket, prefix);
+
+  if (paths.length === 0) {
+    return 0;
+  }
+
+  const { error } = await supabase.storage.from(bucket).remove(paths);
+
+  if (error && !/not found|does not exist|object/i.test(error.message)) {
+    throw error;
+  }
+
+  return paths.length;
+}
+
+async function deleteLedgerRowsForSalesReset(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  shopId: string
+) {
+  const { error } = await supabase
+    .from("accounting_ledger_entries")
+    .delete()
+    .eq("shop_id", shopId)
+    .in("reference_type", ["bill", "cash_movement", "customer_payment", "refund"]);
+
+  if (error && !isMissingTableOrColumn(error)) {
+    throw error;
+  }
+}
+
+async function clearShopRowsForScope(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  shopId: string,
+  scope: OwnerClearShopDataScope
+) {
+  const clearBills = scope === "all" || scope === "bills";
+  const clearProducts = scope === "all" || scope === "products";
+
+  if (clearBills) {
+    const billTables: Array<[string, string]> = [
+      ["refund_items", "shop_id"],
+      ["payments", "shop_id"],
+      ["bill_items", "shop_id"],
+      ["customer_account_payments", "shop_id"],
+      ["day_closes", "shop_id"],
+      ["cash_movements", "shop_id"],
+      ["refunds", "shop_id"],
+      ["bills", "shop_id"],
+      ["shifts", "shop_id"],
+      ["business_days", "shop_id"]
+    ];
+
+    await deleteLedgerRowsForSalesReset(supabase, shopId);
+
+    for (const [table, column] of billTables) {
+      await deleteFromTable(supabase, table, column, shopId);
+    }
+  }
+
+  if (clearProducts) {
+    const productTables: Array<[string, string]> = [
+      ["purchase_order_items", "shop_id"],
+      ["inventory_adjustments", "shop_id"],
+      ["inventory_batches", "shop_id"],
+      ["purchase_orders", "shop_id"],
+      ["deleted_products", "shop_id"],
+      ["products", "shop_id"],
+      ["product_categories", "shop_id"],
+      ["suppliers", "shop_id"]
+    ];
+
+    for (const [table, column] of productTables) {
+      await deleteFromTable(supabase, table, column, shopId);
+    }
+
+    await removeStoragePrefix(supabase, POS_ASSETS_BUCKET, `shops/${shopId}/products`);
+    await removeStoragePrefix(supabase, POS_ASSETS_BUCKET, `shops/${shopId}/categories`);
+  }
+
+  if (scope === "all") {
+    const allOnlyTables: Array<[string, string]> = [
+      ["expenses", "shop_id"],
+      ["expense_categories", "shop_id"],
+      ["support_sessions", "shop_id"],
+      ["support_tickets", "shop_id"],
+      ["customers", "shop_id"]
+    ];
+
+    for (const [table, column] of allOnlyTables) {
+      await deleteFromTable(supabase, table, column, shopId);
+    }
+  }
 }
 
 async function loadSnapshot(supabase: ReturnType<typeof createSupabaseAdminClient>, shopId: string) {
@@ -134,11 +336,6 @@ async function saveSnapshot(
 
 export async function POST(request: Request) {
   const ownerEmail = request.headers.get("x-owner-email")?.trim().toLowerCase();
-  const expectedOwnerEmail = process.env.POS_OWNER_EMAIL?.trim().toLowerCase();
-
-  if (expectedOwnerEmail && ownerEmail !== expectedOwnerEmail) {
-    return NextResponse.json({ ok: false, message: "Owner data reset is not authorized." }, { status: 401 });
-  }
 
   let body: ClearShopDataRequest;
 
@@ -157,6 +354,12 @@ export async function POST(request: Request) {
 
   try {
     const supabase = createSupabaseAdminClient();
+    const isAuthorized = await isAuthorizedOwnerUser(supabase, ownerEmail ?? "");
+
+    if (!isAuthorized) {
+      return NextResponse.json({ ok: false, message: "Owner data reset is not authorized." }, { status: 401 });
+    }
+
     const cloudShopId = await resolveCloudShopId(supabase, shopId);
     const snapshot = await loadSnapshot(supabase, cloudShopId);
     const clearedState = clearShopDataScope(snapshot.state ?? {}, cloudShopId, scope, {
@@ -165,6 +368,7 @@ export async function POST(request: Request) {
       createdAt: new Date().toISOString()
     });
 
+    await clearShopRowsForScope(supabase, cloudShopId, scope);
     await saveSnapshot(supabase, cloudShopId, clearedState, snapshot.usesStorageFallback);
 
     return NextResponse.json({
@@ -174,7 +378,7 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     return NextResponse.json(
-      { ok: false, message: error instanceof Error ? error.message : "Unable to clear store data." },
+      { ok: false, message: errorMessage(error, "Unable to clear store data.") },
       { status: 500 }
     );
   }

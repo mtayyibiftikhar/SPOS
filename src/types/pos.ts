@@ -370,12 +370,17 @@ export interface Shift {
   businessDayId?: string;
   businessDate: string;
   cashierId: string;
+  deviceActivationId?: string;
+  deviceBrowserInfo?: string;
   openingCash: number;
   countedCash?: number;
   expectedCash?: number;
   difference?: number;
   note?: string;
   startedAt: string;
+  forcedClosedBy?: string;
+  forceClosedAt?: string;
+  forceCloseReason?: string;
   endedAt?: string;
 }
 
@@ -556,6 +561,7 @@ export interface SessionUser {
   email: string;
   role: UserRole;
   workspace: WorkspaceKind;
+  signedInAt?: string;
   supportSessionId?: string;
 }
 
