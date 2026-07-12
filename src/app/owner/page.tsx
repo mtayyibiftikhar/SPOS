@@ -199,6 +199,32 @@ function buildRange(range: ReportRange, customStart: string, customEnd: string) 
   return { start, end };
 }
 
+function formatDateInput(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function getDefaultPlanName(billingCycle: BillingCycle) {
+  return `${billingCycle[0].toUpperCase()}${billingCycle.slice(1)} package`;
+}
+
+function getExpiryDateForBillingCycle(billingCycle: BillingCycle) {
+  const expiry = new Date();
+
+  if (billingCycle === "monthly") {
+    expiry.setMonth(expiry.getMonth() + 1);
+  }
+
+  if (billingCycle === "quarterly") {
+    expiry.setMonth(expiry.getMonth() + 3);
+  }
+
+  if (billingCycle === "yearly") {
+    expiry.setFullYear(expiry.getFullYear() + 1);
+  }
+
+  return formatDateInput(expiry);
+}
+
 function previewProductKey(value: string) {
   const normalized = value.trim();
 
@@ -352,12 +378,12 @@ export default function OwnerPage() {
     setupPassword: "",
     phone: "",
     address: "",
-    planName: "Starter",
+    planName: getDefaultPlanName("monthly"),
     billingCycle: "monthly" as BillingCycle,
     packagePrice: 0,
     totalPaid: 0,
-    licenseStatus: "trial" as LicenseStatus,
-    expiresAt: "",
+    licenseStatus: "active" as LicenseStatus,
+    expiresAt: getExpiryDateForBillingCycle("monthly"),
     allowedDevices: 2,
     autoLockDaysAfterExpiry: 3
   });
@@ -756,7 +782,10 @@ export default function OwnerPage() {
         setupEmail: "",
         setupPassword: "",
         phone: "",
-        address: ""
+        address: "",
+        planName: getDefaultPlanName(current.billingCycle),
+        licenseStatus: "active",
+        expiresAt: getExpiryDateForBillingCycle(current.billingCycle)
       }));
     }
   };
@@ -1298,12 +1327,20 @@ export default function OwnerPage() {
           <Input value={createShopForm.address} onChange={(event) => setCreateShopForm((current) => ({ ...current, address: event.target.value }))} />
         </label>
         <label className="space-y-2">
-          <span className="text-sm font-semibold text-slate-950">Plan</span>
-          <Input value={createShopForm.planName} onChange={(event) => setCreateShopForm((current) => ({ ...current, planName: event.target.value }))} />
-        </label>
-        <label className="space-y-2">
           <span className="text-sm font-semibold text-slate-950">Billing cycle</span>
-          <Select value={createShopForm.billingCycle} onChange={(event) => setCreateShopForm((current) => ({ ...current, billingCycle: event.target.value as BillingCycle }))}>
+          <Select
+            value={createShopForm.billingCycle}
+            onChange={(event) => {
+              const billingCycle = event.target.value as BillingCycle;
+
+              setCreateShopForm((current) => ({
+                ...current,
+                billingCycle,
+                expiresAt: getExpiryDateForBillingCycle(billingCycle),
+                planName: getDefaultPlanName(billingCycle)
+              }));
+            }}
+          >
             <option value="monthly">Monthly</option>
             <option value="quarterly">Quarterly</option>
             <option value="yearly">Yearly</option>
@@ -1318,18 +1355,30 @@ export default function OwnerPage() {
           <Input min={0} type="number" value={createShopForm.totalPaid} onChange={(event) => setCreateShopForm((current) => ({ ...current, totalPaid: Number(event.target.value) }))} />
         </label>
         <label className="space-y-2">
-          <span className="text-sm font-semibold text-slate-950">License status</span>
-          <Select value={createShopForm.licenseStatus} onChange={(event) => setCreateShopForm((current) => ({ ...current, licenseStatus: event.target.value as LicenseStatus }))}>
-            {licenseStatuses.map((status) => (
-              <option key={status} value={status}>
-                {t(licenseStatusLabelKeys[status])}
-              </option>
-            ))}
-          </Select>
-        </label>
-        <label className="space-y-2">
           <span className="text-sm font-semibold text-slate-950">Expiry date</span>
           <Input type="date" value={createShopForm.expiresAt} onChange={(event) => setCreateShopForm((current) => ({ ...current, expiresAt: event.target.value }))} />
+          <span className="block text-xs leading-5 text-slate-500">
+            Auto-filled from today based on the billing cycle. You can still adjust it if needed.
+          </span>
+        </label>
+        <label className="flex min-h-[82px] items-center gap-3 rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-3">
+          <input
+            checked={createShopForm.licenseStatus === "trial"}
+            className="h-5 w-5 accent-emerald-600"
+            type="checkbox"
+            onChange={(event) =>
+              setCreateShopForm((current) => ({
+                ...current,
+                licenseStatus: event.target.checked ? "trial" : "active"
+              }))
+            }
+          />
+          <span>
+            <span className="block text-sm font-semibold text-slate-950">Give trial</span>
+            <span className="mt-1 block text-xs leading-5 text-slate-500">
+              Leave unchecked to create the shop as active.
+            </span>
+          </span>
         </label>
         <label className="space-y-2">
           <span className="text-sm font-semibold text-slate-950">Allowed devices</span>
