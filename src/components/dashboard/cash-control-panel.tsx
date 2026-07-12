@@ -667,8 +667,8 @@ export function CashControlPanel() {
                     value={`${activeDaySummary?.billCount ?? 0}`}
                   />
                   <SummaryRow
-                    label={t("dashboard.shiftBills")}
-                    value={`${activeShiftSummary?.billCount ?? 0}`}
+                    label={t("dashboard.openShifts")}
+                    value={`${openShiftsForDay.length}/${deviceShiftLimit}`}
                   />
                   <SummaryRow
                     label={t("cashControl.expectedCash")}
@@ -680,8 +680,24 @@ export function CashControlPanel() {
                     value={formatCurrency(activeDaySummary?.cashSales ?? 0, currency, locale)}
                   />
                   <SummaryRow
+                    label={t("cashControl.cardSales")}
+                    value={formatCurrency(activeDaySummary?.cardSales ?? 0, currency, locale)}
+                  />
+                  <SummaryRow
+                    label={t("cashControl.accountSales")}
+                    value={formatCurrency(activeDaySummary?.accountSales ?? 0, currency, locale)}
+                  />
+                  <SummaryRow
                     label={t("cashControl.refunds")}
                     value={formatCurrency(activeDaySummary?.refunds ?? 0, currency, locale)}
+                  />
+                  <SummaryRow
+                    label={t("cashControl.cashIn")}
+                    value={formatCurrency(activeDaySummary?.cashIn ?? 0, currency, locale)}
+                  />
+                  <SummaryRow
+                    label={t("cashControl.cashOut")}
+                    value={formatCurrency(activeDaySummary?.cashOut ?? 0, currency, locale)}
                   />
                   <SummaryRow
                     label={t("cashControl.expenses")}
