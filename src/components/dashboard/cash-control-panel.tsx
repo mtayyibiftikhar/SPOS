@@ -680,6 +680,10 @@ export function CashControlPanel() {
                     value={formatCurrency(activeDaySummary?.cashSales ?? 0, currency, locale)}
                   />
                   <SummaryRow
+                    label={t("cashControl.refunds")}
+                    value={formatCurrency(activeDaySummary?.refunds ?? 0, currency, locale)}
+                  />
+                  <SummaryRow
                     label={t("cashControl.expenses")}
                     value={formatCurrency(activeDaySummary?.expenses ?? 0, currency, locale)}
                   />
@@ -757,6 +761,10 @@ export function CashControlPanel() {
                   <SummaryRow
                     label={t("cashControl.accountSales")}
                     value={formatCurrency(activeDaySummary.accountSales, currency, locale)}
+                  />
+                  <SummaryRow
+                    label={t("cashControl.refunds")}
+                    value={formatCurrency(activeDaySummary.refunds, currency, locale)}
                   />
                   <SummaryRow
                     label={t("cashControl.expenses")}
