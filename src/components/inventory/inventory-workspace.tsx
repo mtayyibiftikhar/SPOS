@@ -178,8 +178,8 @@ export function InventoryWorkspace() {
   const [feedback, setFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const selectedProduct =
     physicalProducts.find((product) => product.id === selectedProductId) ?? physicalProducts[0] ?? null;
-  const restockProduct = physicalProducts.find(
-    (product) => product.barcode?.trim() === restockBarcode.trim()
+  const restockProduct = physicalProducts.find((product) =>
+    [product.barcode, ...(product.barcodes ?? [])].some((barcode) => barcode?.trim() === restockBarcode.trim())
   );
   const orderSupplier = suppliers.find((supplier) => supplier.id === orderSupplierId);
   const orderProductIds = new Set(orderItems.map((item) => item.productId));
@@ -195,7 +195,8 @@ export function InventoryWorkspace() {
         product.name.en,
         product.name.ar,
         product.name.ur,
-        product.barcode ?? ""
+        product.barcode ?? "",
+        ...(product.barcodes ?? [])
       ].some((value) => value.toLowerCase().includes(orderSearchTerm));
     })
     .slice(0, 8);

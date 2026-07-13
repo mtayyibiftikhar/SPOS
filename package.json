@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:pos": "next dev -p 3000",
-    "dev:owner": "next dev -p 3001",
+    "dev:owner": "node scripts/local-owner-proxy.cjs 3001 http://localhost:3000",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",

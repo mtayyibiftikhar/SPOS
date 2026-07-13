@@ -108,6 +108,7 @@ export interface Product {
   shopId: string;
   categoryId?: string;
   barcode?: string;
+  barcodes?: string[];
   kind: ProductKind;
   name: LocalizedText;
   imageUrl?: string;

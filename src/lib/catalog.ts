@@ -52,7 +52,9 @@ export function findBarcodeConflict(
     products.find(
       (product) =>
         product.shopId === shopId &&
-        normalizeBarcode(product.barcode) === normalized &&
+        [product.barcode, ...(product.barcodes ?? [])]
+          .map((entry) => normalizeBarcode(entry))
+          .some((entry) => entry === normalized) &&
         product.id !== excludeId
     ) ?? null
   );
@@ -62,7 +64,8 @@ export function generateUniqueBarcode(products: Product[], shopId: string | null
   const existing = new Set(
     products
       .filter((product) => (shopId ? product.shopId === shopId : true))
-      .map((product) => normalizeBarcode(product.barcode))
+      .flatMap((product) => [product.barcode, ...(product.barcodes ?? [])])
+      .map((barcode) => normalizeBarcode(barcode))
       .filter((barcode): barcode is string => Boolean(barcode))
   );
   const seed = Number(`${Date.now()}`.slice(-9));

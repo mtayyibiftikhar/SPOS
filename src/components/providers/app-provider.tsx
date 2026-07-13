@@ -123,6 +123,7 @@ type ProductInput = {
   kind: Product["kind"];
   categoryId?: string;
   barcode?: string;
+  barcodes?: string[];
   name: Product["name"];
   imageUrl?: string;
   salePrice: number;
@@ -726,13 +727,14 @@ function normalizeStoredProducts(products: DemoAppState["products"]) {
     const productWithOptionalId = product as Product & { id?: string };
     const candidateId = productWithOptionalId.id?.trim() ?? "";
     const productId = candidateId && !usedIds.has(candidateId) ? candidateId : createId("prod");
-    const barcodeCandidate = normalizeBarcode(product.barcode);
-    const barcodeConflict = barcodeCandidate
-      ? findBarcodeConflict(accumulator, product.shopId, barcodeCandidate)
-      : undefined;
-    const barcode = barcodeCandidate && !barcodeConflict
-      ? barcodeCandidate
-      : generateUniqueBarcode(accumulator, product.shopId);
+    const barcodeCandidates = [product.barcode, ...(product.barcodes ?? [])]
+      .map((barcode) => normalizeBarcode(barcode))
+      .filter((barcode): barcode is string => Boolean(barcode));
+    const barcodes = Array.from(new Set(barcodeCandidates)).filter(
+      (barcode) => !findBarcodeConflict(accumulator, product.shopId, barcode)
+    );
+    const barcode = barcodes[0] ?? generateUniqueBarcode(accumulator, product.shopId);
+    const assignedBarcodes = Array.from(new Set([barcode, ...barcodes]));
 
     usedIds.add(productId);
 
@@ -740,6 +742,7 @@ function normalizeStoredProducts(products: DemoAppState["products"]) {
       ...product,
       id: productId,
       barcode,
+      barcodes: assignedBarcodes,
       expiryDate: product.expiryDate?.trim() || undefined,
       imageUrl: product.imageUrl?.trim() || undefined,
       reorderLevel: product.reorderLevel ?? 0,
@@ -4922,13 +4925,13 @@ export function AppProvider({
             return current;
           }
 
-          const nextBarcodeCandidate = normalizeBarcode(payload.barcode);
-          const barcodeConflict = findBarcodeConflict(
-            current.products,
-            currentShopId,
-            nextBarcodeCandidate,
-            payload.id
-          );
+          const barcodeCandidates = [payload.barcode, ...(payload.barcodes ?? [])]
+            .map((barcode) => normalizeBarcode(barcode))
+            .filter((barcode): barcode is string => Boolean(barcode));
+          const resolvedBarcodes = Array.from(new Set(barcodeCandidates));
+          const barcodeConflict = resolvedBarcodes
+            .map((barcode) => findBarcodeConflict(current.products, currentShopId, barcode, payload.id))
+            .find(Boolean);
           if (barcodeConflict) {
             result = {
               ok: false,
@@ -4936,14 +4939,18 @@ export function AppProvider({
             };
             return current;
           }
-          const resolvedBarcode =
-            nextBarcodeCandidate
-              ? nextBarcodeCandidate
-              : generateUniqueBarcode(current.products, currentShopId);
+          const generatedBarcode = resolvedBarcodes.length > 0
+            ? undefined
+            : generateUniqueBarcode(current.products, currentShopId);
+          const finalBarcodes = generatedBarcode
+            ? [generatedBarcode]
+            : resolvedBarcodes;
+          const resolvedBarcode = finalBarcodes[0];
           const nextPayload = {
             ...payload,
             categoryId: payload.categoryId || undefined,
             barcode: resolvedBarcode,
+            barcodes: finalBarcodes,
             expiryDate: payload.kind === "product" ? payload.expiryDate?.trim() || undefined : undefined,
             imageUrl: payload.imageUrl?.trim() || undefined
           };

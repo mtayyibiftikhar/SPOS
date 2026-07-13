@@ -155,7 +155,7 @@ function getCartLineDiscountLimit(line: Pick<CartLine, "quantity" | "unitPriceIn
 }
 
 function productMatchesSearch(product: Product, query: string) {
-  return [product.name.en, product.name.ar, product.name.ur, product.barcode]
+  return [product.name.en, product.name.ar, product.name.ur, product.barcode, ...(product.barcodes ?? [])]
     .filter(Boolean)
     .some((value) => value!.toLowerCase().includes(query));
 }

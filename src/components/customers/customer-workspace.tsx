@@ -4,17 +4,30 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, CircleDollarSign, Download, Plus, ReceiptText, Search, Trash2, Upload, UserRound, Wallet } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  CircleDollarSign,
+  Download,
+  FileSpreadsheet,
+  Plus,
+  ReceiptText,
+  Search,
+  Trash2,
+  Upload,
+  UserRound,
+  Wallet,
+  X
+} from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { PageHeader } from "@/components/ui/page-header";
 import { PhoneNumberField } from "@/components/ui/phone-number-field";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { WorkspaceSectionsNav } from "@/components/ui/workspace-sections-nav";
 import { getCustomerAccountMetrics } from "@/lib/customer-accounts";
 import { paymentMethodLabelKeys } from "@/lib/i18n";
 import { createStructuredReportPdfBlob, downloadBlob } from "@/lib/report-export";
@@ -36,6 +49,30 @@ type CustomerFormState = {
   phoneNumber: string;
   whatsappCountryCode: string;
   whatsappNumber: string;
+};
+
+const CUSTOMER_PAGE_SIZE = 9;
+const ACCOUNT_PAGE_SIZE = 9;
+const SETTLEMENT_PAGE_SIZE = 10;
+
+const CUSTOMER_IMPORT_HEADERS = [
+  "customer_name",
+  "first_name",
+  "last_name",
+  "country_code",
+  "phone_number",
+  "whatsapp_country_code",
+  "whatsapp_number",
+  "email"
+] as const;
+
+type CustomerImportResult = {
+  duplicateRows: string[];
+  importedCount: number;
+  invalidRows: number;
+  message: string;
+  skippedCount: number;
+  status: "error" | "success";
 };
 
 function createEmptyCustomerForm(): CustomerFormState {
@@ -129,6 +166,52 @@ function SummaryMetricCard({
   );
 }
 
+function PaginationBar({
+  page,
+  pageCount,
+  total,
+  onPageChange
+}: {
+  onPageChange: (page: number) => void;
+  page: number;
+  pageCount: number;
+  total: number;
+}) {
+  if (pageCount <= 1) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+        Page {page} of {pageCount} | {total} records
+      </p>
+      <div className="flex items-center gap-2">
+        <Button
+          className="h-10 rounded-full"
+          disabled={page <= 1}
+          size="sm"
+          variant="secondary"
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Previous
+        </Button>
+        <Button
+          className="h-10 rounded-full"
+          disabled={page >= pageCount}
+          size="sm"
+          variant="secondary"
+          onClick={() => onPageChange(Math.min(pageCount, page + 1))}
+        >
+          Next
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function toCsvCell(value?: string | number) {
   const text = String(value ?? "");
 
@@ -169,6 +252,31 @@ function splitCsvLine(line: string) {
   return values;
 }
 
+function normalizeImportHeader(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+function normalizeImportPhone(countryCode: string | undefined, phoneNumber: string | undefined) {
+  const digits = sanitizePhoneDigits(phoneNumber ?? "").replace(/^0+/, "");
+  const codeDigits = sanitizePhoneDigits(countryCode ?? "");
+
+  if (!digits || !codeDigits) {
+    return null;
+  }
+
+  return `+${codeDigits}${digits}`;
+}
+
+function splitNameForExport(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const firstName = parts.shift() ?? "";
+
+  return {
+    firstName,
+    lastName: parts.join(" ")
+  };
+}
+
 export function CustomerWorkspace() {
   const searchParams = useSearchParams();
   const { currentShop, currentShopId, locale, saveCustomer, deleteCustomer, settleCustomerAccount, state, t } = usePosApp();
@@ -184,6 +292,11 @@ export function CustomerWorkspace() {
   const [settlementNote, setSettlementNote] = useState("");
   const [selectedSettlementBillIds, setSelectedSettlementBillIds] = useState<string[]>([]);
   const [receiptSearch, setReceiptSearch] = useState("");
+  const [customerPage, setCustomerPage] = useState(1);
+  const [accountPage, setAccountPage] = useState(1);
+  const [settlementPage, setSettlementPage] = useState(1);
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [importResult, setImportResult] = useState<CustomerImportResult | null>(null);
   const [settlementFeedback, setSettlementFeedback] = useState<string | null>(null);
   const [settlementError, setSettlementError] = useState<string | null>(null);
   const requestedView = searchParams.get("view");
@@ -341,6 +454,12 @@ export function CustomerWorkspace() {
   }, [activeView]);
 
   useEffect(() => {
+    setCustomerPage(1);
+    setAccountPage(1);
+    setSettlementPage(1);
+  }, [activeView, search]);
+
+  useEffect(() => {
     if (!selectedMetrics) {
       setSelectedSettlementBillIds([]);
       return;
@@ -359,13 +478,6 @@ export function CustomerWorkspace() {
       settlementCount: state.customerAccountPayments.filter((entry) => entry.shopId === currentShopId).length
     };
   }, [currentShopId, customerMetricsById, state.customerAccountPayments]);
-  const customersWithBalance = useMemo(
-    () =>
-      shopCustomers
-        .filter((customer) => (customerMetricsById[customer.id]?.outstandingBalance ?? 0) > 0)
-        .slice(0, 6),
-    [customerMetricsById, shopCustomers]
-  );
   const accountCustomers = useMemo(() => {
     const query = search.trim().toLowerCase();
 
@@ -386,13 +498,30 @@ export function CustomerWorkspace() {
           (customerMetricsById[left.id]?.outstandingBalance ?? 0)
       );
   }, [customerMetricsById, search, shopCustomers]);
-  const recentShopSettlements = useMemo(
+  const allShopSettlements = useMemo(
     () =>
       state.customerAccountPayments
         .filter((entry) => entry.shopId === currentShopId)
-        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
-        .slice(0, 6),
+        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
     [currentShopId, state.customerAccountPayments]
+  );
+  const customerPageCount = Math.max(1, Math.ceil(filteredCustomers.length / CUSTOMER_PAGE_SIZE));
+  const safeCustomerPage = Math.min(customerPage, customerPageCount);
+  const paginatedCustomers = filteredCustomers.slice(
+    (safeCustomerPage - 1) * CUSTOMER_PAGE_SIZE,
+    safeCustomerPage * CUSTOMER_PAGE_SIZE
+  );
+  const accountPageCount = Math.max(1, Math.ceil(accountCustomers.length / ACCOUNT_PAGE_SIZE));
+  const safeAccountPage = Math.min(accountPage, accountPageCount);
+  const paginatedAccountCustomers = accountCustomers.slice(
+    (safeAccountPage - 1) * ACCOUNT_PAGE_SIZE,
+    safeAccountPage * ACCOUNT_PAGE_SIZE
+  );
+  const settlementPageCount = Math.max(1, Math.ceil(allShopSettlements.length / SETTLEMENT_PAGE_SIZE));
+  const safeSettlementPage = Math.min(settlementPage, settlementPageCount);
+  const paginatedSettlements = allShopSettlements.slice(
+    (safeSettlementPage - 1) * SETTLEMENT_PAGE_SIZE,
+    safeSettlementPage * SETTLEMENT_PAGE_SIZE
   );
 
   const settlementAmountNumber = Number(settlementAmount || 0);
@@ -570,13 +699,23 @@ export function CustomerWorkspace() {
 
   const exportCustomersCsv = () => {
     const rows = [
-      ["name", "phone", "email", "whatsapp"],
-      ...shopCustomers.map((customer) => [
-        customer.name,
-        customer.phone ?? "",
-        customer.email ?? "",
-        customer.whatsapp ?? ""
-      ])
+      [...CUSTOMER_IMPORT_HEADERS],
+      ...shopCustomers.map((customer) => {
+        const phone = splitPhoneNumber(customer.phone);
+        const whatsapp = splitPhoneNumber(customer.whatsapp || customer.phone);
+        const name = splitNameForExport(customer.name);
+
+        return [
+          customer.name,
+          name.firstName,
+          name.lastName,
+          phone.countryCode,
+          phone.localNumber,
+          whatsapp.countryCode,
+          whatsapp.localNumber,
+          customer.email ?? ""
+        ];
+      })
     ];
     const csv = rows.map((row) => row.map(toCsvCell).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -589,20 +728,97 @@ export function CustomerWorkspace() {
     setCustomerFeedback(t("customers.exportSuccess"));
   };
 
+  const downloadCustomerSchema = () => {
+    const csv = [
+      CUSTOMER_IMPORT_HEADERS.map(toCsvCell).join(","),
+      [
+        "Sample Customer",
+        "Sample",
+        "Customer",
+        "+966",
+        "501234567",
+        "+966",
+        "501234567",
+        "customer@example.com"
+      ].map(toCsvCell).join(",")
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+
+    downloadBlob(blob, "customer-import-schema.csv");
+  };
+
   const importCustomersCsv = async (file: File | null) => {
     if (!file) {
       return;
     }
 
+    setImportResult(null);
+    setCustomerError(null);
+    setCustomerFeedback(null);
+
     const raw = await file.text();
     const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    const dataLines = lines[0]?.toLowerCase().includes("name") ? lines.slice(1) : lines;
+    const headers = splitCsvLine(lines[0] ?? "").map(normalizeImportHeader);
+    const expectedHeaders = [...CUSTOMER_IMPORT_HEADERS];
+
+    if (
+      headers.length !== expectedHeaders.length ||
+      headers.some((header, index) => header !== expectedHeaders[index])
+    ) {
+      setImportResult({
+        duplicateRows: [],
+        importedCount: 0,
+        invalidRows: 0,
+        message: "Import stopped. Download the schema file and keep the headers exactly the same.",
+        skippedCount: 0,
+        status: "error"
+      });
+
+      if (customerImportRef.current) {
+        customerImportRef.current.value = "";
+      }
+
+      return;
+    }
+
+    const dataLines = lines.slice(1);
     let importedCount = 0;
+    let invalidRows = 0;
+    let skippedCount = 0;
+    const duplicateRows: string[] = [];
+    const knownPhones = new Set(shopCustomers.map((customer) => customer.phone).filter(Boolean));
 
     dataLines.forEach((line) => {
-      const [name, phone, email, whatsapp] = splitCsvLine(line);
+      const [
+        customerName,
+        firstName,
+        lastName,
+        countryCode,
+        phoneNumber,
+        whatsappCountryCode,
+        whatsappNumber,
+        email
+      ] = splitCsvLine(line);
+      const name = (customerName || `${firstName ?? ""} ${lastName ?? ""}`).trim().replace(/\s+/g, " ");
+      const phone = normalizeImportPhone(countryCode, phoneNumber);
 
-      if (!name?.trim()) {
+      if (!name || !phone) {
+        invalidRows += 1;
+        return;
+      }
+
+      if (knownPhones.has(phone)) {
+        skippedCount += 1;
+        duplicateRows.push(`${name} (${phone})`);
+        return;
+      }
+
+      const whatsapp = whatsappNumber?.trim()
+        ? normalizeImportPhone(whatsappCountryCode || countryCode, whatsappNumber)
+        : phone;
+
+      if (!whatsapp) {
+        invalidRows += 1;
         return;
       }
 
@@ -615,6 +831,10 @@ export function CustomerWorkspace() {
 
       if (result.ok) {
         importedCount += 1;
+        knownPhones.add(phone);
+      } else {
+        skippedCount += 1;
+        duplicateRows.push(`${name} (${phone})`);
       }
     });
 
@@ -622,7 +842,18 @@ export function CustomerWorkspace() {
       customerImportRef.current.value = "";
     }
 
-    setCustomerFeedback(t("customers.importSuccess", { count: importedCount }));
+    setImportResult({
+      duplicateRows: duplicateRows.slice(0, 8),
+      importedCount,
+      invalidRows,
+      message:
+        importedCount > 0
+          ? `${importedCount} customers imported. ${skippedCount} duplicate rows skipped. ${invalidRows} invalid rows ignored.`
+          : `No customers imported. ${skippedCount} duplicate rows skipped. ${invalidRows} invalid rows ignored.`,
+      skippedCount,
+      status: importedCount > 0 ? "success" : "error"
+    });
+    setCustomerFeedback(importedCount > 0 ? t("customers.importSuccess", { count: importedCount }) : null);
   };
 
   const exportSelectedStatementPdf = async () => {
@@ -721,12 +952,12 @@ export function CustomerWorkspace() {
   };
 
   const directoryPanel = (
-    <Card className="flex flex-col overflow-hidden p-0 xl:max-h-[calc(100dvh-11rem)]">
+    <Card className="flex flex-col overflow-hidden p-0 xl:max-h-[calc(100dvh-10rem)]">
       <div className="border-b border-slate-200 p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
             <SectionEyebrow>{t("nav.customers")}</SectionEyebrow>
-            <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{t("customers.directoryTitle")}</h2>
+            <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">Customer</h2>
           </div>
           <div className="flex flex-wrap justify-end gap-2">
             <Button className="h-11 shrink-0 rounded-full bg-slate-950 px-4 text-sm text-white shadow-[0_14px_28px_rgba(15,23,42,0.16)] hover:bg-slate-900" onClick={beginCreateCustomer}>
@@ -741,19 +972,12 @@ export function CustomerWorkspace() {
                 {t("customers.exportCustomers")}
               </span>
             </Button>
-            <Button className="h-11 rounded-full" variant="secondary" onClick={() => customerImportRef.current?.click()}>
+            <Button className="h-11 rounded-full" variant="secondary" onClick={() => setIsImportOpen(true)}>
               <span className="inline-flex items-center gap-2 whitespace-nowrap">
                 <Upload className="h-4 w-4" />
                 {t("customers.importCustomers")}
               </span>
             </Button>
-            <Input
-              ref={customerImportRef}
-              accept=".csv,text/csv"
-              className="hidden"
-              type="file"
-              onChange={(event) => void importCustomersCsv(event.target.files?.[0] ?? null)}
-            />
           </div>
         </div>
 
@@ -769,8 +993,8 @@ export function CustomerWorkspace() {
       </div>
 
       <div className="grid flex-1 gap-3 overflow-y-auto p-4 md:grid-cols-2 2xl:grid-cols-3">
-        {filteredCustomers.length > 0 ? (
-          filteredCustomers.map((customer) => {
+        {paginatedCustomers.length > 0 ? (
+          paginatedCustomers.map((customer) => {
             const metrics = customerMetricsById[customer.id];
             const isActive = !isCreating && selectedCustomerId === customer.id;
 
@@ -811,6 +1035,12 @@ export function CustomerWorkspace() {
           </div>
         )}
       </div>
+      <PaginationBar
+        page={safeCustomerPage}
+        pageCount={customerPageCount}
+        total={filteredCustomers.length}
+        onPageChange={setCustomerPage}
+      />
     </Card>
   );
 
@@ -1367,38 +1597,15 @@ export function CustomerWorkspace() {
   const accountFlowPanel = (
     <div className="space-y-5">
       <Card className="overflow-hidden p-0">
-        <div className="border-b border-slate-200 bg-[linear-gradient(135deg,#ffffff_0%,#ecfdf5_54%,#fff7ed_100%)] p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <SectionEyebrow>{t("customers.accountTitle")}</SectionEyebrow>
-              <h2 className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-slate-950">
-                {accountFlowStep === "customer"
-                  ? "Select account customer"
-                  : accountFlowStep === "receipt"
-                    ? "Select due receipt"
-                    : "Receive account payment"}
-              </h2>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-                {accountFlowStep === "customer"
-                  ? "Only customers with unpaid account receipts are shown here."
-                  : accountFlowStep === "receipt"
-                    ? "Choose the exact receipt you want to collect against."
-                    : "Confirm the amount and payment method, then save the settlement."}
-              </p>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 rounded-[22px] border border-slate-200 bg-white p-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-              <span className={`rounded-2xl px-3 py-2 text-center ${accountFlowStep === "customer" ? "bg-slate-950 text-white" : "bg-slate-50"}`}>
-                1 Customer
-              </span>
-              <span className={`rounded-2xl px-3 py-2 text-center ${accountFlowStep === "receipt" ? "bg-slate-950 text-white" : "bg-slate-50"}`}>
-                2 Receipt
-              </span>
-              <span className={`rounded-2xl px-3 py-2 text-center ${accountFlowStep === "payment" ? "bg-slate-950 text-white" : "bg-slate-50"}`}>
-                3 Payment
-              </span>
-            </div>
-          </div>
+        <div className="border-b border-slate-200 p-5">
+          <SectionEyebrow>{t("customers.accountTitle")}</SectionEyebrow>
+          <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">
+            {accountFlowStep === "customer"
+              ? "Accounts"
+              : accountFlowStep === "receipt"
+                ? "Due receipts"
+                : "Receive payment"}
+          </h2>
         </div>
 
         {accountFlowStep === "customer" ? (
@@ -1414,8 +1621,8 @@ export function CustomerWorkspace() {
             </div>
 
             <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {accountCustomers.length > 0 ? (
-                accountCustomers.map((customer) => {
+              {paginatedAccountCustomers.length > 0 ? (
+                paginatedAccountCustomers.map((customer) => {
                   const metrics = customerMetricsById[customer.id];
 
                   return (
@@ -1456,6 +1663,12 @@ export function CustomerWorkspace() {
                 </div>
               )}
             </div>
+            <PaginationBar
+              page={safeAccountPage}
+              pageCount={accountPageCount}
+              total={accountCustomers.length}
+              onPageChange={setAccountPage}
+            />
           </div>
         ) : null}
 
@@ -1637,212 +1850,120 @@ export function CustomerWorkspace() {
   );
 
   const historyPanel = (
-    <Card className="p-6">
-      <div className="flex items-start gap-3">
-        <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">
-          <UserRound className="h-5 w-5" />
-        </div>
+    <Card className="overflow-hidden p-0">
+      <div className="border-b border-slate-200 p-5">
         <div>
           <SectionEyebrow>{t("customers.paymentHistory")}</SectionEyebrow>
           <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{t("customers.paymentHistory")}</h2>
         </div>
       </div>
 
-      <div className="mt-5 max-h-[520px] space-y-3 overflow-y-auto pr-1">
-        {selectedSettlements.length > 0 ? (
-          selectedSettlements.map((payment) => (
-            <div key={payment.id} className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-slate-950">{payment.number}</p>
-                  <p className="mt-1 text-sm text-slate-600">{formatDateTime(payment.createdAt, locale)}</p>
-                  <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                    {t(paymentMethodLabelKeys[payment.method])}
-                  </p>
-                </div>
-                <Badge variant="success">
-                  {formatCurrency(payment.amount, currentShop?.currency ?? "SAR", locale)}
-                </Badge>
-              </div>
-              {payment.allocations?.length ? (
-                <div className="mt-3 rounded-[16px] border border-slate-200 bg-white px-3 py-3 text-sm text-slate-600">
-                  <p className="font-medium text-slate-950">{t("customers.appliedToBills")}</p>
-                  <div className="mt-2 space-y-1">
-                    {payment.allocations.map((allocation) => (
-                      <div key={`${payment.id}-${allocation.billId}`} className="flex items-center justify-between gap-3">
-                        <span>{allocation.billNumber}</span>
-                        <span className="font-medium text-slate-950">
-                          {formatCurrency(allocation.amount, currentShop?.currency ?? "SAR", locale)}
-                        </span>
-                      </div>
-                    ))}
+      <div className="grid max-h-[calc(100dvh-15rem)] gap-3 overflow-y-auto p-5 md:grid-cols-2 xl:grid-cols-3">
+        {paginatedSettlements.length > 0 ? (
+          paginatedSettlements.map((payment) => {
+            const customer = shopCustomers.find((entry) => entry.id === payment.customerId);
+
+            return (
+              <div key={payment.id} className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-base font-semibold text-slate-950">{customer?.name ?? t("common.notAvailable")}</p>
+                    <p className="mt-1 text-sm font-medium text-slate-600">{payment.number}</p>
+                    <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      {formatDateTime(payment.createdAt, locale)} | {t(paymentMethodLabelKeys[payment.method])}
+                    </p>
                   </div>
+                  <Badge variant="success">
+                    {formatCurrency(payment.amount, currentShop?.currency ?? "SAR", locale)}
+                  </Badge>
                 </div>
-              ) : null}
-              {payment.note ? <p className="mt-3 text-sm leading-6 text-slate-600">{payment.note}</p> : null}
-            </div>
-          ))
+                {payment.allocations?.length ? (
+                  <div className="mt-3 rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+                    <p className="font-medium text-slate-950">{t("customers.appliedToBills")}</p>
+                    <div className="mt-2 space-y-1">
+                      {payment.allocations.map((allocation) => (
+                        <div key={`${payment.id}-${allocation.billId}`} className="flex items-center justify-between gap-3">
+                          <span>{allocation.billNumber}</span>
+                          <span className="font-medium text-slate-950">
+                            {formatCurrency(allocation.amount, currentShop?.currency ?? "SAR", locale)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {payment.note ? <p className="mt-3 text-sm leading-6 text-slate-600">{payment.note}</p> : null}
+              </div>
+            );
+          })
         ) : (
-          <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center text-sm leading-6 text-slate-600">
+          <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center text-sm leading-6 text-slate-600 md:col-span-2 xl:col-span-3">
             {t("customers.noPayments")}
           </div>
         )}
       </div>
+      <PaginationBar
+        page={safeSettlementPage}
+        pageCount={settlementPageCount}
+        total={allShopSettlements.length}
+        onPageChange={setSettlementPage}
+      />
     </Card>
   );
 
-  return (
-    <div className="space-y-6">
-      <PageHeader title={t("customers.title")} subtitle={t("customers.subtitle")} eyebrow={t("nav.customers")} />
+  const customerNavItems = [
+    { href: "/customers?view=overview", active: activeView === "overview", icon: UserRound, label: t("customers.sectionsOverview") },
+    { href: "/customers?view=directory", active: activeView === "directory", icon: UserRound, label: "Customer" },
+    { href: "/customers?view=account", active: activeView === "account", icon: Wallet, label: t("customers.accountTitle") },
+    { href: "/customers?view=history", active: activeView === "history", icon: ReceiptText, label: t("customers.paymentHistory") }
+  ];
 
-      <WorkspaceSectionsNav
-        compact
-        items={[
-          {
-            href: "/customers?view=overview",
-            active: activeView === "overview",
-            icon: UserRound,
-            label: t("customers.sectionsOverview"),
-            description: t("customers.sectionsOverviewDesc")
-          },
-          {
-            href: "/customers?view=directory",
-            active: activeView === "directory",
-            icon: UserRound,
-            label: t("customers.directoryTitle"),
-            description: t("customers.formDesc")
-          },
-          {
-            href: "/customers?view=account",
-            active: activeView === "account",
-            icon: Wallet,
-            label: t("customers.accountTitle"),
-            description: t("customers.accountDesc")
-          },
-          {
-            href: "/customers?view=history",
-            active: activeView === "history",
-            icon: ReceiptText,
-            label: t("customers.paymentHistory"),
-            description: t("customers.settlementCountDesc")
-          }
-        ]}
-      />
+  return (
+    <div className="space-y-5">
+      <nav className="grid max-w-4xl grid-cols-2 gap-2 rounded-[24px] border border-slate-200 bg-white/88 p-2 shadow-[0_18px_45px_rgba(15,23,42,0.05)] backdrop-blur md:grid-cols-4">
+        {customerNavItems.map((item) => {
+          const Icon = item.icon;
+
+          return (
+            <Link
+              key={item.href}
+              className={`inline-flex h-12 items-center justify-center gap-2 rounded-[18px] px-4 text-sm font-semibold transition ${
+                item.active
+                  ? "bg-slate-950 text-white shadow-[0_14px_30px_rgba(15,23,42,0.16)]"
+                  : "text-slate-600 hover:bg-emerald-50 hover:text-slate-950"
+              }`}
+              href={item.href}
+            >
+              <Icon className="h-4 w-4" />
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
 
       {activeView === "overview" ? (
-        <div className="space-y-6">
-          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <SummaryMetricCard
-              description={t("customers.totalCustomersDesc")}
-              label={t("customers.totalCustomers")}
-              value={shopCustomers.length}
-            />
-            <SummaryMetricCard
-              description={t("customers.withBalanceDesc")}
-              label={t("customers.withBalance")}
-              value={totals.customersWithBalance}
-            />
-            <SummaryMetricCard
-              description={t("customers.outstandingBalanceDesc")}
-              label={t("customers.outstandingBalance")}
-              value={formatCurrency(totals.outstandingBalance, currentShop?.currency ?? "SAR", locale)}
-            />
-            <SummaryMetricCard
-              description={t("customers.settlementCountDesc")}
-              label={t("customers.settlementCount")}
-              value={totals.settlementCount}
-            />
-          </section>
-
-          <Card className="p-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <SectionEyebrow>{t("customers.dataTools")}</SectionEyebrow>
-                <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{t("customers.importExport")}</h2>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{t("customers.importExportDesc")}</p>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <Button variant="secondary" onClick={exportCustomersCsv}>
-                  <span className="inline-flex items-center gap-2">
-                    <Download className="h-4 w-4" />
-                    {t("customers.exportCustomers")}
-                  </span>
-                </Button>
-                <Button variant="secondary" onClick={() => customerImportRef.current?.click()}>
-                  <span className="inline-flex items-center gap-2">
-                    <Upload className="h-4 w-4" />
-                    {t("customers.importCustomers")}
-                  </span>
-                </Button>
-                <Input
-                  ref={customerImportRef}
-                  accept=".csv,text/csv"
-                  className="hidden"
-                  type="file"
-                  onChange={(event) => void importCustomersCsv(event.target.files?.[0] ?? null)}
-                />
-              </div>
-            </div>
-          </Card>
-
-          <div className="grid gap-6 xl:grid-cols-2">
-            <Card className="p-6">
-              <SectionEyebrow>{t("customers.withBalance")}</SectionEyebrow>
-              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{t("customers.withBalance")}</h2>
-              <div className="mt-5 space-y-3">
-                {customersWithBalance.length > 0 ? (
-                  customersWithBalance.map((customer) => (
-                    <div key={customer.id} className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-950">{customer.name}</p>
-                          <p className="mt-1 text-sm text-slate-600">{customer.phone || customer.email || t("common.notAvailable")}</p>
-                        </div>
-                        <Badge variant="warning">
-                          {formatCurrency(customerMetricsById[customer.id]?.outstandingBalance ?? 0, currentShop?.currency ?? "SAR", locale)}
-                        </Badge>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center text-sm leading-6 text-slate-600">
-                    {t("customers.noOpenBills")}
-                  </div>
-                )}
-              </div>
-            </Card>
-
-            <Card className="p-6">
-              <SectionEyebrow>{t("customers.paymentHistory")}</SectionEyebrow>
-              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{t("customers.paymentHistory")}</h2>
-              <div className="mt-5 space-y-3">
-                {recentShopSettlements.length > 0 ? (
-                  recentShopSettlements.map((payment) => {
-                    const customer = shopCustomers.find((entry) => entry.id === payment.customerId);
-
-                    return (
-                      <div key={payment.id} className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-semibold text-slate-950">{customer?.name ?? t("common.notAvailable")}</p>
-                            <p className="mt-1 text-sm text-slate-600">{formatDateTime(payment.createdAt, locale)}</p>
-                          </div>
-                          <Badge variant="success">
-                            {formatCurrency(payment.amount, currentShop?.currency ?? "SAR", locale)}
-                          </Badge>
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center text-sm leading-6 text-slate-600">
-                    {t("customers.noPayments")}
-                  </div>
-                )}
-              </div>
-            </Card>
-          </div>
-        </div>
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <SummaryMetricCard
+            description={t("customers.totalCustomersDesc")}
+            label={t("customers.totalCustomers")}
+            value={shopCustomers.length}
+          />
+          <SummaryMetricCard
+            description={t("customers.withBalanceDesc")}
+            label={t("customers.withBalance")}
+            value={totals.customersWithBalance}
+          />
+          <SummaryMetricCard
+            description={t("customers.outstandingBalanceDesc")}
+            label={t("customers.outstandingBalance")}
+            value={formatCurrency(totals.outstandingBalance, currentShop?.currency ?? "SAR", locale)}
+          />
+          <SummaryMetricCard
+            description={t("customers.settlementCountDesc")}
+            label={t("customers.settlementCount")}
+            value={totals.settlementCount}
+          />
+        </section>
       ) : activeView === "directory" ? (
         isCreating || selectedCustomer ? profilePanel : directoryPanel
       ) : activeView === "account" ? (
@@ -1850,6 +1971,82 @@ export function CustomerWorkspace() {
       ) : (
         historyPanel
       )}
+
+      {isImportOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+          <Card className="w-full max-w-3xl overflow-hidden p-0 shadow-[0_30px_80px_rgba(15,23,42,0.25)]">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+              <div>
+                <SectionEyebrow>Customer import</SectionEyebrow>
+                <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">Import customers safely</h2>
+              </div>
+              <Button className="h-10 w-10 rounded-full p-0" variant="secondary" onClick={() => setIsImportOpen(false)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="grid gap-4 p-5 md:grid-cols-2">
+              <button
+                className="rounded-[26px] border border-slate-200 bg-white p-5 text-left shadow-[0_18px_40px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50/50"
+                type="button"
+                onClick={downloadCustomerSchema}
+              >
+                <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
+                  <FileSpreadsheet className="h-5 w-5" />
+                </span>
+                <h3 className="mt-4 text-lg font-semibold text-slate-950">Download schema file</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Use this Excel-compatible CSV. Keep the headers unchanged so the POS accepts the import.
+                </p>
+              </button>
+
+              <button
+                className="rounded-[26px] border border-slate-200 bg-slate-950 p-5 text-left text-white shadow-[0_18px_40px_rgba(15,23,42,0.16)] transition hover:-translate-y-0.5 hover:bg-slate-900"
+                type="button"
+                onClick={() => customerImportRef.current?.click()}
+              >
+                <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-white">
+                  <Upload className="h-5 w-5" />
+                </span>
+                <h3 className="mt-4 text-lg font-semibold">Choose customer file</h3>
+                <p className="mt-2 text-sm leading-6 text-white/72">
+                  Upload the completed schema. Existing customers with the same phone number are skipped.
+                </p>
+              </button>
+
+              <Input
+                ref={customerImportRef}
+                accept=".csv,text/csv"
+                className="hidden"
+                type="file"
+                onChange={(event) => void importCustomersCsv(event.target.files?.[0] ?? null)}
+              />
+            </div>
+
+            <div className="border-t border-slate-200 bg-slate-50 px-5 py-4">
+              <p className="text-sm leading-6 text-slate-600">
+                Required: customer name or first/last name, country code, and phone number. If the number starts with 0, the POS removes the first zero after the country code. WhatsApp and email are optional.
+              </p>
+              {importResult ? (
+                <div
+                  className={`mt-4 rounded-[22px] border px-4 py-3 text-sm ${
+                    importResult.status === "success"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                      : "border-red-200 bg-red-50 text-red-800"
+                  }`}
+                >
+                  <p className="font-semibold">{importResult.message}</p>
+                  {importResult.duplicateRows.length > 0 ? (
+                    <p className="mt-2 text-xs leading-5">
+                      Duplicates skipped: {importResult.duplicateRows.join(", ")}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </Card>
+        </div>
+      ) : null}
     </div>
   );
 }
