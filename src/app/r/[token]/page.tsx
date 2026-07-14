@@ -1,5 +1,6 @@
 import { ReceiptText, ShieldCheck } from "lucide-react";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { PublicReceiptActions } from "@/components/billing/public-receipt-actions";
 import { getReceiptItemNameLines } from "@/lib/receipt-language";
 import { normalizePublicReceiptToken } from "@/lib/public-receipts";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
@@ -135,9 +136,12 @@ export default async function PublicReceiptPage({ params }: PublicReceiptPagePro
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.12),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(245,158,11,0.12),_transparent_34%),linear-gradient(180deg,#f8fbf9_0%,#eef5f1_100%)] px-4 py-8 text-slate-950">
       <section className="mx-auto max-w-3xl">
-        <div className="mb-4 flex items-center justify-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 shadow-sm">
-          <ShieldCheck className="h-4 w-4" />
-          Verified digital receipt
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="inline-flex items-center justify-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 shadow-sm">
+            <ShieldCheck className="h-4 w-4" />
+            Verified digital receipt
+          </div>
+          <PublicReceiptActions />
         </div>
 
         <article className="overflow-hidden rounded-[36px] border border-slate-200 bg-white shadow-[0_28px_90px_rgba(15,23,42,0.10)]">

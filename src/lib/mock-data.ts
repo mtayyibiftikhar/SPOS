@@ -248,6 +248,9 @@ export const initialAppState: DemoAppState = {
   ledgerEntries: [],
   businessDays: [],
   shifts: [],
+  attendanceRecords: [],
+  attendanceQrSessions: [],
+  payrollRates: [],
   dayCloses: [],
   cashMovements: [],
   expenseCategories: [
@@ -279,7 +282,12 @@ export const initialAppState: DemoAppState = {
         currency: "SAR",
         logoUrl: defaultShopLogo,
         vatNumber: "300123456700003",
-        autoDayRolloverEnabled: false
+        autoDayRolloverEnabled: false,
+        rolePermissions: {
+          shop_admin: ["billing", "customers", "products", "inventory", "timeClock", "bills", "refunds", "reports", "settings", "backup"],
+          cashier: ["billing", "customers", "timeClock", "bills"],
+          support: ["reports", "settings"]
+        }
       },
       printer: {
         receiptSize: "80mm",
@@ -303,8 +311,11 @@ export const initialAppState: DemoAppState = {
         showOnReceipt: true,
         promotionEnabled: false,
         promotionTarget: "bill",
+        promotionScope: "bill",
         promotionDiscountType: "percentage",
-        promotionDiscountValue: 0
+        promotionDiscountValue: 0,
+        promotionProductIds: [],
+        permanentItemDiscounts: {}
       }
     }
   },

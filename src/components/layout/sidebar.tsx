@@ -7,6 +7,7 @@ import {
   LayoutGrid,
   LogOut,
   Boxes,
+  Clock3,
   Package,
   Receipt,
   RotateCcw,
@@ -22,6 +23,7 @@ import { Button } from "@/components/ui/button";
 
 const icons = {
   "/dashboard": LayoutGrid,
+  "/time-clock": Clock3,
   "/billing": ShoppingCart,
   "/customers": Users2,
   "/products": Package,

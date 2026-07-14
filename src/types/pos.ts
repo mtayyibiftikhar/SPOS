@@ -13,12 +13,26 @@ export type TextDirection = "ltr" | "rtl";
 export type ReceiptSize = "58mm" | "80mm" | "a4";
 export type ReceiptSecondaryLanguage = Exclude<Locale, "en">;
 export type TaxMode = "inclusive" | "exclusive";
+export type PromotionScope = "bill" | "products" | "services" | "selected";
+export type RolePermissionKey =
+  | "billing"
+  | "customers"
+  | "products"
+  | "inventory"
+  | "timeClock"
+  | "bills"
+  | "refunds"
+  | "reports"
+  | "settings"
+  | "backup";
 export type InventoryAdjustmentType = "add" | "remove" | "sale" | "refund";
 export type PurchaseOrderStatus = "draft" | "ordered" | "partially_received" | "received" | "cancelled";
 export type ExpensePaymentMethod = "cash" | "card" | "bank";
 export type SupplierPaymentMethod = "cash" | "card" | "bank" | "credit";
 export type PurchasePaymentStatus = "unpaid" | "partial" | "paid";
 export type LedgerReferenceType = "bill" | "customer_payment" | "refund" | "expense" | "cash_movement";
+export type AttendanceStatus = "open" | "closed" | "auto_closed";
+export type AttendanceSource = "qr" | "manual" | "admin_bypass";
 
 export interface LocalizedText {
   en: string;
@@ -92,6 +106,57 @@ export interface User {
   passwordHash?: string;
   lastLoginAt?: string;
   createdAt: string;
+}
+
+export interface AttendanceLocation {
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  capturedAt: string;
+}
+
+export interface AttendanceRecord {
+  id: string;
+  shopId: string;
+  userId: string;
+  businessDate: string;
+  status: AttendanceStatus;
+  source: AttendanceSource;
+  clockInAt: string;
+  clockOutAt?: string;
+  clockInLocation?: AttendanceLocation;
+  clockOutLocation?: AttendanceLocation;
+  clockInSelfieUrl?: string;
+  clockOutSelfieUrl?: string;
+  scheduledHours: number;
+  paidHours?: number;
+  hourlyRate: number;
+  note?: string;
+  editedBy?: string;
+  editedAt?: string;
+  createdAt: string;
+}
+
+export interface AttendanceQrSession {
+  id: string;
+  shopId: string;
+  userId: string;
+  businessDate: string;
+  token: string;
+  expiresAt: string;
+  usedAt?: string;
+  createdAt: string;
+}
+
+export interface PayrollRate {
+  id: string;
+  shopId: string;
+  userId: string;
+  hourlyRate: number;
+  defaultDailyHours: number;
+  currency: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ProductCategory {
@@ -448,6 +513,7 @@ export interface POSSettings {
   vatNumber?: string;
   receiptQrUrl?: string;
   autoDayRolloverEnabled?: boolean;
+  rolePermissions?: Partial<Record<Exclude<UserRole, "super_admin">, RolePermissionKey[]>>;
 }
 
 export interface PrinterSettings {
@@ -474,8 +540,16 @@ export interface TaxSettings {
   showOnReceipt: boolean;
   promotionEnabled?: boolean;
   promotionTarget?: "bill" | "items";
+  promotionScope?: PromotionScope;
+  promotionStartsAt?: string;
+  promotionEndsAt?: string;
+  promotionProductIds?: string[];
   promotionDiscountType?: DiscountType;
   promotionDiscountValue?: number;
+  permanentItemDiscounts?: Record<string, {
+    discountType: DiscountType;
+    discountValue: number;
+  }>;
 }
 
 export interface ShopSettingsBundle {
@@ -621,6 +695,9 @@ export interface DemoAppState {
   ledgerEntries: AccountingLedgerEntry[];
   businessDays: BusinessDay[];
   shifts: Shift[];
+  attendanceRecords: AttendanceRecord[];
+  attendanceQrSessions: AttendanceQrSession[];
+  payrollRates: PayrollRate[];
   dayCloses: DayClose[];
   cashMovements: CashMovement[];
   expenseCategories: ExpenseCategory[];

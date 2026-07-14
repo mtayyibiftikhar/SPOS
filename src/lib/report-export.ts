@@ -233,9 +233,11 @@ function drawSection(
     height: number;
   }
 ) {
-  drawFilledRect(commands, x, y, width, height, [0.985, 0.988, 0.992]);
-  drawStrokedRect(commands, x, y, width, height, [0.86, 0.89, 0.93], 0.9);
-  renderPdfText(commands, sanitizePdfText(title), x + 16, y + height - 26, 13, "F2");
+  drawFilledRect(commands, x, y, width, height, [1, 1, 1]);
+  drawStrokedRect(commands, x, y, width, height, [0.82, 0.87, 0.90], 0.9);
+  drawFilledRect(commands, x, y + height - 36, width, 36, [0.91, 0.98, 0.95]);
+  drawFilledRect(commands, x, y + height - 36, 5, 36, [0.063, 0.725, 0.506]);
+  renderPdfText(commands, sanitizePdfText(title), x + 18, y + height - 24, 13.5, "F2");
 
   let rowY = y + height - 48;
 
@@ -243,17 +245,17 @@ function drawSection(
     const isLast = index === rows.length - 1;
     const rowStep = row.detail ? 32 : 24;
 
-    renderPdfText(commands, sanitizePdfText(row.label), x + 16, rowY, 10.5, "F1");
-    const valueWidth = estimateTextWidth(row.value, 10.5);
-    renderPdfText(commands, sanitizePdfText(row.value), x + width - 16 - valueWidth, rowY, 10.5, "F2");
+    renderPdfText(commands, sanitizePdfText(row.label), x + 18, rowY, 10.5, "F1");
+    const valueWidth = estimateTextWidth(row.value, 10.8);
+    renderPdfText(commands, sanitizePdfText(row.value), x + width - 18 - valueWidth, rowY, 10.8, "F2");
 
     if (row.detail) {
-      renderPdfText(commands, sanitizePdfText(row.detail), x + 16, rowY - 13, 8.5, "F1");
+      renderPdfText(commands, sanitizePdfText(row.detail), x + 18, rowY - 13, 8.7, "F1");
     }
 
     if (!isLast) {
       const dividerY = rowY - (row.detail ? 18 : 8);
-      commands.push(`0.88 G 0.6 w ${(x + 16).toFixed(2)} ${dividerY.toFixed(2)} m ${(x + width - 16).toFixed(2)} ${dividerY.toFixed(2)} l S 0 G`);
+      commands.push(`0.90 G 0.55 w ${(x + 18).toFixed(2)} ${dividerY.toFixed(2)} m ${(x + width - 18).toFixed(2)} ${dividerY.toFixed(2)} l S 0 G`);
     }
 
     rowY -= rowStep;
@@ -544,47 +546,75 @@ export async function createStructuredReportPdfBlob({
   const pageHeight = 841.89;
   const margin = 40;
   const contentWidth = pageWidth - margin * 2;
-  const logoAsset = await loadImageAsset(logoUrl, 154, 66);
+  const logoAsset = await loadImageAsset(logoUrl, 118, 58);
   const pages: string[][] = [];
   let commands: string[] = [];
   let cursorY = pageHeight - 52;
 
   const beginPage = (isFirstPage: boolean) => {
     commands = [];
-    drawFilledRect(commands, 0, 0, pageWidth, pageHeight, [1, 1, 1]);
+    drawFilledRect(commands, 0, 0, pageWidth, pageHeight, [0.963, 0.973, 0.968]);
     drawFilledRect(commands, 0, pageHeight - 18, pageWidth, 18, [0.063, 0.725, 0.506]);
-    cursorY = pageHeight - 52;
 
-    if (isFirstPage && logoAsset) {
-      const logoX = margin + (contentWidth - logoAsset.displayWidth) / 2;
-      const logoY = cursorY - logoAsset.displayHeight;
+    const headerHeight = isFirstPage ? 118 : 88;
+    const headerY = pageHeight - 34 - headerHeight;
+    drawFilledRect(commands, margin, headerY, contentWidth, headerHeight, [1, 1, 1]);
+    drawStrokedRect(commands, margin, headerY, contentWidth, headerHeight, [0.82, 0.87, 0.90], 0.9);
+    drawFilledRect(commands, margin, headerY + headerHeight - 8, contentWidth, 8, [0.91, 0.98, 0.95]);
+
+    const textStartX = logoAsset ? margin + 20 + logoAsset.displayWidth + 18 : margin + 22;
+    const headerTextY = headerY + headerHeight - 38;
+
+    if (logoAsset) {
+      const logoX = margin + 20;
+      const logoY = headerY + headerHeight - 24 - logoAsset.displayHeight;
       commands.push(
         `q ${logoAsset.displayWidth.toFixed(2)} 0 0 ${logoAsset.displayHeight.toFixed(2)} ${logoX.toFixed(2)} ${logoY.toFixed(2)} cm /Im1 Do Q`
       );
-      cursorY = logoY - 30;
     }
 
-    renderCenteredText(commands, sanitizePdfText(shopName) || "Simple POS", margin, cursorY, contentWidth, isFirstPage ? 22 : 15, "F2");
-    cursorY -= isFirstPage ? 24 : 18;
-    renderCenteredText(commands, sanitizePdfText(title), margin, cursorY, contentWidth, isFirstPage ? 16 : 12, "F2");
-    cursorY -= isFirstPage ? 19 : 15;
+    renderPdfText(commands, sanitizePdfText(shopName) || "Simple POS", textStartX, headerTextY, isFirstPage ? 19 : 15, "F2");
+    renderPdfText(commands, sanitizePdfText(title), textStartX, headerTextY - (isFirstPage ? 22 : 18), isFirstPage ? 13.5 : 11.5, "F2");
 
     if (isFirstPage) {
-      renderCenteredText(commands, sanitizePdfText(subtitle), margin, cursorY, contentWidth, 10.5, "F1");
-      cursorY -= 17;
+      renderPdfText(commands, sanitizePdfText(subtitle), textStartX, headerTextY - 40, 9.5, "F1");
     }
 
-    renderCenteredText(
+    const metaX = margin + contentWidth - 188;
+    renderPdfText(
       commands,
-      `Period: ${sanitizePdfText(period)}    Generated: ${sanitizePdfText(generatedAt)}`,
-      margin,
-      cursorY,
-      contentWidth,
-      10,
+      "REPORT PERIOD",
+      metaX,
+      headerY + headerHeight - 36,
+      8,
+      "F2"
+    );
+    renderPdfText(
+      commands,
+      sanitizePdfText(period),
+      metaX,
+      headerY + headerHeight - 50,
+      9.5,
+      "F1"
+    );
+    renderPdfText(
+      commands,
+      "GENERATED",
+      metaX,
+      headerY + headerHeight - 70,
+      8,
+      "F2"
+    );
+    renderPdfText(
+      commands,
+      sanitizePdfText(generatedAt),
+      metaX,
+      headerY + headerHeight - 84,
+      9.5,
       "F1"
     );
 
-    cursorY -= isFirstPage ? 34 : 26;
+    cursorY = headerY - 24;
   };
 
   const commitPage = () => {

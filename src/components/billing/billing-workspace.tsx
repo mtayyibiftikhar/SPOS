@@ -154,6 +154,20 @@ function getCartLineDiscountLimit(line: Pick<CartLine, "quantity" | "unitPriceIn
   return Math.round(unitPrice * line.quantity * 100) / 100;
 }
 
+function isDateWithinPromotionRange(startsAt?: string, endsAt?: string) {
+  const today = new Date().toISOString().slice(0, 10);
+
+  if (startsAt && today < startsAt) {
+    return false;
+  }
+
+  if (endsAt && today > endsAt) {
+    return false;
+  }
+
+  return true;
+}
+
 function productMatchesSearch(product: Product, query: string) {
   return [product.name.en, product.name.ar, product.name.ur, product.barcode, ...(product.barcodes ?? [])]
     .filter(Boolean)
@@ -279,10 +293,18 @@ export function BillingWorkspace() {
   const currency = currentShop?.currency ?? "SAR";
   const taxEnabled = currentSettings?.tax.enabled ?? false;
   const taxLabel = currentSettings?.tax.name ?? t("common.tax");
-  const promotionTarget = currentSettings?.tax.promotionTarget ?? "bill";
+  const promotionScope =
+    currentSettings?.tax.promotionScope ?? (currentSettings?.tax.promotionTarget === "items" ? "products" : "bill");
   const promotionDiscountType = currentSettings?.tax.promotionDiscountType ?? "percentage";
   const promotionDiscountValue = Math.max(0, currentSettings?.tax.promotionDiscountValue ?? 0);
-  const promotionEnabled = Boolean(currentSettings?.tax.promotionEnabled && promotionDiscountValue > 0);
+  const promotionSelectedProductIds = currentSettings?.tax.promotionProductIds ?? [];
+  const promotionEnabled = Boolean(
+    currentSettings?.tax.promotionEnabled &&
+      promotionDiscountValue > 0 &&
+      isDateWithinPromotionRange(currentSettings.tax.promotionStartsAt, currentSettings.tax.promotionEndsAt)
+  );
+  const promotionAppliesToBill = promotionEnabled && promotionScope === "bill";
+  const permanentItemDiscounts = currentSettings?.tax.permanentItemDiscounts ?? {};
   const checkoutBlocked = !currentBusinessDay || !currentShift;
   const customerSearchHasValue = deferredCustomerSearch.trim().length > 0;
   const productSearchHasValue = productSearch.trim().length > 0;
@@ -510,6 +532,36 @@ export function BillingWorkspace() {
 
   const customerDisplayName = normalizedCustomerName || t("billing.walkInCustomer");
 
+  const getAutomaticLineDiscount = (product: Product, maxAmount: number) => {
+    const promotionAppliesToProduct =
+      promotionEnabled &&
+      promotionScope !== "bill" &&
+      ((promotionScope === "products" && product.kind === "product") ||
+        (promotionScope === "services" && product.kind === "service") ||
+        (promotionScope === "selected" && promotionSelectedProductIds.includes(product.id)));
+
+    if (promotionAppliesToProduct) {
+      return {
+        discountType: promotionDiscountType,
+        discountValue: normalizeDiscountValue(promotionDiscountType, promotionDiscountValue, maxAmount)
+      };
+    }
+
+    const permanentDiscount = permanentItemDiscounts[product.id];
+
+    if (permanentDiscount && permanentDiscount.discountValue > 0) {
+      return {
+        discountType: permanentDiscount.discountType,
+        discountValue: normalizeDiscountValue(permanentDiscount.discountType, permanentDiscount.discountValue, maxAmount)
+      };
+    }
+
+    return {
+      discountType: "fixed" as const,
+      discountValue: 0
+    };
+  };
+
   useEffect(() => {
     const nextDiscountValue = clampDiscountInput(discountType, discountValue, totals.subtotal);
 
@@ -519,7 +571,7 @@ export function BillingWorkspace() {
   }, [discountType, discountValue, totals.subtotal]);
 
   useEffect(() => {
-    if (!promotionEnabled || promotionTarget !== "bill") {
+    if (!promotionAppliesToBill) {
       return;
     }
 
@@ -529,23 +581,31 @@ export function BillingWorkspace() {
         normalizeDiscountValue(promotionDiscountType, promotionDiscountValue, totals.subtotal)
       )
     );
-  }, [promotionDiscountType, promotionDiscountValue, promotionEnabled, promotionTarget, totals.subtotal]);
+  }, [promotionAppliesToBill, promotionDiscountType, promotionDiscountValue, totals.subtotal]);
 
   useEffect(() => {
-    if (!promotionEnabled || promotionTarget !== "items") {
-      return;
-    }
-
     setCart((current) =>
-      current.map((line) => ({
-        ...line,
-        discountType: promotionDiscountType,
-        discountValueInput: formatEditablePrice(
-          normalizeDiscountValue(promotionDiscountType, promotionDiscountValue, getCartLineDiscountLimit(line))
-        )
-      }))
+      current.map((line) => {
+        const product = productById[line.productId];
+
+        if (!product) {
+          return line;
+        }
+
+        const automaticDiscount = getAutomaticLineDiscount(product, getCartLineDiscountLimit(line));
+
+        if (automaticDiscount.discountValue <= 0) {
+          return line;
+        }
+
+        return {
+          ...line,
+          discountType: automaticDiscount.discountType,
+          discountValueInput: formatEditablePrice(automaticDiscount.discountValue)
+        };
+      })
     );
-  }, [promotionDiscountType, promotionDiscountValue, promotionEnabled, promotionTarget]);
+  }, [permanentItemDiscounts, productById, promotionDiscountType, promotionDiscountValue, promotionEnabled, promotionScope, promotionSelectedProductIds]);
 
   useEffect(() => {
     if (
@@ -610,17 +670,13 @@ export function BillingWorkspace() {
       const existing = current.find((line) => line.productId === product.id);
 
       if (!existing) {
-        const promotionLineDiscountValue =
-          promotionEnabled && promotionTarget === "items"
-            ? normalizeDiscountValue(promotionDiscountType, promotionDiscountValue, product.salePrice)
-            : 0;
+        const automaticDiscount = getAutomaticLineDiscount(product, product.salePrice);
 
         return [
           ...current,
           {
-            discountType:
-              promotionEnabled && promotionTarget === "items" ? promotionDiscountType : "fixed",
-            discountValueInput: formatEditablePrice(promotionLineDiscountValue),
+            discountType: automaticDiscount.discountType,
+            discountValueInput: formatEditablePrice(automaticDiscount.discountValue),
             productId: product.id,
             quantity: 1,
             unitPriceInput: formatEditablePrice(product.salePrice)
@@ -1887,7 +1943,7 @@ export function BillingWorkspace() {
             {promotionEnabled ? (
               <div className="mt-3 rounded-[18px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
                 <span className="font-semibold">{t("billing.promotionActive")}.</span>{" "}
-                {promotionTarget === "bill" ? t("billing.promotionBillHint") : t("billing.promotionItemsHint")}
+                {promotionScope === "bill" ? t("billing.promotionBillHint") : t("billing.promotionItemsHint")}
               </div>
             ) : null}
           </div>

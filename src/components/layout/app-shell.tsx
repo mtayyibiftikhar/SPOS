@@ -6,6 +6,7 @@ import { AlertTriangle, CheckCircle2, LockKeyhole, Mail, Menu, MessageCircle, Ph
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { usePosApp } from "@/components/providers/app-provider";
+import { AttendanceGate } from "@/components/attendance/attendance-gate";
 import { cn, formatDateTime } from "@/lib/utils";
 
 function getBlockedStatus(license: ReturnType<typeof usePosApp>["currentLicense"]) {
@@ -196,7 +197,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
             ) : (
-              children
+              <AttendanceGate>{children}</AttendanceGate>
             )}
           </div>
         </main>

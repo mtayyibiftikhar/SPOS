@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRight, Download, Mail, MessageCircle, Printer, ReceiptText, Share2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Download, ExternalLink, Mail, MessageCircle, Printer, ReceiptText, Share2 } from "lucide-react";
 import { billStatusLabelKeys, paymentMethodLabelKeys } from "@/lib/i18n";
 import {
   buildMailtoLink,
@@ -138,10 +138,6 @@ export function ReceiptView({ billId }: { billId: string }) {
     brand: state.brand
   });
   const receiptTitle = t("receipt.title", { number: bill.number });
-  const shareText = t("receipt.shareMessage", {
-    number: bill.number,
-    shop: posSettings?.shopName ?? shop?.name ?? t("brand.name")
-  });
   const receiptBrand = posSettings?.shopName ?? shop?.name ?? t("brand.name");
   const digitalReceiptUrl = buildPublicReceiptUrl(bill.publicToken);
   const receiptQrImageUrl = buildQrCodeImageUrl(digitalReceiptUrl, 172);
@@ -154,10 +150,10 @@ export function ReceiptView({ billId }: { billId: string }) {
       .join("") || "SP";
   const formattedCustomerName = bill.customerName?.trim() || t("billing.walkInCustomer");
   const whatsappTarget = bill.customerWhatsapp || bill.customerPhone;
-  const itemSummaryLines = items.map((item) => {
+  const itemSummaryLines = items.map((item, index) => {
     const itemName = getReceiptItemNameText(item.productName, receiptSettings);
 
-    return `- ${itemName}: ${item.quantity} x ${formatCurrency(item.unitPrice, shop?.currency ?? "SAR", locale)} = ${formatCurrency(item.lineTotal, shop?.currency ?? "SAR", locale)}`;
+    return `${index + 1}. ${itemName}\n   ${item.quantity} x ${formatCurrency(item.unitPrice, shop?.currency ?? "SAR", locale)} = ${formatCurrency(item.lineTotal, shop?.currency ?? "SAR", locale)}`;
   });
   const renderReceiptItemName = (item: (typeof items)[number]) => (
     <span className="block min-w-0">
@@ -176,9 +172,10 @@ export function ReceiptView({ billId }: { billId: string }) {
     const customerName = contact?.name?.trim() || bill.customerName?.trim() || t("billing.walkInCustomer");
 
     return [
-      `${t("common.receiptNumber")}: ${bill.number}`,
-      `${t("common.customer")}: ${customerName}`,
+      t("receipt.shareGreeting", { customer: customerName }),
+      "",
       `${t("receipt.sharePurchasedFrom")}: ${receiptBrand}`,
+      `${t("common.receiptNumber")}: ${bill.number}`,
       `${t("common.dateTime")}: ${formatDateTime(bill.createdAt, locale)}`,
       "",
       `${t("common.items")}:`,
@@ -190,9 +187,12 @@ export function ReceiptView({ billId }: { billId: string }) {
       `${t("common.total")}: ${formatCurrency(bill.total, shop?.currency ?? "SAR", locale)}`,
       `${t("common.paidAmount")}: ${formatCurrency(bill.paidAmount, shop?.currency ?? "SAR", locale)}`,
       `${t("common.dueAmount")}: ${formatCurrency(bill.dueAmount, shop?.currency ?? "SAR", locale)}`,
-      ...(digitalReceiptUrl ? ["", `${t("receipt.digitalReceipt")}: ${digitalReceiptUrl}`] : [])
+      ...(digitalReceiptUrl ? ["", `${t("receipt.shareDigitalReceiptLine")}:`, digitalReceiptUrl] : []),
+      "",
+      t("receipt.shareThanks", { shop: receiptBrand })
     ].join("\n");
   };
+  const shareText = buildReceiptShareMessage();
   const emailSubject = t("receipt.emailSubject", {
     number: bill.number,
     shop: receiptBrand
@@ -224,25 +224,6 @@ export function ReceiptView({ billId }: { billId: string }) {
 
     downloadBlob(blob, receiptDocument.fileName);
   };
-  const createContactAwarePdf = () =>
-    createReceiptPdfBlob(
-      buildReceiptPdfDocument({
-        bill: {
-          ...bill,
-          customerName: contactForm.name.trim() || undefined,
-          customerPhone: contactForm.phone.trim() || undefined,
-          customerEmail: contactForm.email.trim() || undefined,
-          customerWhatsapp: contactForm.whatsapp.trim() || undefined
-        },
-        items,
-        shop: shop ?? null,
-        cashier: cashier ?? null,
-        posSettings,
-        receiptSettings,
-        brand: state.brand
-      })
-    );
-
   const handlePrint = async () => {
     setFeedback(null);
 
@@ -346,8 +327,6 @@ export function ReceiptView({ billId }: { billId: string }) {
         return;
       }
 
-      const pdfBlob = await createContactAwarePdf();
-      await savePdf(pdfBlob);
       const contactAwareMessage = buildReceiptShareMessage({ name: contactForm.name });
 
       if (pendingShareAction === "email") {
@@ -723,6 +702,17 @@ export function ReceiptView({ billId }: { billId: string }) {
 
             <div className="mt-5 rounded-[22px] border border-dashed border-line bg-shell p-4 text-sm leading-6 text-slate-600">
               <p>{t("receipt.browserLimitNote")}</p>
+              {digitalReceiptUrl ? (
+                <a
+                  className="mt-3 inline-flex items-center gap-2 font-semibold text-emerald-700 hover:text-emerald-800"
+                  href={digitalReceiptUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  {t("receipt.openDigitalReceipt")}
+                </a>
+              ) : null}
             </div>
 
             {feedback ? <p className="mt-4 text-sm font-medium text-olive">{feedback}</p> : null}

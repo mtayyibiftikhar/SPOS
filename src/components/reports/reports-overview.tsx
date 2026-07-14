@@ -4,76 +4,60 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   BarChart3,
-  CalendarRange,
-  Clock3,
+  Boxes,
+  CalendarDays,
   Download,
   Package,
   ReceiptText,
+  ShoppingBag,
+  Truck,
   Users2,
   WalletCards
 } from "lucide-react";
-import {
-  calculateShiftSummary,
-  getBusinessDateInTimezone,
-  getLatestClosedShift
-} from "@/lib/cash-control";
-import { getLedgerControlTotals, summarizeLedgerByAccount } from "@/lib/accounting";
-import { calculateSalesReportSummaryRange } from "@/lib/refunds";
-import {
-  buildProfitLossFileName,
-  createStructuredReportPdfBlob,
-  downloadBlob
-} from "@/lib/report-export";
 import { usePosApp } from "@/components/providers/app-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { WorkspaceSectionsNav } from "@/components/ui/workspace-sections-nav";
-import { formatBusinessDate, formatCurrency, formatDateTime } from "@/lib/utils";
+import { getLedgerControlTotals, summarizeLedgerByAccount } from "@/lib/accounting";
+import { calculateShiftSummary, getBusinessDateInTimezone } from "@/lib/cash-control";
+import { calculateBillItemProfit, calculateSalesReportSummaryRange } from "@/lib/refunds";
+import {
+  buildProfitLossFileName,
+  createStructuredReportPdfBlob,
+  downloadBlob,
+  type StructuredReportSection
+} from "@/lib/report-export";
+import { cn, formatBusinessDate, formatCurrency, formatDateTime } from "@/lib/utils";
+import type {
+  Locale,
+  Refund,
+  Supplier
+} from "@/types/pos";
 
 type RangePreset = "today" | "yesterday" | "week" | "month" | "year" | "custom";
-type ReportView = "overview" | "profit" | "cashier" | "inventory" | "expenses" | "refunds" | "tax";
+type ReportView =
+  | "overview"
+  | "sales"
+  | "profit"
+  | "employee"
+  | "dayShift"
+  | "inventory"
+  | "suppliers"
+  | "expenses"
+  | "refunds"
+  | "tax";
+
+type MoneyRow = {
+  detail?: string;
+  label: string;
+  value: string;
+};
+
+const MAX_ROWS = 12;
 
 function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
-}
-
-function isTaxAuthorityPaymentText(value: string) {
-  return /\b(vat|tax|zakat|authority|government)\b/i.test(value);
-}
-
-function SummaryRow({
-  label,
-  value
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 text-sm text-slate-600">
-      <span>{label}</span>
-      <span className="font-medium text-ink">{value}</span>
-    </div>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  description
-}: {
-  description: string;
-  label: string;
-  value: string | number;
-}) {
-  return (
-    <Card className="p-5">
-      <p className="text-sm text-slate-500">{label}</p>
-      <p className="mt-3 font-display text-3xl font-semibold text-ink">{value}</p>
-      <p className="mt-2 text-sm leading-6 text-slate-500">{description}</p>
-    </Card>
-  );
 }
 
 function parseBusinessDate(dateString: string) {
@@ -114,102 +98,146 @@ function getStartOfYear(dateString: string) {
 function getRangeFromPreset(preset: Exclude<RangePreset, "custom">, todayBusinessDate: string) {
   switch (preset) {
     case "today":
-      return {
-        dateFrom: todayBusinessDate,
-        dateTo: todayBusinessDate
-      };
+      return { dateFrom: todayBusinessDate, dateTo: todayBusinessDate };
     case "yesterday": {
       const previousDay = shiftBusinessDate(todayBusinessDate, -1);
-      return {
-        dateFrom: previousDay,
-        dateTo: previousDay
-      };
+      return { dateFrom: previousDay, dateTo: previousDay };
     }
     case "week":
-      return {
-        dateFrom: getStartOfWeek(todayBusinessDate),
-        dateTo: todayBusinessDate
-      };
+      return { dateFrom: getStartOfWeek(todayBusinessDate), dateTo: todayBusinessDate };
     case "month":
-      return {
-        dateFrom: getStartOfMonth(todayBusinessDate),
-        dateTo: todayBusinessDate
-      };
+      return { dateFrom: getStartOfMonth(todayBusinessDate), dateTo: todayBusinessDate };
     case "year":
-      return {
-        dateFrom: getStartOfYear(todayBusinessDate),
-        dateTo: todayBusinessDate
-      };
+      return { dateFrom: getStartOfYear(todayBusinessDate), dateTo: todayBusinessDate };
   }
 
-  return {
-    dateFrom: todayBusinessDate,
-    dateTo: todayBusinessDate
-  };
-}
-
-function hasSummaryActivity(summary: ReturnType<typeof calculateSalesReportSummaryRange>) {
-  return summary.billCount > 0 || summary.refundCount > 0 || summary.expenses > 0;
+  return { dateFrom: todayBusinessDate, dateTo: todayBusinessDate };
 }
 
 function getEntryBusinessDate(isoDate: string, timeZone: string, explicitBusinessDate?: string) {
   return explicitBusinessDate ?? getBusinessDateInTimezone(timeZone, new Date(isoDate));
 }
 
+function isTaxAuthorityPaymentText(value: string) {
+  return /\b(vat|tax|zakat|authority|government)\b/i.test(value);
+}
+
+function localizedName(name: { en?: string; ar?: string; ur?: string } | undefined, locale: Locale) {
+  if (!name) {
+    return "Item";
+  }
+
+  return name[locale] || name.en || name.ar || name.ur || "Item";
+}
+
+function compactRows<T>(rows: T[], maxRows = MAX_ROWS) {
+  return rows.slice(0, maxRows);
+}
+
+function toFileSlug(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "shop";
+}
+
+function isInRange(value: string, from: string, to: string) {
+  return value >= from && value <= to;
+}
+
+function SummaryRow({ label, value, detail }: MoneyRow) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+      <div className="flex items-start justify-between gap-4">
+        <p className="text-sm font-medium text-slate-600">{label}</p>
+        <p className="text-right text-sm font-semibold text-slate-950">{value}</p>
+      </div>
+      {detail ? <p className="mt-2 text-xs leading-5 text-slate-500">{detail}</p> : null}
+    </div>
+  );
+}
+
+function MetricCard({
+  accent = "default",
+  label,
+  value
+}: {
+  accent?: "default" | "green" | "yellow" | "blue";
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <Card
+      className={cn(
+        "min-h-[112px] p-5",
+        accent === "green" && "border-emerald-200 bg-emerald-50/70",
+        accent === "yellow" && "border-amber-200 bg-amber-50/80",
+        accent === "blue" && "border-sky-200 bg-sky-50/80"
+      )}
+    >
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
+      <p className="mt-4 font-display text-3xl font-semibold tracking-[-0.04em] text-slate-950">{value}</p>
+    </Card>
+  );
+}
+
+function ReportPanel({
+  children,
+  icon,
+  title,
+  right
+}: {
+  children: React.ReactNode;
+  icon: React.ReactNode;
+  right?: React.ReactNode;
+  title: string;
+}) {
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-950 text-white">
+            {icon}
+          </div>
+          <h2 className="font-display text-2xl font-semibold tracking-[-0.04em] text-slate-950">{title}</h2>
+        </div>
+        {right}
+      </div>
+      <div className="p-5">{children}</div>
+    </Card>
+  );
+}
+
+function EmptyReport({ label }: { label: string }) {
+  return (
+    <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50/80 p-8 text-center text-sm text-slate-500">
+      {label}
+    </div>
+  );
+}
+
 export function ReportsOverview() {
   const searchParams = useSearchParams();
-  const { currentSettings, currentShop, currentShift, locale, session, state, t } = usePosApp();
+  const { currentSettings, currentShop, locale, state, t } = usePosApp();
   const [exportFeedback, setExportFeedback] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [rangePreset, setRangePreset] = useState<RangePreset>("today");
-  const todayBusinessDate = getBusinessDateInTimezone(currentShop?.timezone ?? "Asia/Riyadh", new Date());
+
+  const timeZone = currentShop?.timezone ?? "Asia/Riyadh";
+  const currency = currentShop?.currency ?? "SAR";
+  const todayBusinessDate = getBusinessDateInTimezone(timeZone, new Date());
   const [customFrom, setCustomFrom] = useState(todayBusinessDate);
   const [customTo, setCustomTo] = useState(todayBusinessDate);
-
   const requestedView = searchParams.get("view");
   const activeView: ReportView =
+    requestedView === "sales" ||
     requestedView === "profit" ||
-    requestedView === "cashier" ||
+    requestedView === "employee" ||
+    requestedView === "dayShift" ||
     requestedView === "inventory" ||
+    requestedView === "suppliers" ||
     requestedView === "expenses" ||
     requestedView === "refunds" ||
     requestedView === "tax"
       ? requestedView
       : "overview";
-
-  const currency = currentShop?.currency ?? "SAR";
-  const timeZone = currentShop?.timezone ?? "Asia/Riyadh";
-
-  const liveShiftSummary = useMemo(() => {
-    if (!currentShift) {
-      return null;
-    }
-
-    return calculateShiftSummary({
-      shift: currentShift,
-      bills: state.bills,
-      cashMovements: state.cashMovements,
-      refunds: state.refunds
-    });
-  }, [currentShift, state.bills, state.cashMovements, state.refunds]);
-
-  const latestShift = useMemo(
-    () => getLatestClosedShift(state.shifts, currentShop?.id ?? null, session?.id ?? null),
-    [currentShop?.id, session?.id, state.shifts]
-  );
-
-  const latestShiftSummary = useMemo(() => {
-    if (!latestShift) {
-      return null;
-    }
-
-    return calculateShiftSummary({
-      shift: latestShift,
-      bills: state.bills,
-      cashMovements: state.cashMovements,
-      refunds: state.refunds
-    });
-  }, [latestShift, state.bills, state.cashMovements, state.refunds]);
 
   const selectedRange = useMemo(() => {
     if (rangePreset !== "custom") {
@@ -220,16 +248,10 @@ export function ReportsOverview() {
     const normalizedTo = customTo || normalizedFrom;
 
     if (normalizedFrom <= normalizedTo) {
-      return {
-        dateFrom: normalizedFrom,
-        dateTo: normalizedTo
-      };
+      return { dateFrom: normalizedFrom, dateTo: normalizedTo };
     }
 
-    return {
-      dateFrom: normalizedTo,
-      dateTo: normalizedFrom
-    };
+    return { dateFrom: normalizedTo, dateTo: normalizedFrom };
   }, [customFrom, customTo, rangePreset, todayBusinessDate]);
 
   const selectedRangeLabel = useMemo(() => {
@@ -239,6 +261,98 @@ export function ReportsOverview() {
 
     return `${formatBusinessDate(selectedRange.dateFrom, locale)} - ${formatBusinessDate(selectedRange.dateTo, locale)}`;
   }, [locale, selectedRange.dateFrom, selectedRange.dateTo]);
+
+  const periodBills = useMemo(
+    () =>
+      state.bills
+        .filter((bill) => {
+          if (!currentShop || bill.shopId !== currentShop.id || bill.status === "cancelled") {
+            return false;
+          }
+
+          const businessDate = getEntryBusinessDate(bill.createdAt, timeZone, bill.businessDate);
+          return isInRange(businessDate, selectedRange.dateFrom, selectedRange.dateTo);
+        })
+        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
+    [currentShop, selectedRange.dateFrom, selectedRange.dateTo, state.bills, timeZone]
+  );
+
+  const billById = useMemo(() => new Map(state.bills.map((bill) => [bill.id, bill])), [state.bills]);
+  const periodBillIds = useMemo(() => new Set(periodBills.map((bill) => bill.id)), [periodBills]);
+
+  const periodBillItems = useMemo(
+    () => state.billItems.filter((item) => periodBillIds.has(item.billId)),
+    [periodBillIds, state.billItems]
+  );
+
+  const periodRefunds = useMemo(
+    () =>
+      state.refunds
+        .filter((refund) => {
+          if (!currentShop || refund.shopId !== currentShop.id) {
+            return false;
+          }
+
+          const businessDate = getEntryBusinessDate(refund.returnDate, timeZone, refund.businessDate);
+          return isInRange(businessDate, selectedRange.dateFrom, selectedRange.dateTo);
+        })
+        .sort((left, right) => new Date(right.returnDate).getTime() - new Date(left.returnDate).getTime()),
+    [currentShop, selectedRange.dateFrom, selectedRange.dateTo, state.refunds, timeZone]
+  );
+
+  const periodRefundIds = useMemo(() => new Set(periodRefunds.map((refund) => refund.id)), [periodRefunds]);
+  const periodRefundItems = useMemo(
+    () => state.refundItems.filter((item) => periodRefundIds.has(item.refundId)),
+    [periodRefundIds, state.refundItems]
+  );
+
+  const periodExpenses = useMemo(
+    () =>
+      state.expenses
+        .filter(
+          (expense) =>
+            expense.shopId === currentShop?.id &&
+            isInRange(expense.businessDate, selectedRange.dateFrom, selectedRange.dateTo)
+        )
+        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
+    [currentShop?.id, selectedRange.dateFrom, selectedRange.dateTo, state.expenses]
+  );
+
+  const periodMovements = useMemo(
+    () =>
+      state.cashMovements
+        .filter(
+          (movement) =>
+            movement.shopId === currentShop?.id &&
+            isInRange(movement.businessDate, selectedRange.dateFrom, selectedRange.dateTo)
+        )
+        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
+    [currentShop?.id, selectedRange.dateFrom, selectedRange.dateTo, state.cashMovements]
+  );
+
+  const periodShifts = useMemo(
+    () =>
+      state.shifts
+        .filter(
+          (shift) =>
+            shift.shopId === currentShop?.id &&
+            isInRange(shift.businessDate, selectedRange.dateFrom, selectedRange.dateTo)
+        )
+        .sort((left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime()),
+    [currentShop?.id, selectedRange.dateFrom, selectedRange.dateTo, state.shifts]
+  );
+
+  const periodDayCloses = useMemo(
+    () =>
+      state.dayCloses
+        .filter(
+          (dayClose) =>
+            dayClose.shopId === currentShop?.id &&
+            isInRange(dayClose.businessDate, selectedRange.dateFrom, selectedRange.dateTo)
+        )
+        .sort((left, right) => new Date(right.closedAt).getTime() - new Date(left.closedAt).getTime()),
+    [currentShop?.id, selectedRange.dateFrom, selectedRange.dateTo, state.dayCloses]
+  );
 
   const financialSummary = useMemo(() => {
     if (!currentShop) {
@@ -257,164 +371,191 @@ export function ReportsOverview() {
     });
   }, [currentShop, selectedRange.dateFrom, selectedRange.dateTo, state.billItems, state.bills, state.expenses, state.refunds, timeZone]);
 
-  const filteredDayCloses = useMemo(
-    () =>
-      state.dayCloses
-        .filter(
-          (dayClose) =>
-            dayClose.shopId === currentShop?.id &&
-            dayClose.businessDate >= selectedRange.dateFrom &&
-            dayClose.businessDate <= selectedRange.dateTo
-        )
-        .sort((left, right) => new Date(right.closedAt).getTime() - new Date(left.closedAt).getTime())
-        .slice(0, 6),
-    [currentShop?.id, selectedRange.dateFrom, selectedRange.dateTo, state.dayCloses]
-  );
-
-  const filteredShopShifts = useMemo(
-    () =>
-      state.shifts
-        .filter(
-          (shift) =>
-            shift.shopId === currentShop?.id &&
-            shift.businessDate >= selectedRange.dateFrom &&
-            shift.businessDate <= selectedRange.dateTo
-        )
-        .sort((left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime())
-        .slice(0, 6),
-    [currentShop?.id, selectedRange.dateFrom, selectedRange.dateTo, state.shifts]
-  );
-
-  const filteredMovements = useMemo(
-    () =>
-      state.cashMovements
-        .filter(
-          (movement) =>
-            movement.shopId === currentShop?.id &&
-            movement.businessDate >= selectedRange.dateFrom &&
-            movement.businessDate <= selectedRange.dateTo
-        )
-        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
-    [currentShop?.id, selectedRange.dateFrom, selectedRange.dateTo, state.cashMovements]
-  );
-
-  const filteredExpenses = useMemo(
-    () =>
-      state.expenses
-        .filter(
-          (expense) =>
-            expense.shopId === currentShop?.id &&
-            expense.businessDate >= selectedRange.dateFrom &&
-            expense.businessDate <= selectedRange.dateTo
-        )
-        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
-    [currentShop?.id, selectedRange.dateFrom, selectedRange.dateTo, state.expenses]
-  );
+  const productById = useMemo(() => new Map(state.products.map((product) => [product.id, product])), [state.products]);
+  const categoryById = useMemo(() => new Map(state.categories.map((category) => [category.id, category])), [state.categories]);
+  const supplierById = useMemo(() => new Map(state.suppliers.map((supplier) => [supplier.id, supplier])), [state.suppliers]);
 
   const expenseReportSummary = useMemo(
     () => ({
-      bankExpenses: filteredExpenses
-        .filter((expense) => expense.paymentMethod === "bank")
-        .reduce((sum, expense) => sum + expense.amount, 0),
-      cardExpenses: filteredExpenses
-        .filter((expense) => expense.paymentMethod === "card")
-        .reduce((sum, expense) => sum + expense.amount, 0),
-      cashExpenses: filteredExpenses
-        .filter((expense) => expense.paymentMethod === "cash")
-        .reduce((sum, expense) => sum + expense.amount, 0),
-      cashIn: filteredMovements
-        .filter((movement) => movement.type === "cash_in")
-        .reduce((sum, movement) => sum + movement.amount, 0),
-      cashOut: filteredMovements
-        .filter((movement) => movement.type === "cash_out")
-        .reduce((sum, movement) => sum + movement.amount, 0),
-      totalExpenses: filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0)
+      bankExpenses: periodExpenses.filter((expense) => expense.paymentMethod === "bank").reduce((sum, expense) => sum + expense.amount, 0),
+      cardExpenses: periodExpenses.filter((expense) => expense.paymentMethod === "card").reduce((sum, expense) => sum + expense.amount, 0),
+      cashExpenses: periodExpenses.filter((expense) => expense.paymentMethod === "cash").reduce((sum, expense) => sum + expense.amount, 0),
+      cashIn: periodMovements.filter((movement) => movement.type === "cash_in").reduce((sum, movement) => sum + movement.amount, 0),
+      cashOut: periodMovements.filter((movement) => movement.type === "cash_out").reduce((sum, movement) => sum + movement.amount, 0),
+      totalExpenses: periodExpenses.reduce((sum, expense) => sum + expense.amount, 0)
     }),
-    [filteredExpenses, filteredMovements]
+    [periodExpenses, periodMovements]
   );
 
-  const cashierPerformance = useMemo(() => {
-    const entries = new Map<
-      string,
-      {
-        billCount: number;
-        grossSales: number;
-        refunds: number;
-        userId: string;
-      }
-    >();
+  const salesByItem = useMemo(() => {
+    const rows = new Map<string, { discount: number; gross: number; name: string; profit: number; quantity: number; refunds: number; net: number }>();
 
-    state.bills.forEach((bill) => {
-      if (!currentShop || bill.shopId !== currentShop.id || bill.status === "cancelled") {
-        return;
-      }
+    periodBillItems.forEach((item) => {
+      const entry = rows.get(item.productId) ?? {
+        name: localizedName(item.productName, locale),
+        quantity: 0,
+        gross: 0,
+        discount: 0,
+        refunds: 0,
+        profit: 0,
+        net: 0
+      };
 
-      const businessDate = getEntryBusinessDate(bill.createdAt, timeZone, bill.businessDate);
-      if (businessDate < selectedRange.dateFrom || businessDate > selectedRange.dateTo) {
-        return;
-      }
+      entry.quantity += item.quantity;
+      entry.gross += item.grossLineTotal;
+      entry.discount += item.discountAmount;
+      entry.net += item.lineTotal;
+      entry.profit += calculateBillItemProfit(item);
+      rows.set(item.productId, entry);
+    });
 
-      const entry = entries.get(bill.cashierId) ?? {
-        userId: bill.cashierId,
+    periodRefundItems.forEach((item) => {
+      const entry = rows.get(item.productId) ?? {
+        name: localizedName(item.productName, locale),
+        quantity: 0,
+        gross: 0,
+        discount: 0,
+        refunds: 0,
+        profit: 0,
+        net: 0
+      };
+
+      entry.refunds += Math.abs(item.refundAmount);
+      entry.net -= Math.abs(item.refundAmount);
+      entry.profit -= Math.abs(item.profitAdjustment);
+      rows.set(item.productId, entry);
+    });
+
+    return Array.from(rows.entries())
+      .map(([productId, row]) => ({ productId, ...row }))
+      .sort((left, right) => right.net - left.net);
+  }, [locale, periodBillItems, periodRefundItems]);
+
+  const salesByCategory = useMemo(() => {
+    const rows = new Map<string, { gross: number; name: string; quantity: number; refunds: number; net: number }>();
+
+    salesByItem.forEach((item) => {
+      const product = productById.get(item.productId);
+      const category = product?.categoryId ? categoryById.get(product.categoryId) : undefined;
+      const key = category?.id ?? "uncategorized";
+      const entry = rows.get(key) ?? {
+        name: category?.name ?? "No category",
+        quantity: 0,
+        gross: 0,
+        refunds: 0,
+        net: 0
+      };
+
+      entry.quantity += item.quantity;
+      entry.gross += item.gross;
+      entry.refunds += item.refunds;
+      entry.net += item.net;
+      rows.set(key, entry);
+    });
+
+    return Array.from(rows.values()).sort((left, right) => right.net - left.net);
+  }, [categoryById, productById, salesByItem]);
+
+  const salesByCustomer = useMemo(() => {
+    const rows = new Map<string, { billCount: number; gross: number; name: string; refunds: number; net: number; phone?: string }>();
+
+    periodBills.forEach((bill) => {
+      const key = bill.customerId ?? bill.customerPhone ?? "walk-in";
+      const entry = rows.get(key) ?? {
+        name: bill.customerName || "Walk-in Customer",
+        phone: bill.customerPhone,
         billCount: 0,
-        grossSales: 0,
-        refunds: 0
+        gross: 0,
+        refunds: 0,
+        net: 0
       };
 
       entry.billCount += 1;
-      entry.grossSales += bill.total;
-      entries.set(bill.cashierId, entry);
+      entry.gross += bill.total;
+      entry.net += bill.total;
+      rows.set(key, entry);
     });
 
-    state.refunds.forEach((refund) => {
-      if (!currentShop || refund.shopId !== currentShop.id) {
-        return;
-      }
-
-      const businessDate = getEntryBusinessDate(refund.returnDate, timeZone, refund.businessDate);
-      if (businessDate < selectedRange.dateFrom || businessDate > selectedRange.dateTo) {
-        return;
-      }
-
-      const entry = entries.get(refund.createdBy) ?? {
-        userId: refund.createdBy,
+    periodRefunds.forEach((refund) => {
+      const bill = billById.get(refund.originalBillId);
+      const key = bill?.customerId ?? bill?.customerPhone ?? "walk-in";
+      const entry = rows.get(key) ?? {
+        name: bill?.customerName || "Walk-in Customer",
+        phone: bill?.customerPhone,
         billCount: 0,
-        grossSales: 0,
-        refunds: 0
+        gross: 0,
+        refunds: 0,
+        net: 0
       };
 
-      entry.refunds += refund.amount;
-      entries.set(refund.createdBy, entry);
+      entry.refunds += Math.abs(refund.amount);
+      entry.net -= Math.abs(refund.amount);
+      rows.set(key, entry);
     });
 
-    return Array.from(entries.values())
-      .map((entry) => {
-        const user = state.users.find((candidate) => candidate.id === entry.userId);
+    return Array.from(rows.values()).sort((left, right) => right.net - left.net);
+  }, [billById, periodBills, periodRefunds]);
 
-        return {
-          ...entry,
-          userName: user?.name ?? t("common.notAvailable"),
-          netSales: entry.grossSales - entry.refunds
-        };
-      })
-      .sort((left, right) => right.netSales - left.netSales);
-  }, [
-    currentShop,
-    selectedRange.dateFrom,
-    selectedRange.dateTo,
-    state.bills,
-    state.refunds,
-    state.users,
-    t,
-    timeZone
-  ]);
+  const employeePerformance = useMemo(() => {
+    const rows = new Map<string, { billCount: number; gross: number; name: string; productMap: Map<string, number>; refunds: number; net: number }>();
+
+    periodBills.forEach((bill) => {
+      const user = state.users.find((candidate) => candidate.id === bill.cashierId);
+      const entry = rows.get(bill.cashierId) ?? {
+        name: user?.name ?? "Unknown employee",
+        billCount: 0,
+        gross: 0,
+        refunds: 0,
+        net: 0,
+        productMap: new Map<string, number>()
+      };
+
+      entry.billCount += 1;
+      entry.gross += bill.total;
+      entry.net += bill.total;
+      periodBillItems
+        .filter((item) => item.billId === bill.id)
+        .forEach((item) => {
+          const name = localizedName(item.productName, locale);
+          entry.productMap.set(name, (entry.productMap.get(name) ?? 0) + item.quantity);
+        });
+      rows.set(bill.cashierId, entry);
+    });
+
+    periodRefunds.forEach((refund) => {
+      const entry = rows.get(refund.createdBy) ?? {
+        name: state.users.find((candidate) => candidate.id === refund.createdBy)?.name ?? "Unknown employee",
+        billCount: 0,
+        gross: 0,
+        refunds: 0,
+        net: 0,
+        productMap: new Map<string, number>()
+      };
+
+      entry.refunds += Math.abs(refund.amount);
+      entry.net -= Math.abs(refund.amount);
+      rows.set(refund.createdBy, entry);
+    });
+
+    return Array.from(rows.entries())
+      .map(([userId, row]) => ({
+        userId,
+        ...row,
+        products: Array.from(row.productMap.entries())
+          .sort((left, right) => right[1] - left[1])
+          .slice(0, 5)
+          .map(([name, quantity]) => `${name} x ${quantity}`)
+          .join(", ")
+      }))
+      .sort((left, right) => right.net - left.net);
+  }, [locale, periodBillItems, periodBills, periodRefunds, state.users]);
 
   const inventoryProducts = useMemo(
     () =>
       state.products
         .filter((product) => product.shopId === currentShop?.id && product.kind === "product")
-        .sort((left, right) => left.name.en.localeCompare(right.name.en)),
-    [currentShop?.id, state.products]
+        .sort((left, right) => localizedName(left.name, locale).localeCompare(localizedName(right.name, locale))),
+    [currentShop?.id, locale, state.products]
   );
 
   const inventorySummary = useMemo(
@@ -433,76 +574,203 @@ export function ReportsOverview() {
     [inventoryProducts]
   );
 
-  const highestValueProducts = useMemo(
+  const inventoryByCategory = useMemo(() => {
+    const rows = new Map<string, { cost: number; name: string; products: number; units: number; value: number }>();
+
+    inventoryProducts.forEach((product) => {
+      const category = product.categoryId ? categoryById.get(product.categoryId) : undefined;
+      const key = category?.id ?? "uncategorized";
+      const entry = rows.get(key) ?? {
+        name: category?.name ?? "No category",
+        products: 0,
+        units: 0,
+        cost: 0,
+        value: 0
+      };
+
+      entry.products += 1;
+      entry.units += product.stockQuantity;
+      entry.cost += product.stockQuantity * product.costPrice;
+      entry.value += product.stockQuantity * product.salePrice;
+      rows.set(key, entry);
+    });
+
+    return Array.from(rows.values()).sort((left, right) => right.cost - left.cost);
+  }, [categoryById, inventoryProducts]);
+
+  const purchaseOrdersInRange = useMemo(
     () =>
-      [...inventoryProducts]
-        .sort(
-          (left, right) =>
-            right.stockQuantity * right.costPrice - left.stockQuantity * left.costPrice
-        )
-        .slice(0, 6),
-    [inventoryProducts]
+      state.purchaseOrders.filter((order) => {
+        if (order.shopId !== currentShop?.id) {
+          return false;
+        }
+
+        const businessDate = getEntryBusinessDate(order.createdAt, timeZone);
+        return isInRange(businessDate, selectedRange.dateFrom, selectedRange.dateTo);
+      }),
+    [currentShop?.id, selectedRange.dateFrom, selectedRange.dateTo, state.purchaseOrders, timeZone]
   );
 
-  const filteredRefunds = useMemo(
+  const supplierSummary = useMemo(() => {
+    const rows = new Map<
+      string,
+      {
+        balance: number;
+        name: string;
+        orderCount: number;
+        ordered: number;
+        paid: number;
+        receivedQuantity: number;
+      }
+    >();
+
+    const ensure = (supplier?: Supplier, fallbackName = "General supplier") => {
+      const key = supplier?.id ?? fallbackName;
+      const entry = rows.get(key) ?? {
+        name: supplier?.name ?? fallbackName,
+        balance: supplier?.accountBalance ?? 0,
+        orderCount: 0,
+        ordered: 0,
+        paid: 0,
+        receivedQuantity: 0
+      };
+      rows.set(key, entry);
+      return entry;
+    };
+
+    state.suppliers
+      .filter((supplier) => supplier.shopId === currentShop?.id)
+      .forEach((supplier) => ensure(supplier));
+
+    purchaseOrdersInRange.forEach((order) => {
+      const supplier = order.supplierId ? supplierById.get(order.supplierId) : undefined;
+      const entry = ensure(supplier, order.supplierName || "General supplier");
+
+      entry.orderCount += 1;
+      entry.ordered += order.totalAmount ?? 0;
+      entry.paid += order.paidAmount ?? 0;
+    });
+
+    state.purchaseOrderItems.forEach((item) => {
+      const order = purchaseOrdersInRange.find((candidate) => candidate.id === item.purchaseOrderId);
+      if (!order) {
+        return;
+      }
+
+      const supplier = order.supplierId ? supplierById.get(order.supplierId) : undefined;
+      const entry = ensure(supplier, order.supplierName || "General supplier");
+      entry.receivedQuantity += item.receivedQuantity ?? 0;
+    });
+
+    return Array.from(rows.values()).sort((left, right) => right.ordered - left.ordered);
+  }, [currentShop?.id, purchaseOrdersInRange, state.purchaseOrderItems, state.suppliers, supplierById]);
+
+  const refundsByItem = useMemo(() => {
+    const rows = new Map<string, { amount: number; category: string; name: string; profit: number; quantity: number }>();
+
+    periodRefundItems.forEach((item) => {
+      const product = productById.get(item.productId);
+      const category = product?.categoryId ? categoryById.get(product.categoryId) : undefined;
+      const entry = rows.get(item.productId) ?? {
+        name: localizedName(item.productName, locale),
+        category: category?.name ?? "No category",
+        amount: 0,
+        profit: 0,
+        quantity: 0
+      };
+
+      entry.quantity += item.quantity;
+      entry.amount += Math.abs(item.refundAmount);
+      entry.profit += Math.abs(item.profitAdjustment);
+      rows.set(item.productId, entry);
+    });
+
+    return Array.from(rows.values()).sort((left, right) => right.amount - left.amount);
+  }, [categoryById, locale, periodRefundItems, productById]);
+
+  const refundsByCategory = useMemo(() => {
+    const rows = new Map<string, { amount: number; items: number; name: string; profit: number; quantity: number }>();
+
+    refundsByItem.forEach((item) => {
+      const entry = rows.get(item.category) ?? {
+        name: item.category,
+        items: 0,
+        quantity: 0,
+        amount: 0,
+        profit: 0
+      };
+
+      entry.items += 1;
+      entry.quantity += item.quantity;
+      entry.amount += item.amount;
+      entry.profit += item.profit;
+      rows.set(item.category, entry);
+    });
+
+    return Array.from(rows.values()).sort((left, right) => right.amount - left.amount);
+  }, [refundsByItem]);
+
+  const dayReportRows = useMemo(() => {
+    const rows = new Map<string, { bills: number; expenses: number; refunds: number; sales: number; shifts: number }>();
+    const ensure = (businessDate: string) => {
+      const entry = rows.get(businessDate) ?? {
+        bills: 0,
+        sales: 0,
+        refunds: 0,
+        expenses: 0,
+        shifts: 0
+      };
+      rows.set(businessDate, entry);
+      return entry;
+    };
+
+    periodBills.forEach((bill) => {
+      const entry = ensure(getEntryBusinessDate(bill.createdAt, timeZone, bill.businessDate));
+      entry.bills += 1;
+      entry.sales += bill.total;
+    });
+    periodRefunds.forEach((refund) => {
+      ensure(getEntryBusinessDate(refund.returnDate, timeZone, refund.businessDate)).refunds += Math.abs(refund.amount);
+    });
+    periodExpenses.forEach((expense) => {
+      ensure(expense.businessDate).expenses += expense.amount;
+    });
+    periodShifts.forEach((shift) => {
+      ensure(shift.businessDate).shifts += 1;
+    });
+
+    return Array.from(rows.entries())
+      .map(([businessDate, row]) => ({
+        businessDate,
+        ...row,
+        net: row.sales - row.refunds - row.expenses
+      }))
+      .sort((left, right) => right.businessDate.localeCompare(left.businessDate));
+  }, [periodBills, periodExpenses, periodRefunds, periodShifts, timeZone]);
+
+  const shiftReportRows = useMemo(
     () =>
-      state.refunds
-        .filter((refund) => {
-          if (!currentShop || refund.shopId !== currentShop.id) {
-            return false;
-          }
+      periodShifts.map((shift) => {
+        const summary = calculateShiftSummary({
+          shift,
+          bills: state.bills,
+          cashMovements: state.cashMovements,
+          refunds: state.refunds
+        });
+        const cashier = state.users.find((user) => user.id === shift.cashierId);
 
-          const businessDate = getEntryBusinessDate(refund.returnDate, timeZone, refund.businessDate);
-
-          return businessDate >= selectedRange.dateFrom && businessDate <= selectedRange.dateTo;
-        })
-        .sort((left, right) => new Date(right.returnDate).getTime() - new Date(left.returnDate).getTime()),
-    [currentShop, selectedRange.dateFrom, selectedRange.dateTo, state.refunds, timeZone]
+        return {
+          shift,
+          cashierName: cashier?.name ?? "Unknown cashier",
+          summary
+        };
+      }),
+    [periodShifts, state.bills, state.cashMovements, state.refunds, state.users]
   );
 
   const taxSummary = useMemo(() => {
-    const emptySummary = {
-      invoiceTax: 0,
-      refundTax: 0,
-      netPayableTax: 0,
-      customerPaidTax: 0,
-      customerDueTax: 0,
-      authorityPaidTax: 0,
-      remainingPayableTax: 0,
-      cashTax: 0,
-      cardTax: 0,
-      accountTax: 0,
-      cashRefundTax: 0,
-      cardRefundTax: 0,
-      accountRefundTax: 0,
-      billCount: 0,
-      refundCount: 0
-    };
-
-    if (!currentShop) {
-      return emptySummary;
-    }
-
-    const periodBills = state.bills.filter((bill) => {
-      if (bill.shopId !== currentShop.id || bill.status === "cancelled") {
-        return false;
-      }
-
-      const businessDate = getEntryBusinessDate(bill.createdAt, timeZone, bill.businessDate);
-
-      return businessDate >= selectedRange.dateFrom && businessDate <= selectedRange.dateTo;
-    });
-    const periodRefunds = state.refunds.filter((refund) => {
-      if (refund.shopId !== currentShop.id) {
-        return false;
-      }
-
-      const businessDate = getEntryBusinessDate(refund.returnDate, timeZone, refund.businessDate);
-
-      return businessDate >= selectedRange.dateFrom && businessDate <= selectedRange.dateTo;
-    });
-    const refundTaxAmount = (refund: (typeof periodRefunds)[number]) => {
-      const originalBill = state.bills.find((bill) => bill.id === refund.originalBillId);
+    const refundTaxAmount = (refund: Refund) => {
+      const originalBill = billById.get(refund.originalBillId);
 
       if (!originalBill || originalBill.total <= 0 || originalBill.taxAmount <= 0) {
         return 0;
@@ -518,56 +786,22 @@ export function ReportsOverview() {
           return sum;
         }
 
-        const paidRatio = Math.min(Math.max(bill.paidAmount, 0), bill.total) / bill.total;
-
-        return sum + bill.taxAmount * paidRatio;
+        return sum + bill.taxAmount * (Math.min(Math.max(bill.paidAmount, 0), bill.total) / bill.total);
       }, 0)
     );
-    const cashTax = roundMoney(
-      periodBills.filter((bill) => bill.paymentMethod === "cash").reduce((sum, bill) => sum + bill.taxAmount, 0)
-    );
-    const cardTax = roundMoney(
-      periodBills.filter((bill) => bill.paymentMethod === "card").reduce((sum, bill) => sum + bill.taxAmount, 0)
-    );
-    const accountTax = roundMoney(
-      periodBills.filter((bill) => bill.paymentMethod === "account").reduce((sum, bill) => sum + bill.taxAmount, 0)
-    );
-    const cashRefundTax = roundMoney(
-      periodRefunds.filter((refund) => refund.paymentMethod === "cash").reduce((sum, refund) => sum + refundTaxAmount(refund), 0)
-    );
-    const cardRefundTax = roundMoney(
-      periodRefunds.filter((refund) => refund.paymentMethod === "card").reduce((sum, refund) => sum + refundTaxAmount(refund), 0)
-    );
-    const accountRefundTax = roundMoney(
-      periodRefunds.filter((refund) => refund.paymentMethod === "account").reduce((sum, refund) => sum + refundTaxAmount(refund), 0)
-    );
     const netPayableTax = roundMoney(invoiceTax - refundTax);
+    const cashTax = roundMoney(periodBills.filter((bill) => bill.paymentMethod === "cash").reduce((sum, bill) => sum + bill.taxAmount, 0));
+    const cardTax = roundMoney(periodBills.filter((bill) => bill.paymentMethod === "card").reduce((sum, bill) => sum + bill.taxAmount, 0));
+    const accountTax = roundMoney(periodBills.filter((bill) => bill.paymentMethod === "account").reduce((sum, bill) => sum + bill.taxAmount, 0));
+    const cashRefundTax = roundMoney(periodRefunds.filter((refund) => refund.paymentMethod === "cash").reduce((sum, refund) => sum + refundTaxAmount(refund), 0));
+    const cardRefundTax = roundMoney(periodRefunds.filter((refund) => refund.paymentMethod === "card").reduce((sum, refund) => sum + refundTaxAmount(refund), 0));
+    const accountRefundTax = roundMoney(periodRefunds.filter((refund) => refund.paymentMethod === "account").reduce((sum, refund) => sum + refundTaxAmount(refund), 0));
     const taxCashOutPayments = roundMoney(
-      state.cashMovements
-        .filter(
-          (movement) =>
-            movement.shopId === currentShop.id &&
-            movement.type === "cash_out" &&
-            movement.businessDate >= selectedRange.dateFrom &&
-            movement.businessDate <= selectedRange.dateTo &&
-            isTaxAuthorityPaymentText(movement.reason)
-        )
+      periodMovements
+        .filter((movement) => movement.type === "cash_out" && isTaxAuthorityPaymentText(movement.reason))
         .reduce((sum, movement) => sum + movement.amount, 0)
     );
-    const taxLedgerPayments = roundMoney(
-      state.ledgerEntries
-        .filter(
-          (entry) =>
-            entry.shopId === currentShop.id &&
-            entry.referenceType === "cash_movement" &&
-            entry.debit > 0 &&
-            entry.businessDate >= selectedRange.dateFrom &&
-            entry.businessDate <= selectedRange.dateTo &&
-            isTaxAuthorityPaymentText(`${entry.accountName} ${entry.memo}`)
-        )
-        .reduce((sum, entry) => sum + entry.debit, 0)
-    );
-    const authorityPaidTax = roundMoney(Math.min(netPayableTax, Math.max(taxCashOutPayments, taxLedgerPayments)));
+    const authorityPaidTax = roundMoney(Math.min(netPayableTax, taxCashOutPayments));
 
     return {
       invoiceTax,
@@ -582,20 +816,9 @@ export function ReportsOverview() {
       accountTax,
       cashRefundTax,
       cardRefundTax,
-      accountRefundTax,
-      billCount: periodBills.length,
-      refundCount: periodRefunds.length
+      accountRefundTax
     };
-  }, [
-    currentShop,
-    selectedRange.dateFrom,
-    selectedRange.dateTo,
-    state.bills,
-    state.cashMovements,
-    state.ledgerEntries,
-    state.refunds,
-    timeZone
-  ]);
+  }, [billById, periodBills, periodMovements, periodRefunds]);
 
   const filteredLedgerEntries = useMemo(
     () =>
@@ -603,22 +826,13 @@ export function ReportsOverview() {
         .filter(
           (entry) =>
             entry.shopId === currentShop?.id &&
-            entry.businessDate >= selectedRange.dateFrom &&
-            entry.businessDate <= selectedRange.dateTo
+            isInRange(entry.businessDate, selectedRange.dateFrom, selectedRange.dateTo)
         )
         .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
     [currentShop?.id, selectedRange.dateFrom, selectedRange.dateTo, state.ledgerEntries]
   );
-
-  const ledgerControlTotals = useMemo(
-    () => getLedgerControlTotals(filteredLedgerEntries),
-    [filteredLedgerEntries]
-  );
-
-  const ledgerAccountRows = useMemo(
-    () => summarizeLedgerByAccount(filteredLedgerEntries),
-    [filteredLedgerEntries]
-  );
+  const ledgerControlTotals = useMemo(() => getLedgerControlTotals(filteredLedgerEntries), [filteredLedgerEntries]);
+  const ledgerAccountRows = useMemo(() => summarizeLedgerByAccount(filteredLedgerEntries), [filteredLedgerEntries]);
 
   const profitTaxView = useMemo(
     () => ({
@@ -630,142 +844,374 @@ export function ReportsOverview() {
     [financialSummary, taxSummary]
   );
 
-  const handleDownloadProfitLoss = async () => {
-    if (!financialSummary || !currentShop || !hasSummaryActivity(financialSummary)) {
-      setExportFeedback(t("reports.exportUnavailable"));
-      return;
+  const hasRangeData =
+    periodBills.length > 0 || periodRefunds.length > 0 || periodExpenses.length > 0 || periodMovements.length > 0;
+
+  const reportTabs: Array<{
+    href: string;
+    icon: React.ReactNode;
+    label: string;
+    view: ReportView;
+  }> = [
+    { href: "/reports", icon: <BarChart3 className="h-4 w-4" />, label: "Overview", view: "overview" },
+    { href: "/reports?view=sales", icon: <ShoppingBag className="h-4 w-4" />, label: "Sales", view: "sales" },
+    { href: "/reports?view=profit", icon: <WalletCards className="h-4 w-4" />, label: "Profit / Loss", view: "profit" },
+    { href: "/reports?view=employee", icon: <Users2 className="h-4 w-4" />, label: "Employees", view: "employee" },
+    { href: "/reports?view=dayShift", icon: <CalendarDays className="h-4 w-4" />, label: "Day / Shift", view: "dayShift" },
+    { href: "/reports?view=inventory", icon: <Boxes className="h-4 w-4" />, label: "Inventory", view: "inventory" },
+    { href: "/reports?view=suppliers", icon: <Truck className="h-4 w-4" />, label: "Suppliers", view: "suppliers" },
+    { href: "/reports?view=expenses", icon: <WalletCards className="h-4 w-4" />, label: "Expenses / Drawer", view: "expenses" },
+    { href: "/reports?view=refunds", icon: <ReceiptText className="h-4 w-4" />, label: "Refunds", view: "refunds" },
+    { href: "/reports?view=tax", icon: <ReceiptText className="h-4 w-4" />, label: "Tax", view: "tax" }
+  ];
+
+  const reportTitles: Record<ReportView, string> = {
+    overview: "Management Overview Report",
+    sales: "Sales Report",
+    profit: "Profit & Loss Report",
+    employee: "Sales by Employee Report",
+    dayShift: "Day and Shift Report",
+    inventory: "Inventory Report",
+    suppliers: "Supplier Purchase Report",
+    expenses: "Expenses and Drawer Report",
+    refunds: "Refund Report",
+    tax: "Tax Payable Report"
+  };
+
+  const summaryRows = (rows: MoneyRow[]): StructuredReportSection => ({
+    title: "Executive summary",
+    rows
+  });
+
+  const buildReportSections = (view: ReportView): StructuredReportSection[] => {
+    const money = (value: number) => formatCurrency(value, currency, "en");
+    const salesSummary: MoneyRow[] = [
+      { label: "Gross sales", value: money(financialSummary?.grossSales ?? 0) },
+      { label: "Refunds", value: money(-(financialSummary?.refunds ?? 0)) },
+      { label: "Net sales", value: money(financialSummary?.netSales ?? 0) },
+      { label: "Gross profit", value: money(financialSummary?.grossProfit ?? 0) },
+      { label: "Expenses", value: money(-(financialSummary?.expenses ?? 0)) },
+      { label: "Net profit", value: money(financialSummary?.netProfit ?? 0) }
+    ];
+
+    const salesSections: StructuredReportSection[] = [
+      summaryRows(salesSummary),
+      {
+        title: "Sales by item",
+        rows:
+          salesByItem.length > 0
+            ? compactRows(salesByItem, 40).map((row) => ({
+                label: row.name,
+                value: money(row.net),
+                detail: `${row.quantity} sold | refunds ${money(-row.refunds)} | profit ${money(row.profit)}`
+              }))
+            : [{ label: "No item sales", value: "-" }]
+      },
+      {
+        title: "Sales by category",
+        rows:
+          salesByCategory.length > 0
+            ? compactRows(salesByCategory, 30).map((row) => ({
+                label: row.name,
+                value: money(row.net),
+                detail: `${row.quantity} items | refunds ${money(-row.refunds)}`
+              }))
+            : [{ label: "No category sales", value: "-" }]
+      },
+      {
+        title: "Sales by customer",
+        rows:
+          salesByCustomer.length > 0
+            ? compactRows(salesByCustomer, 30).map((row) => ({
+                label: row.name,
+                value: money(row.net),
+                detail: `${row.billCount} bills${row.phone ? ` | ${row.phone}` : ""}`
+              }))
+            : [{ label: "No customer sales", value: "-" }]
+      }
+    ];
+
+    if (view === "sales") {
+      return salesSections;
     }
 
-    setIsExporting(true);
-    setExportFeedback(null);
+    if (view === "profit") {
+      return [
+        summaryRows([
+          ...salesSummary,
+          { label: "Gross sales excluding VAT", value: money(profitTaxView.grossSalesExcludingTax) },
+          { label: "Net sales excluding VAT", value: money(profitTaxView.netSalesExcludingTax) },
+          { label: "Net profit after remaining VAT payable", value: money(profitTaxView.profitAfterVatPayable) }
+        ]),
+        {
+          title: "VAT and profit view",
+          rows: [
+            { label: "Invoice VAT", value: money(taxSummary.invoiceTax) },
+            { label: "VAT reversed from refunds", value: money(-taxSummary.refundTax) },
+            { label: "Remaining VAT payable", value: money(taxSummary.remainingPayableTax) },
+            { label: "Profit before VAT payable", value: money(profitTaxView.profitBeforeVatPayable) },
+            { label: "Profit after VAT payable", value: money(profitTaxView.profitAfterVatPayable) }
+          ]
+        },
+        {
+          title: "Ledger control",
+          rows: [
+            { label: "Total debits", value: money(ledgerControlTotals.debit) },
+            { label: "Total credits", value: money(ledgerControlTotals.credit) },
+            { label: "Difference", value: money(ledgerControlTotals.difference) },
+            { label: "Ledger rows", value: String(filteredLedgerEntries.length) }
+          ]
+        },
+        {
+          title: "Ledger by account",
+          rows:
+            ledgerAccountRows.length > 0
+              ? compactRows(ledgerAccountRows, 30).map((entry) => ({
+                  label: `${entry.accountCode} ${entry.accountName}`,
+                  value: `Dr ${money(entry.debit)} | Cr ${money(entry.credit)}`,
+                  detail: `Net ${money(entry.net)}`
+                }))
+              : [{ label: "No ledger rows", value: "-" }]
+        }
+      ];
+    }
 
-    try {
-      const pdfBlob = await createStructuredReportPdfBlob({
-        generatedAt: formatDateTime(new Date().toISOString(), "en"),
-        logoUrl: currentSettings?.pos.logoUrl,
-        period: selectedRangeLabel,
-        shopName: currentShop.name,
-        subtitle: "Accounting report with sales, refunds, VAT, receivables, expense, and ledger controls",
-        title: "Profit & Loss Accounting Report",
-        sections: [
-          {
-            title: "Executive summary",
-            rows: [
-              { label: "Gross sales", value: formatCurrency(financialSummary.grossSales, currency, "en") },
-              { label: "Gross sales excluding VAT", value: formatCurrency(profitTaxView.grossSalesExcludingTax, currency, "en") },
-              { label: "Refunds and returns", value: formatCurrency(-financialSummary.refunds, currency, "en") },
-              { label: "Net sales", value: formatCurrency(financialSummary.netSales, currency, "en") },
-              { label: "Net sales excluding VAT", value: formatCurrency(profitTaxView.netSalesExcludingTax, currency, "en") },
-              { label: "Gross profit", value: formatCurrency(financialSummary.grossProfit, currency, "en") },
-              { label: "Expenses", value: formatCurrency(-financialSummary.expenses, currency, "en") },
-              { label: "Net profit before VAT payable", value: formatCurrency(profitTaxView.profitBeforeVatPayable, currency, "en") },
-              {
-                label: "Net profit after remaining VAT payable",
-                value: formatCurrency(profitTaxView.profitAfterVatPayable, currency, "en")
-              }
-            ]
-          },
-          {
-            title: "VAT payable and profit view",
-            rows: [
-              { label: "Invoice VAT", value: formatCurrency(taxSummary.invoiceTax, currency, "en") },
-              { label: "VAT reversed from refunds", value: formatCurrency(-taxSummary.refundTax, currency, "en") },
-              { label: "Net VAT payable", value: formatCurrency(taxSummary.netPayableTax, currency, "en") },
-              {
-                label: "VAT paid to authority",
-                value: formatCurrency(taxSummary.authorityPaidTax, currency, "en"),
-                detail: "Detected from VAT/tax cash-out or ledger rows in this period."
-              },
-              { label: "Remaining VAT payable", value: formatCurrency(taxSummary.remainingPayableTax, currency, "en") },
-              {
-                label: "Profit after remaining VAT payable",
-                value: formatCurrency(profitTaxView.profitAfterVatPayable, currency, "en")
-              }
-            ]
-          },
-          {
-            title: "Sales and returns movement",
-            rows: [
-              { label: "Bill count", value: String(financialSummary.billCount) },
-              { label: "Refund count", value: String(financialSummary.refundCount) },
-              {
-                label: "Returns from previous days",
-                value: formatCurrency(-financialSummary.returnsFromPreviousDays, currency, "en"),
-                detail: "Shown in the return date period without editing the original sale date."
-              },
-              { label: "Same-day returns", value: formatCurrency(-financialSummary.sameDayReturns, currency, "en") },
-              { label: "Profit adjustments from returns", value: formatCurrency(-financialSummary.profitAdjustments, currency, "en") }
-            ]
-          },
-          {
-            title: "Payment, receivable, and refund split",
-            rows: [
-              { label: "Cash sales", value: formatCurrency(financialSummary.cashSales, currency, "en") },
-              { label: "Card sales", value: formatCurrency(financialSummary.cardSales, currency, "en") },
-              { label: "Account / pay later sales", value: formatCurrency(financialSummary.accountSales, currency, "en") },
-              { label: "Cash refunds", value: formatCurrency(-financialSummary.cashRefunds, currency, "en") },
-              { label: "Card refunds", value: formatCurrency(-financialSummary.cardRefunds, currency, "en") },
-              { label: "Account refunds", value: formatCurrency(-financialSummary.accountRefunds, currency, "en") }
-            ]
-          },
-          {
-            title: "Ledger control totals",
-            rows: [
-              { label: "Total debits", value: formatCurrency(ledgerControlTotals.debit, currency, "en") },
-              { label: "Total credits", value: formatCurrency(ledgerControlTotals.credit, currency, "en") },
-              {
-                label: "Trial balance difference",
-                value: formatCurrency(ledgerControlTotals.difference, currency, "en"),
-                detail: ledgerControlTotals.difference === 0 ? "Balanced for this report period." : "Review ledger rows before closing accounts."
-              },
-              { label: "Ledger rows", value: String(filteredLedgerEntries.length) }
-            ]
-          },
-          {
-            title: "Ledger by account",
-            rows:
-              ledgerAccountRows.length > 0
-                ? ledgerAccountRows.map((entry) => ({
-                    label: `${entry.accountCode} ${entry.accountName}`,
-                    value: `Dr ${formatCurrency(entry.debit, currency, "en")} | Cr ${formatCurrency(entry.credit, currency, "en")}`,
-                    detail: `Net ${formatCurrency(entry.net, currency, "en")}`
-                  }))
-                : [{ label: "No ledger rows", value: "-" }]
-          },
-          {
-            title: "Refund audit trail",
-            rows:
-              filteredRefunds.length > 0
-                ? filteredRefunds.slice(0, 24).map((refund) => {
-                    const originalBill = state.bills.find((entry) => entry.id === refund.originalBillId);
+    if (view === "employee") {
+      return [
+        summaryRows([
+          { label: "Employees with sales", value: String(employeePerformance.length) },
+          { label: "Total bills", value: String(periodBills.length) },
+          { label: "Net sales", value: money(financialSummary?.netSales ?? 0) }
+        ]),
+        {
+          title: "Employee performance",
+          rows:
+            employeePerformance.length > 0
+              ? employeePerformance.map((row) => ({
+                  label: `${row.name} (${row.billCount} bills)`,
+                  value: money(row.net),
+                  detail: `Gross ${money(row.gross)} | Refunds ${money(-row.refunds)} | Products ${row.products || "-"}`
+                }))
+              : [{ label: "No employee sales", value: "-" }]
+        }
+      ];
+    }
 
-                    return {
-                      label: `${originalBill?.number ?? refund.originalBillId} | ${formatDateTime(refund.returnDate, "en")}`,
-                      value: formatCurrency(refund.amount, currency, "en"),
-                      detail: `${refund.reason} | original sale ${refund.originalSaleDate}`
-                    };
-                  })
-                : [{ label: "No refunds in this period", value: "-" }]
-          }
+    if (view === "dayShift") {
+      return [
+        {
+          title: "Day report",
+          rows:
+            dayReportRows.length > 0
+              ? dayReportRows.map((row) => ({
+                  label: formatBusinessDate(row.businessDate, "en"),
+                  value: money(row.net),
+                  detail: `${row.bills} bills | sales ${money(row.sales)} | refunds ${money(-row.refunds)} | shifts ${row.shifts}`
+                }))
+              : [{ label: "No day data", value: "-" }]
+        },
+        {
+          title: "Shift report",
+          rows:
+            shiftReportRows.length > 0
+              ? compactRows(shiftReportRows, 40).map((row) => ({
+                  label: `${row.cashierName} | ${formatDateTime(row.shift.startedAt, "en")}`,
+                  value: money(row.summary.expectedCash),
+                  detail: `${row.shift.endedAt ? "Closed" : "Open"} | cash sales ${money(row.summary.cashSales)} | difference ${money(row.summary.difference ?? 0)}`
+                }))
+              : [{ label: "No shift data", value: "-" }]
+        }
+      ];
+    }
+
+    if (view === "inventory") {
+      return [
+        summaryRows([
+          { label: "Stock products", value: String(inventorySummary.itemCount) },
+          { label: "Units on hand", value: String(inventorySummary.unitsOnHand) },
+          { label: "Cost value", value: money(inventorySummary.costValue) },
+          { label: "Sales value", value: money(inventorySummary.salesValue) },
+          { label: "Low stock items", value: String(inventorySummary.lowStockCount) }
+        ]),
+        {
+          title: "Inventory by category",
+          rows:
+            inventoryByCategory.length > 0
+              ? inventoryByCategory.map((row) => ({
+                  label: row.name,
+                  value: money(row.cost),
+                  detail: `${row.products} products | ${row.units} units | sale value ${money(row.value)}`
+                }))
+              : [{ label: "No inventory", value: "-" }]
+        },
+        {
+          title: "Low stock",
+          rows:
+            lowStockProducts.length > 0
+              ? lowStockProducts.map((product) => ({
+                  label: localizedName(product.name, "en"),
+                  value: `${product.stockQuantity} / ${product.reorderLevel}`,
+                  detail: `Cost ${money(product.costPrice)} | Sale ${money(product.salePrice)}`
+                }))
+              : [{ label: "Inventory healthy", value: "-" }]
+        }
+      ];
+    }
+
+    if (view === "suppliers") {
+      return [
+        summaryRows([
+          { label: "Suppliers", value: String(supplierSummary.length) },
+          { label: "Purchase orders", value: String(purchaseOrdersInRange.length) },
+          { label: "Ordered amount", value: money(supplierSummary.reduce((sum, row) => sum + row.ordered, 0)) },
+          { label: "Paid amount", value: money(supplierSummary.reduce((sum, row) => sum + row.paid, 0)) }
+        ]),
+        {
+          title: "Supplier summary",
+          rows:
+            supplierSummary.length > 0
+              ? supplierSummary.map((row) => ({
+                  label: row.name,
+                  value: money(row.ordered),
+                  detail: `${row.orderCount} POs | paid ${money(row.paid)} | balance ${money(row.balance)} | received ${row.receivedQuantity}`
+                }))
+              : [{ label: "No supplier activity", value: "-" }]
+        },
+        {
+          title: "Purchase orders",
+          rows:
+            purchaseOrdersInRange.length > 0
+              ? compactRows(purchaseOrdersInRange, 40).map((order) => ({
+                  label: `${order.number} | ${order.supplierName}`,
+                  value: money(order.totalAmount ?? 0),
+                  detail: `${order.status} | paid ${money(order.paidAmount ?? 0)} | ${formatDateTime(order.createdAt, "en")}`
+                }))
+              : [{ label: "No purchase orders", value: "-" }]
+        }
+      ];
+    }
+
+    if (view === "expenses") {
+      return [
+        summaryRows([
+          { label: "Total expenses", value: money(expenseReportSummary.totalExpenses) },
+          { label: "Cash expenses", value: money(expenseReportSummary.cashExpenses) },
+          { label: "Card expenses", value: money(expenseReportSummary.cardExpenses) },
+          { label: "Bank expenses", value: money(expenseReportSummary.bankExpenses) },
+          { label: "Cash in", value: money(expenseReportSummary.cashIn) },
+          { label: "Cash out", value: money(expenseReportSummary.cashOut) }
+        ]),
+        {
+          title: "Expense log",
+          rows:
+            periodExpenses.length > 0
+              ? compactRows(periodExpenses, 50).map((expense) => ({
+                  label: `${expense.categoryName} | ${formatDateTime(expense.createdAt, "en")}`,
+                  value: money(expense.amount),
+                  detail: `${expense.paymentMethod.toUpperCase()}${expense.vendorName ? ` | ${expense.vendorName}` : ""}${expense.note ? ` | ${expense.note}` : ""}`
+                }))
+              : [{ label: "No expenses", value: "-" }]
+        },
+        {
+          title: "Drawer adjustment log",
+          rows:
+            periodMovements.length > 0
+              ? compactRows(periodMovements, 50).map((movement) => ({
+                  label: `${movement.type === "cash_in" ? "Cash in" : "Cash out"} | ${formatDateTime(movement.createdAt, "en")}`,
+                  value: money(movement.amount),
+                  detail: movement.reason
+                }))
+              : [{ label: "No drawer adjustments", value: "-" }]
+        }
+      ];
+    }
+
+    if (view === "refunds") {
+      return [
+        summaryRows([
+          { label: "Refund count", value: String(periodRefunds.length) },
+          { label: "Refund amount", value: money(periodRefunds.reduce((sum, refund) => sum + refund.amount, 0)) },
+          { label: "Profit adjustment", value: money(periodRefunds.reduce((sum, refund) => sum + refund.profitAdjustment, 0)) }
+        ]),
+        {
+          title: "Refunds by category",
+          rows:
+            refundsByCategory.length > 0
+              ? refundsByCategory.map((row) => ({
+                  label: row.name,
+                  value: money(row.amount),
+                  detail: `${row.items} items | ${row.quantity} qty | profit adjustment ${money(row.profit)}`
+                }))
+              : [{ label: "No refund categories", value: "-" }]
+        },
+        {
+          title: "Refunds by item",
+          rows:
+            refundsByItem.length > 0
+              ? compactRows(refundsByItem, 50).map((row) => ({
+                  label: row.name,
+                  value: money(row.amount),
+                  detail: `${row.category} | qty ${row.quantity} | profit adjustment ${money(row.profit)}`
+                }))
+              : [{ label: "No refunded items", value: "-" }]
+        },
+        {
+          title: "Refund audit",
+          rows:
+            periodRefunds.length > 0
+              ? compactRows(periodRefunds, 50).map((refund) => {
+                  const bill = billById.get(refund.originalBillId);
+                  return {
+                    label: `${bill?.number ?? refund.originalBillId} | ${formatDateTime(refund.returnDate, "en")}`,
+                    value: money(refund.amount),
+                    detail: `${refund.reason} | original sale ${refund.originalSaleDate}`
+                  };
+                })
+              : [{ label: "No refunds", value: "-" }]
+        }
+      ];
+    }
+
+    if (view === "tax") {
+      return [
+        summaryRows([
+          { label: "Invoice VAT output", value: money(taxSummary.invoiceTax) },
+          { label: "VAT reversed from refunds", value: money(-taxSummary.refundTax) },
+          { label: "Net VAT payable", value: money(taxSummary.netPayableTax) },
+          { label: "VAT collected from paid bills", value: money(taxSummary.customerPaidTax) },
+          { label: "VAT paid to authority", value: money(taxSummary.authorityPaidTax) },
+          { label: "Remaining VAT payable", value: money(taxSummary.remainingPayableTax) }
+        ]),
+        {
+          title: "VAT by payment method",
+          rows: [
+            { label: "Cash VAT", value: money(taxSummary.cashTax) },
+            { label: "Card VAT", value: money(taxSummary.cardTax) },
+            { label: "Account VAT", value: money(taxSummary.accountTax) },
+            { label: "Cash refund VAT", value: money(-taxSummary.cashRefundTax) },
+            { label: "Card refund VAT", value: money(-taxSummary.cardRefundTax) },
+            { label: "Account refund VAT", value: money(-taxSummary.accountRefundTax) }
+          ]
+        }
+      ];
+    }
+
+    return [
+      summaryRows(salesSummary),
+      {
+        title: "What changed in this period",
+        rows: [
+          { label: "Bills", value: String(periodBills.length) },
+          { label: "Refunds", value: String(periodRefunds.length) },
+          { label: "Expenses", value: String(periodExpenses.length) },
+          { label: "Open/closed shifts", value: String(periodShifts.length) },
+          { label: "Purchase orders", value: String(purchaseOrdersInRange.length) }
         ]
-      });
-
-      downloadBlob(
-        pdfBlob,
-        buildProfitLossFileName(currentShop.name, `${selectedRange.dateFrom}-to-${selectedRange.dateTo}`)
-      );
-      setExportFeedback(t("reports.exportDownloaded"));
-    } finally {
-      setIsExporting(false);
-    }
+      }
+    ];
   };
 
   const handleDownloadCurrentReport = async () => {
-    if (activeView === "profit") {
-      await handleDownloadProfitLoss();
-      return;
-    }
-
     if (!currentShop) {
       return;
     }
@@ -774,1000 +1220,334 @@ export function ReportsOverview() {
     setExportFeedback(null);
 
     try {
-      const titleByView: Record<ReportView, string> = {
-        overview: "Sales Overview Report",
-        profit: "Profit & Loss Report",
-        cashier: "Sales by Employee Report",
-        inventory: "Inventory Report",
-        expenses: "Expenses & Drawer Adjustments Report",
-        refunds: "Refund Report",
-        tax: "Tax Payable Report"
-      };
-      const sections =
-        activeView === "cashier"
-          ? [
-              {
-                title: t("reports.salesByEmployee"),
-                rows:
-                  cashierPerformance.length > 0
-                    ? cashierPerformance.slice(0, 60).map((entry) => ({
-                        label: `${entry.userName} (${entry.billCount})`,
-                        value: formatCurrency(entry.netSales, currency, "en")
-                      }))
-                    : [{ label: t("reports.rangeEmpty"), value: "-" }]
-              },
-              {
-                title: t("reports.cashRegisterTitle"),
-                rows: liveShiftSummary
-                  ? [
-                      { label: t("cashControl.openingCash"), value: formatCurrency(liveShiftSummary.openingCash, currency, "en") },
-                      { label: t("cashControl.cashSales"), value: formatCurrency(liveShiftSummary.cashSales, currency, "en") },
-                      { label: t("cashControl.cashIn"), value: formatCurrency(liveShiftSummary.cashIn, currency, "en") },
-                      { label: t("cashControl.cashOut"), value: formatCurrency(liveShiftSummary.cashOut, currency, "en") },
-                      { label: t("cashControl.expectedCash"), value: formatCurrency(liveShiftSummary.expectedCash, currency, "en") }
-                    ]
-                  : [{ label: t("reports.waitingForShift"), value: "-" }]
-              }
-            ]
-          : activeView === "expenses"
-            ? [
-                {
-                  title: t("reports.expenseReportTitle"),
-                  rows: [
-                    { label: t("reports.expenseCount"), value: String(filteredExpenses.length) },
-                    { label: t("reports.expenseTotal"), value: formatCurrency(expenseReportSummary.totalExpenses, currency, "en") },
-                    { label: t("common.cash"), value: formatCurrency(expenseReportSummary.cashExpenses, currency, "en") },
-                    { label: t("common.card"), value: formatCurrency(expenseReportSummary.cardExpenses, currency, "en") },
-                    { label: t("common.bank"), value: formatCurrency(expenseReportSummary.bankExpenses, currency, "en") }
-                  ]
-                },
-                {
-                  title: t("reports.expenseLog"),
-                  rows:
-                    filteredExpenses.length > 0
-                      ? filteredExpenses.slice(0, 80).map((expense) => ({
-                          label: `${expense.categoryName} | ${formatDateTime(expense.createdAt, "en")}`,
-                          value: formatCurrency(expense.amount, currency, "en"),
-                          detail: `${expense.paymentMethod.toUpperCase()}${expense.vendorName ? ` | ${expense.vendorName}` : ""}${
-                            expense.note ? ` | ${expense.note}` : ""
-                          }`
-                        }))
-                      : [{ label: t("expense.none"), value: "-" }]
-                },
-                {
-                  title: t("reports.drawerAdjustmentReportTitle"),
-                  rows: [
-                    { label: t("cashControl.cashIn"), value: formatCurrency(expenseReportSummary.cashIn, currency, "en") },
-                    { label: t("cashControl.cashOut"), value: formatCurrency(expenseReportSummary.cashOut, currency, "en") },
-                    { label: t("reports.drawerAdjustmentCount"), value: String(filteredMovements.length) }
-                  ]
-                },
-                {
-                  title: t("reports.drawerAdjustmentLog"),
-                  rows:
-                    filteredMovements.length > 0
-                      ? filteredMovements.slice(0, 80).map((movement) => ({
-                          label: `${movement.type === "cash_in" ? t("cashControl.cashIn") : t("cashControl.cashOut")} | ${formatDateTime(
-                            movement.createdAt,
-                            "en"
-                          )}`,
-                          value: formatCurrency(movement.amount, currency, "en"),
-                          detail: movement.reason
-                        }))
-                      : [{ label: t("cashControl.noMovements"), value: "-" }]
-                }
-              ]
-            : activeView === "inventory"
-            ? [
-                {
-                  title: t("reports.inventoryReportTitle"),
-                  rows: [
-                    { label: t("reports.inventoryItems"), value: String(inventorySummary.itemCount) },
-                    { label: t("reports.inventoryUnits"), value: String(inventorySummary.unitsOnHand) },
-                    { label: t("reports.inventoryCostValue"), value: formatCurrency(inventorySummary.costValue, currency, "en") },
-                    { label: t("reports.inventorySalesValue"), value: formatCurrency(inventorySummary.salesValue, currency, "en") },
-                    { label: t("reports.lowStockItems"), value: String(inventorySummary.lowStockCount) }
-                  ]
-                },
-                {
-                  title: t("reports.lowStockItems"),
-                  rows:
-                    lowStockProducts.length > 0
-                      ? lowStockProducts.slice(0, 60).map((product) => ({
-                          label: product.name.en,
-                          value: `${product.stockQuantity} / ${product.reorderLevel}`
-                        }))
-                      : [{ label: t("reports.inventoryHealthy"), value: "-" }]
-                }
-              ]
-            : activeView === "refunds"
-              ? [
-                  {
-                    title: t("reports.refundReportTitle"),
-                    rows: [
-                      { label: t("reports.exportRefundCount"), value: String(filteredRefunds.length) },
-                      {
-                        label: t("reports.refundsTotal"),
-                        value: formatCurrency(filteredRefunds.reduce((sum, refund) => sum + refund.amount, 0), currency, "en")
-                      }
-                    ]
-                  },
-                  {
-                    title: t("reports.refundReportDesc"),
-                    rows:
-                      filteredRefunds.length > 0
-                        ? filteredRefunds.slice(0, 60).map((refund) => {
-                            const bill = state.bills.find((entry) => entry.id === refund.originalBillId);
-
-                            return {
-                              label: `${bill?.number ?? refund.originalBillId} - ${refund.reason}`,
-                              value: formatCurrency(refund.amount, currency, "en")
-                            };
-                          })
-                        : [{ label: t("reports.noRefunds"), value: "-" }]
-                  }
-                ]
-              : [
-                  {
-                    title: t("reports.sectionOverview"),
-                    rows: financialSummary
-                      ? [
-                          { label: t("reports.grossSales"), value: formatCurrency(financialSummary.grossSales, currency, "en") },
-                          { label: t("reports.refundsTotal"), value: formatCurrency(-financialSummary.refunds, currency, "en") },
-                          { label: t("reports.netSalesLabel"), value: formatCurrency(financialSummary.netSales, currency, "en") },
-                          { label: t("cashControl.expenses"), value: formatCurrency(-financialSummary.expenses, currency, "en") },
-                          { label: t("reports.netProfitLabel"), value: formatCurrency(financialSummary.netProfit, currency, "en") },
-                          { label: t("reports.exportBillCount"), value: String(financialSummary.billCount) },
-                          { label: t("reports.exportRefundCount"), value: String(financialSummary.refundCount) }
-                        ]
-                      : [{ label: t("reports.rangeEmpty"), value: "-" }]
-                  }
-                ];
-      const reportSections =
-        activeView === "tax"
-          ? [
-              {
-                title: t("reports.taxReportTitle"),
-                rows: [
-                  { label: t("reports.taxInvoiceOutput"), value: formatCurrency(taxSummary.invoiceTax, currency, "en") },
-                  { label: t("reports.taxReversed"), value: formatCurrency(-taxSummary.refundTax, currency, "en") },
-                  {
-                    label: t("reports.taxNetPayable"),
-                    value: formatCurrency(taxSummary.netPayableTax, currency, "en"),
-                    detail: t("reports.taxNetPayableDesc")
-                  },
-                  {
-                    label: t("reports.taxPaidByCustomers"),
-                    value: formatCurrency(taxSummary.customerPaidTax, currency, "en"),
-                    detail: t("reports.taxPaidByCustomersDesc")
-                  },
-                  {
-                    label: t("reports.taxPaidToAuthority"),
-                    value: formatCurrency(taxSummary.authorityPaidTax, currency, "en"),
-                    detail: t("reports.taxPaidToAuthorityDesc")
-                  },
-                  { label: t("reports.taxRemainingPayable"), value: formatCurrency(taxSummary.remainingPayableTax, currency, "en") }
-                ]
-              },
-              {
-                title: t("reports.taxPaymentSplit"),
-                rows: [
-                  { label: t("common.cash"), value: formatCurrency(taxSummary.cashTax, currency, "en") },
-                  { label: t("common.card"), value: formatCurrency(taxSummary.cardTax, currency, "en") },
-                  { label: t("common.account"), value: formatCurrency(taxSummary.accountTax, currency, "en") },
-                  { label: t("reports.cashRefunds"), value: formatCurrency(-taxSummary.cashRefundTax, currency, "en") },
-                  { label: t("reports.cardRefunds"), value: formatCurrency(-taxSummary.cardRefundTax, currency, "en") },
-                  { label: t("reports.accountRefunds"), value: formatCurrency(-taxSummary.accountRefundTax, currency, "en") }
-                ]
-              },
-              {
-                title: t("reports.exportVolumeSection"),
-                rows: [
-                  { label: t("reports.exportBillCount"), value: String(taxSummary.billCount) },
-                  { label: t("reports.exportRefundCount"), value: String(taxSummary.refundCount) },
-                  { label: t("reports.periodLabel"), value: selectedRangeLabel }
-                ]
-              }
-            ]
-          : sections;
-      const accountingSections = [
-        {
-          title: "Accounting controls",
-          rows: [
-            { label: "Total debits", value: formatCurrency(ledgerControlTotals.debit, currency, "en") },
-            { label: "Total credits", value: formatCurrency(ledgerControlTotals.credit, currency, "en") },
-            {
-              label: "Trial balance difference",
-              value: formatCurrency(ledgerControlTotals.difference, currency, "en"),
-              detail: ledgerControlTotals.difference === 0 ? "Balanced for this report period." : "Review ledger rows before close."
-            },
-            { label: "Ledger rows", value: String(filteredLedgerEntries.length) }
-          ]
-        },
-        {
-          title: "Ledger accounts",
-          rows:
-            ledgerAccountRows.length > 0
-              ? ledgerAccountRows.slice(0, 24).map((entry) => ({
-                  label: `${entry.accountCode} ${entry.accountName}`,
-                  value: `Dr ${formatCurrency(entry.debit, currency, "en")} | Cr ${formatCurrency(entry.credit, currency, "en")}`,
-                  detail: `Net ${formatCurrency(entry.net, currency, "en")}`
-                }))
-              : [{ label: "No ledger rows", value: "-" }]
-        }
-      ];
-
       const pdfBlob = await createStructuredReportPdfBlob({
         generatedAt: formatDateTime(new Date().toISOString(), "en"),
         logoUrl: currentSettings?.pos.logoUrl,
         period: selectedRangeLabel,
-        sections: [...reportSections, ...accountingSections],
+        sections: buildReportSections(activeView),
         shopName: currentShop.name,
-        subtitle: t("reports.rangeSubtitle"),
-        title: titleByView[activeView]
+        subtitle: `${reportTitles[activeView]} for ${selectedRangeLabel}`,
+        title: reportTitles[activeView]
       });
-      const fileShop = currentShop.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "shop";
+      const fileName =
+        activeView === "profit"
+          ? buildProfitLossFileName(currentShop.name, `${selectedRange.dateFrom}-to-${selectedRange.dateTo}`)
+          : `${activeView}-report-${selectedRange.dateFrom}-to-${selectedRange.dateTo}-${toFileSlug(currentShop.name)}.pdf`;
 
-      downloadBlob(pdfBlob, `${activeView}-report-${selectedRange.dateFrom}-to-${selectedRange.dateTo}-${fileShop}.pdf`);
-      setExportFeedback(t("reports.exportDownloaded"));
+      downloadBlob(pdfBlob, fileName);
+      setExportFeedback(`${reportTitles[activeView]} downloaded.`);
     } finally {
       setIsExporting(false);
     }
   };
 
-  const hasRangeData = financialSummary ? hasSummaryActivity(financialSummary) : false;
+  const renderRangeControls = () => (
+    <Card className="p-5">
+      <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-olive">Report period</p>
+          <h2 className="mt-2 font-display text-2xl font-semibold tracking-[-0.04em] text-slate-950">{selectedRangeLabel}</h2>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {([
+            { key: "today", label: "Today" },
+            { key: "yesterday", label: "Yesterday" },
+            { key: "week", label: "This week" },
+            { key: "month", label: "This month" },
+            { key: "year", label: "This year" },
+            { key: "custom", label: "Custom" }
+          ] as const).map((preset) => (
+            <button
+              key={preset.key}
+              className={cn(
+                "h-10 rounded-full px-4 text-sm font-semibold transition",
+                rangePreset === preset.key
+                  ? "bg-slate-950 text-white shadow-[0_18px_32px_rgba(15,23,42,0.12)]"
+                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              )}
+              onClick={() => setRangePreset(preset.key)}
+              type="button"
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {rangePreset === "custom" ? (
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-950">From date</label>
+            <Input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-950">To date</label>
+            <Input type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} />
+          </div>
+        </div>
+      ) : null}
+
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <Button className="h-11 rounded-2xl bg-slate-950 text-white hover:bg-slate-900" disabled={isExporting} onClick={handleDownloadCurrentReport}>
+          <Download className="mr-2 h-4 w-4" />
+          {isExporting ? "Preparing PDF..." : `Download ${reportTitles[activeView]} PDF`}
+        </Button>
+        {exportFeedback ? <p className="text-sm font-medium text-emerald-700">{exportFeedback}</p> : null}
+      </div>
+    </Card>
+  );
+
+  const tableRows = (rows: MoneyRow[]) => (
+    <div className="grid gap-3">
+      {rows.length > 0 ? rows.map((row) => <SummaryRow key={`${row.label}-${row.value}`} {...row} />) : <EmptyReport label="No data for this period." />}
+    </div>
+  );
 
   return (
     <div className="space-y-6">
-      <WorkspaceSectionsNav
-        compact
-        items={[
-          {
-            href: "/reports?view=overview",
-            active: activeView === "overview",
-            label: t("reports.sectionOverview"),
-            description: t("reports.sectionOverviewDesc")
-          },
-          {
-            href: "/reports?view=profit",
-            active: activeView === "profit",
-            label: t("reports.sectionProfitLoss"),
-            description: t("reports.sectionProfitLossDesc")
-          },
-          {
-            href: "/reports?view=cashier",
-            active: activeView === "cashier",
-            label: t("reports.sectionCashier"),
-            description: t("reports.sectionCashierDesc")
-          },
-          {
-            href: "/reports?view=inventory",
-            active: activeView === "inventory",
-            label: t("reports.sectionInventory"),
-            description: t("reports.sectionInventoryDesc")
-          },
-          {
-            href: "/reports?view=expenses",
-            active: activeView === "expenses",
-            label: t("reports.sectionExpenses"),
-            description: t("reports.sectionExpensesDesc")
-          },
-          {
-            href: "/reports?view=refunds",
-            active: activeView === "refunds",
-            label: t("reports.sectionRefunds"),
-            description: t("reports.sectionRefundsDesc")
-          },
-          {
-            href: "/reports?view=tax",
-            active: activeView === "tax",
-            label: t("reports.sectionTax"),
-            description: t("reports.sectionTaxDesc")
-          }
-        ]}
-      />
-
-      <Card className="p-5">
-        <div className="flex flex-col gap-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-olive">
-              {t("reports.rangeTitle")}
-            </p>
-            <h2 className="mt-2 font-display text-2xl font-semibold text-ink">
-              {selectedRangeLabel}
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-slate-600">{t("reports.rangeSubtitle")}</p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {([
-              { key: "today", label: t("common.today") },
-              { key: "yesterday", label: t("common.yesterday") },
-              { key: "week", label: t("common.thisWeek") },
-              { key: "month", label: t("common.thisMonth") },
-              { key: "year", label: t("common.thisYear") },
-              { key: "custom", label: t("common.customRange") }
-            ] as const).map((preset) => (
-              <button
-                key={preset.key}
-                className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                  rangePreset === preset.key
-                    ? "bg-slate-950 text-white shadow-[0_18px_32px_rgba(15,23,42,0.12)]"
-                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                }`}
-                onClick={() => setRangePreset(preset.key)}
-                type="button"
+      <Card className="p-3">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+          {reportTabs.map((item) => (
+            <a
+              key={item.view}
+              className={cn(
+                "flex min-h-[70px] items-center gap-3 rounded-[24px] border px-4 py-3 text-sm font-semibold transition",
+                activeView === item.view
+                  ? "border-slate-950 bg-slate-950 text-white shadow-[0_20px_40px_rgba(15,23,42,0.16)]"
+                  : "border-slate-200 bg-white text-slate-800 hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50"
+              )}
+              href={item.href}
+            >
+              <span
+                className={cn(
+                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl",
+                  activeView === item.view ? "bg-white/12 text-white" : "bg-slate-100 text-slate-700"
+                )}
               >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-
-          {rangePreset === "custom" ? (
-            <div className="grid gap-3 md:grid-cols-2">
-              <div>
-                <label className="mb-2 block text-sm font-medium text-ink">{t("common.fromDate")}</label>
-                <Input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} />
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-medium text-ink">{t("common.toDate")}</label>
-                <Input type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} />
-              </div>
-            </div>
-          ) : null}
-
-          <div className="flex flex-wrap items-center gap-3">
-            <Button className="gap-2" disabled={isExporting} onClick={handleDownloadCurrentReport} variant="secondary">
-              <Download className="h-4 w-4" />
-              {isExporting ? t("common.loading") : t("reports.exportCurrentPdf")}
-            </Button>
-            {exportFeedback ? <p className="text-sm font-medium text-emerald-700">{exportFeedback}</p> : null}
-          </div>
+                {item.icon}
+              </span>
+              {item.label}
+            </a>
+          ))}
         </div>
       </Card>
+
+      {renderRangeControls()}
 
       {activeView === "overview" ? (
         <div className="space-y-6">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard
-              description={t("reports.sectionOverviewDesc")}
-              label={t("reports.grossSales")}
-              value={formatCurrency(financialSummary?.grossSales ?? 0, currency, locale)}
-            />
-            <MetricCard
-              description={t("reports.exportDescription")}
-              label={t("reports.netSalesLabel")}
-              value={formatCurrency(financialSummary?.netSales ?? 0, currency, locale)}
-            />
-            <MetricCard
-              description={t("reports.sectionProfitLossDesc")}
-              label={t("reports.netProfitLabel")}
-              value={formatCurrency(financialSummary?.netProfit ?? 0, currency, locale)}
-            />
-            <MetricCard
-              description={t("reports.salesByEmployeeDesc")}
-              label={t("reports.salesByEmployee")}
-              value={cashierPerformance.length}
-            />
+            <MetricCard accent="green" label="Gross sales" value={formatCurrency(financialSummary?.grossSales ?? 0, currency, locale)} />
+            <MetricCard label="Net sales" value={formatCurrency(financialSummary?.netSales ?? 0, currency, locale)} />
+            <MetricCard accent="blue" label="Net profit" value={formatCurrency(financialSummary?.netProfit ?? 0, currency, locale)} />
+            <MetricCard accent="yellow" label="VAT payable" value={formatCurrency(taxSummary.remainingPayableTax, currency, locale)} />
           </div>
+          <div className="grid gap-6 xl:grid-cols-2">
+            <ReportPanel icon={<ShoppingBag className="h-5 w-5" />} title="Sales pulse">
+              {tableRows([
+                { label: "Bills", value: String(periodBills.length) },
+                { label: "Refunds", value: String(periodRefunds.length) },
+                { label: "Top item", value: salesByItem[0]?.name ?? "-" },
+                { label: "Top customer", value: salesByCustomer[0]?.name ?? "-" }
+              ])}
+            </ReportPanel>
+            <ReportPanel icon={<Boxes className="h-5 w-5" />} title="Stock and supplier pulse">
+              {tableRows([
+                { label: "Stock products", value: String(inventorySummary.itemCount) },
+                { label: "Inventory cost value", value: formatCurrency(inventorySummary.costValue, currency, locale) },
+                { label: "Low stock", value: String(inventorySummary.lowStockCount) },
+                { label: "Supplier orders", value: String(purchaseOrdersInRange.length) }
+              ])}
+            </ReportPanel>
+          </div>
+        </div>
+      ) : null}
 
-          <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-            <Card className="p-6">
-              <div className="flex items-center gap-2">
-                <BarChart3 className="h-5 w-5 text-ink" />
-                <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.sectionProfitLoss")}</h2>
-              </div>
-              {financialSummary && hasRangeData ? (
-                <div className="mt-5 space-y-3">
-                  <SummaryRow label={t("reports.grossSales")} value={formatCurrency(financialSummary.grossSales, currency, locale)} />
-                  <SummaryRow label={t("reports.refundsTotal")} value={formatCurrency(-financialSummary.refunds, currency, locale)} />
-                  <SummaryRow label={t("reports.netSalesLabel")} value={formatCurrency(financialSummary.netSales, currency, locale)} />
-                  <SummaryRow label={t("cashControl.expenses")} value={formatCurrency(-financialSummary.expenses, currency, locale)} />
-                  <SummaryRow label={t("reports.netProfitLabel")} value={formatCurrency(financialSummary.netProfit, currency, locale)} />
-                </div>
-              ) : (
-                <p className="mt-5 text-sm leading-6 text-slate-600">{t("reports.rangeEmpty")}</p>
-              )}
-            </Card>
-
-            <Card className="p-6">
-              <div className="flex items-center gap-2">
-                <Users2 className="h-5 w-5 text-ink" />
-                <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.salesByEmployee")}</h2>
-              </div>
-              <div className="mt-5 space-y-3">
-                {cashierPerformance.length > 0 ? (
-                  cashierPerformance.slice(0, 5).map((entry) => (
-                    <div key={entry.userId} className="rounded-3xl border border-line bg-shell px-4 py-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-ink">{entry.userName}</p>
-                          <p className="mt-1 text-sm text-slate-600">
-                            {entry.billCount} {t("reports.exportBillCount").toLowerCase()}
-                          </p>
-                        </div>
-                        <Badge variant="success">{formatCurrency(entry.netSales, currency, locale)}</Badge>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm leading-6 text-slate-600">{t("reports.rangeEmpty")}</p>
-                )}
-              </div>
-            </Card>
+      {activeView === "sales" ? (
+        <div className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <MetricCard accent="green" label="Total sales" value={formatCurrency(financialSummary?.grossSales ?? 0, currency, locale)} />
+            <MetricCard label="Net sales" value={formatCurrency(financialSummary?.netSales ?? 0, currency, locale)} />
+            <MetricCard label="Bills" value={periodBills.length} />
+            <MetricCard label="Items sold" value={periodBillItems.reduce((sum, item) => sum + item.quantity, 0)} />
+            <MetricCard accent="yellow" label="Refunds" value={formatCurrency(periodRefunds.reduce((sum, refund) => sum + refund.amount, 0), currency, locale)} />
+          </div>
+          <div className="grid gap-6 xl:grid-cols-2">
+            <ReportPanel icon={<Package className="h-5 w-5" />} title="Sales by item">
+              {tableRows(compactRows(salesByItem).map((row) => ({
+                label: row.name,
+                value: formatCurrency(row.net, currency, locale),
+                detail: `${row.quantity} sold | refunds ${formatCurrency(-row.refunds, currency, locale)} | profit ${formatCurrency(row.profit, currency, locale)}`
+              })))}
+            </ReportPanel>
+            <ReportPanel icon={<BarChart3 className="h-5 w-5" />} title="Sales by category">
+              {tableRows(compactRows(salesByCategory).map((row) => ({
+                label: row.name,
+                value: formatCurrency(row.net, currency, locale),
+                detail: `${row.quantity} items | refunds ${formatCurrency(-row.refunds, currency, locale)}`
+              })))}
+            </ReportPanel>
+            <ReportPanel icon={<Users2 className="h-5 w-5" />} title="Sales by customer">
+              {tableRows(compactRows(salesByCustomer).map((row) => ({
+                label: row.name,
+                value: formatCurrency(row.net, currency, locale),
+                detail: `${row.billCount} bills${row.phone ? ` | ${row.phone}` : ""}`
+              })))}
+            </ReportPanel>
+            <ReportPanel icon={<WalletCards className="h-5 w-5" />} title="Payment split">
+              {tableRows([
+                { label: "Cash sales", value: formatCurrency(financialSummary?.cashSales ?? 0, currency, locale) },
+                { label: "Card sales", value: formatCurrency(financialSummary?.cardSales ?? 0, currency, locale) },
+                { label: "Account sales", value: formatCurrency(financialSummary?.accountSales ?? 0, currency, locale) },
+                { label: "Cash refunds", value: formatCurrency(-(financialSummary?.cashRefunds ?? 0), currency, locale) },
+                { label: "Card refunds", value: formatCurrency(-(financialSummary?.cardRefunds ?? 0), currency, locale) },
+                { label: "Account refunds", value: formatCurrency(-(financialSummary?.accountRefunds ?? 0), currency, locale) }
+              ])}
+            </ReportPanel>
           </div>
         </div>
       ) : null}
 
       {activeView === "profit" ? (
         <div className="space-y-6">
-          <Card className="p-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-olive">
-                  {t("reports.exportTitle")}
-                </p>
-                <h2 className="mt-2 font-display text-2xl font-semibold text-ink">
-                  {t("reports.exportProfitLoss")}
-                </h2>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{selectedRangeLabel}</p>
-                {exportFeedback ? <p className="mt-2 text-sm font-medium text-emerald-700">{exportFeedback}</p> : null}
-              </div>
-              <Button
-                className="gap-2 self-start lg:self-auto"
-                disabled={!financialSummary || !hasRangeData || isExporting}
-                onClick={handleDownloadProfitLoss}
-                variant="secondary"
-              >
-                <Download className="h-4 w-4" />
-                {isExporting ? t("common.loading") : t("reports.exportProfitLoss")}
-              </Button>
-            </div>
-          </Card>
-
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard
-              description={t("reports.sectionProfitLossDesc")}
-              label={t("reports.grossSales")}
-              value={formatCurrency(financialSummary?.grossSales ?? 0, currency, locale)}
-            />
-            <MetricCard
-              description={t("reports.refundsTotal")}
-              label={t("reports.refundsTotal")}
-              value={formatCurrency(-(financialSummary?.refunds ?? 0), currency, locale)}
-            />
-            <MetricCard
-              description={t("reports.sectionProfitLossDesc")}
-              label={t("reports.grossProfit")}
-              value={formatCurrency(financialSummary?.grossProfit ?? 0, currency, locale)}
-            />
-            <MetricCard
-              description={t("reports.sectionProfitLossDesc")}
-              label={t("reports.netProfitLabel")}
-              value={formatCurrency(financialSummary?.netProfit ?? 0, currency, locale)}
-            />
+            <MetricCard label="Gross sales" value={formatCurrency(financialSummary?.grossSales ?? 0, currency, locale)} />
+            <MetricCard label="Gross profit" value={formatCurrency(financialSummary?.grossProfit ?? 0, currency, locale)} />
+            <MetricCard accent="yellow" label="Expenses" value={formatCurrency(-(financialSummary?.expenses ?? 0), currency, locale)} />
+            <MetricCard accent="green" label="Net profit" value={formatCurrency(financialSummary?.netProfit ?? 0, currency, locale)} />
           </div>
-
-          <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-            <Card className="p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-olive">{t("reports.periodLabel")}</p>
-                  <h2 className="mt-2 font-display text-2xl font-semibold text-ink">{selectedRangeLabel}</h2>
-                </div>
-                <Badge variant={hasRangeData ? "success" : "neutral"}>
-                  {hasRangeData ? `${financialSummary?.billCount ?? 0} ${t("common.items")}` : t("reports.dayClosed")}
-                </Badge>
-              </div>
-
-              {financialSummary && hasRangeData ? (
-                <div className="mt-6 space-y-4">
-                  <div className="rounded-3xl bg-shell p-4">
-                    <p className="text-sm font-semibold text-ink">{selectedRangeLabel}</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">{t("reports.closedDayHint")}</p>
-                  </div>
-                  <div className="space-y-3">
-                    <SummaryRow label={t("reports.grossSales")} value={formatCurrency(financialSummary.grossSales, currency, locale)} />
-                    <SummaryRow label={t("reports.refundsTotal")} value={formatCurrency(-financialSummary.refunds, currency, locale)} />
-                    <SummaryRow
-                      label={t("reports.returnsPreviousDays")}
-                      value={formatCurrency(-financialSummary.returnsFromPreviousDays, currency, locale)}
-                    />
-                    <SummaryRow
-                      label={t("reports.sameDayReturns")}
-                      value={formatCurrency(-financialSummary.sameDayReturns, currency, locale)}
-                    />
-                    <SummaryRow label={t("reports.netSalesLabel")} value={formatCurrency(financialSummary.netSales, currency, locale)} />
-                    <SummaryRow label="Net sales excluding VAT" value={formatCurrency(profitTaxView.netSalesExcludingTax, currency, locale)} />
-                    <SummaryRow label={t("reports.grossProfit")} value={formatCurrency(financialSummary.grossProfit, currency, locale)} />
-                    <SummaryRow
-                      label={t("reports.profitAdjustments")}
-                      value={formatCurrency(-financialSummary.profitAdjustments, currency, locale)}
-                    />
-                    <SummaryRow label={t("cashControl.expenses")} value={formatCurrency(-financialSummary.expenses, currency, locale)} />
-                    <SummaryRow label="Net profit before VAT payable" value={formatCurrency(profitTaxView.profitBeforeVatPayable, currency, locale)} />
-                    <SummaryRow label={t("reports.taxRemainingPayable")} value={formatCurrency(taxSummary.remainingPayableTax, currency, locale)} />
-                    <SummaryRow label="Net profit after VAT payable" value={formatCurrency(profitTaxView.profitAfterVatPayable, currency, locale)} />
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-6 rounded-3xl border border-dashed border-line bg-shell/70 p-5 text-sm leading-6 text-slate-600">
-                  {t("reports.rangeEmpty")}
-                </div>
-              )}
-            </Card>
-
-            <Card className="p-6">
-              <div className="flex items-center gap-2">
-                <WalletCards className="h-5 w-5 text-ink" />
-                <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.paymentBreakdown")}</h2>
-              </div>
-              {financialSummary && hasRangeData ? (
-                <div className="mt-5 space-y-3">
-                  <SummaryRow label={t("cashControl.cashSales")} value={formatCurrency(financialSummary.cashSales, currency, locale)} />
-                  <SummaryRow label={t("cashControl.cardSales")} value={formatCurrency(financialSummary.cardSales, currency, locale)} />
-                  <SummaryRow label={t("cashControl.accountSales")} value={formatCurrency(financialSummary.accountSales, currency, locale)} />
-                  <SummaryRow label={t("reports.cashRefunds")} value={formatCurrency(-financialSummary.cashRefunds, currency, locale)} />
-                  <SummaryRow label={t("reports.cardRefunds")} value={formatCurrency(-financialSummary.cardRefunds, currency, locale)} />
-                  <SummaryRow label={t("reports.accountRefunds")} value={formatCurrency(-financialSummary.accountRefunds, currency, locale)} />
-                </div>
-              ) : (
-                <p className="mt-5 text-sm leading-6 text-slate-600">{t("reports.rangeEmpty")}</p>
-              )}
-            </Card>
+          <div className="grid gap-6 xl:grid-cols-2">
+            <ReportPanel icon={<BarChart3 className="h-5 w-5" />} title="Profit / loss summary">
+              {tableRows([
+                { label: "Gross sales", value: formatCurrency(financialSummary?.grossSales ?? 0, currency, locale) },
+                { label: "Gross sales excluding VAT", value: formatCurrency(profitTaxView.grossSalesExcludingTax, currency, locale) },
+                { label: "Refunds", value: formatCurrency(-(financialSummary?.refunds ?? 0), currency, locale) },
+                { label: "Net sales", value: formatCurrency(financialSummary?.netSales ?? 0, currency, locale) },
+                { label: "Net sales excluding VAT", value: formatCurrency(profitTaxView.netSalesExcludingTax, currency, locale) },
+                { label: "Profit adjustments", value: formatCurrency(-(financialSummary?.profitAdjustments ?? 0), currency, locale) },
+                { label: "Net profit before VAT payable", value: formatCurrency(profitTaxView.profitBeforeVatPayable, currency, locale) },
+                { label: "Net profit after VAT payable", value: formatCurrency(profitTaxView.profitAfterVatPayable, currency, locale) }
+              ])}
+            </ReportPanel>
+            <ReportPanel icon={<WalletCards className="h-5 w-5" />} title="Ledger control">
+              {tableRows([
+                { label: "Total debits", value: formatCurrency(ledgerControlTotals.debit, currency, locale) },
+                { label: "Total credits", value: formatCurrency(ledgerControlTotals.credit, currency, locale) },
+                { label: "Difference", value: formatCurrency(ledgerControlTotals.difference, currency, locale) },
+                { label: "Ledger rows", value: String(filteredLedgerEntries.length) }
+              ])}
+            </ReportPanel>
           </div>
         </div>
       ) : null}
 
-      {activeView === "tax" ? (
+      {activeView === "employee" ? (
+        <ReportPanel icon={<Users2 className="h-5 w-5" />} title="Sales by employee">
+          {tableRows(employeePerformance.map((row) => ({
+            label: `${row.name} (${row.billCount} bills)`,
+            value: formatCurrency(row.net, currency, locale),
+            detail: `Gross ${formatCurrency(row.gross, currency, locale)} | refunds ${formatCurrency(-row.refunds, currency, locale)} | products ${row.products || "-"}`
+          })))}
+        </ReportPanel>
+      ) : null}
+
+      {activeView === "dayShift" ? (
+        <div className="grid gap-6 xl:grid-cols-2">
+          <ReportPanel icon={<CalendarDays className="h-5 w-5" />} title="Day report">
+            {tableRows(dayReportRows.map((row) => ({
+              label: formatBusinessDate(row.businessDate, locale),
+              value: formatCurrency(row.net, currency, locale),
+              detail: `${row.bills} bills | sales ${formatCurrency(row.sales, currency, locale)} | refunds ${formatCurrency(-row.refunds, currency, locale)} | shifts ${row.shifts}`
+            })))}
+          </ReportPanel>
+          <ReportPanel icon={<ClockIcon />} title="Shift report">
+            {tableRows(shiftReportRows.map((row) => ({
+              label: `${row.cashierName} | ${formatDateTime(row.shift.startedAt, locale)}`,
+              value: formatCurrency(row.summary.expectedCash, currency, locale),
+              detail: `${row.shift.endedAt ? "Closed" : "Open"} | cash sales ${formatCurrency(row.summary.cashSales, currency, locale)} | difference ${formatCurrency(row.summary.difference ?? 0, currency, locale)}`
+            })))}
+          </ReportPanel>
+        </div>
+      ) : null}
+
+      {activeView === "inventory" ? (
         <div className="space-y-6">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard
-              description={t("reports.taxInvoiceOutputDesc")}
-              label={t("reports.taxInvoiceOutput")}
-              value={formatCurrency(taxSummary.invoiceTax, currency, locale)}
-            />
-            <MetricCard
-              description={t("reports.taxReversedDesc")}
-              label={t("reports.taxReversed")}
-              value={formatCurrency(-taxSummary.refundTax, currency, locale)}
-            />
-            <MetricCard
-              description={t("reports.taxNetPayableDesc")}
-              label={t("reports.taxNetPayable")}
-              value={formatCurrency(taxSummary.netPayableTax, currency, locale)}
-            />
-            <MetricCard
-              description={t("reports.taxPaidByCustomersDesc")}
-              label={t("reports.taxPaidByCustomers")}
-              value={formatCurrency(taxSummary.customerPaidTax, currency, locale)}
-            />
+            <MetricCard label="Stock products" value={inventorySummary.itemCount} />
+            <MetricCard label="Units on hand" value={inventorySummary.unitsOnHand} />
+            <MetricCard accent="green" label="Cost value" value={formatCurrency(inventorySummary.costValue, currency, locale)} />
+            <MetricCard accent="yellow" label="Low stock" value={inventorySummary.lowStockCount} />
           </div>
-
-          <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-            <Card className="p-6">
-              <div className="flex items-center gap-2">
-                <ReceiptText className="h-5 w-5 text-ink" />
-                <div>
-                  <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.taxReportTitle")}</h2>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">{selectedRangeLabel}</p>
-                </div>
-              </div>
-
-              <div className="mt-6 space-y-3">
-                <SummaryRow label={t("reports.taxInvoiceOutput")} value={formatCurrency(taxSummary.invoiceTax, currency, locale)} />
-                <SummaryRow label={t("reports.taxReversed")} value={formatCurrency(-taxSummary.refundTax, currency, locale)} />
-                <SummaryRow label={t("reports.taxNetPayable")} value={formatCurrency(taxSummary.netPayableTax, currency, locale)} />
-                <SummaryRow label={t("reports.taxPaidByCustomers")} value={formatCurrency(taxSummary.customerPaidTax, currency, locale)} />
-                <SummaryRow label={t("reports.taxCustomerDue")} value={formatCurrency(taxSummary.customerDueTax, currency, locale)} />
-                <SummaryRow label={t("reports.taxPaidToAuthority")} value={formatCurrency(taxSummary.authorityPaidTax, currency, locale)} />
-                <SummaryRow label={t("reports.taxRemainingPayable")} value={formatCurrency(taxSummary.remainingPayableTax, currency, locale)} />
-              </div>
-
-              <div className="mt-5 rounded-3xl border border-dashed border-line bg-shell/70 p-4 text-sm leading-6 text-slate-600">
-                {t("reports.taxPaidToAuthorityDesc")}
-              </div>
-            </Card>
-
-            <Card className="p-6">
-              <div className="flex items-center gap-2">
-                <WalletCards className="h-5 w-5 text-ink" />
-                <div>
-                  <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.taxPaymentSplit")}</h2>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">{t("reports.taxPaymentSplitDesc")}</p>
-                </div>
-              </div>
-
-              <div className="mt-6 space-y-3">
-                <SummaryRow label={t("common.cash")} value={formatCurrency(taxSummary.cashTax, currency, locale)} />
-                <SummaryRow label={t("common.card")} value={formatCurrency(taxSummary.cardTax, currency, locale)} />
-                <SummaryRow label={t("common.account")} value={formatCurrency(taxSummary.accountTax, currency, locale)} />
-                <SummaryRow label={t("reports.cashRefunds")} value={formatCurrency(-taxSummary.cashRefundTax, currency, locale)} />
-                <SummaryRow label={t("reports.cardRefunds")} value={formatCurrency(-taxSummary.cardRefundTax, currency, locale)} />
-                <SummaryRow label={t("reports.accountRefunds")} value={formatCurrency(-taxSummary.accountRefundTax, currency, locale)} />
-              </div>
-            </Card>
+          <div className="grid gap-6 xl:grid-cols-2">
+            <ReportPanel icon={<Boxes className="h-5 w-5" />} title="Inventory by category">
+              {tableRows(inventoryByCategory.map((row) => ({
+                label: row.name,
+                value: formatCurrency(row.cost, currency, locale),
+                detail: `${row.products} products | ${row.units} units | sale value ${formatCurrency(row.value, currency, locale)}`
+              })))}
+            </ReportPanel>
+            <ReportPanel icon={<Package className="h-5 w-5" />} title="Low stock items">
+              {tableRows(lowStockProducts.map((product) => ({
+                label: localizedName(product.name, locale),
+                value: `${product.stockQuantity} / ${product.reorderLevel}`,
+                detail: `Cost ${formatCurrency(product.costPrice, currency, locale)} | Sale ${formatCurrency(product.salePrice, currency, locale)}`
+              })))}
+            </ReportPanel>
           </div>
         </div>
       ) : null}
 
-      {activeView === "cashier" ? (
+      {activeView === "suppliers" ? (
         <div className="space-y-6">
-          <Card className="p-6">
-            <div className="flex items-center gap-2">
-              <Users2 className="h-5 w-5 text-ink" />
-              <div>
-                <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.salesByEmployee")}</h2>
-                <p className="mt-1 text-sm leading-6 text-slate-600">{t("reports.salesByEmployeeDesc")}</p>
-              </div>
-            </div>
-
-            <div className="mt-5 grid gap-3 lg:grid-cols-2">
-              {cashierPerformance.length > 0 ? (
-                cashierPerformance.map((entry) => (
-                  <div key={entry.userId} className="rounded-3xl border border-line bg-white p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-ink">{entry.userName}</p>
-                        <p className="mt-1 text-sm text-slate-600">
-                          {entry.billCount} {t("reports.exportBillCount").toLowerCase()}
-                        </p>
-                      </div>
-                      <Badge variant="success">{formatCurrency(entry.netSales, currency, locale)}</Badge>
-                    </div>
-                    <div className="mt-4 space-y-2">
-                      <SummaryRow label={t("reports.grossSales")} value={formatCurrency(entry.grossSales, currency, locale)} />
-                      <SummaryRow label={t("reports.refundsProcessed")} value={formatCurrency(-entry.refunds, currency, locale)} />
-                      <SummaryRow label={t("reports.netSalesLabel")} value={formatCurrency(entry.netSales, currency, locale)} />
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm leading-6 text-slate-600">{t("reports.rangeEmpty")}</p>
-              )}
-            </div>
-          </Card>
-
-          <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-            <Card className="p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-olive">{t("reports.shiftLabel")}</p>
-                  <h2 className="mt-2 font-display text-2xl font-semibold text-ink">{t("reports.shiftTitle")}</h2>
-                </div>
-                <Badge variant={currentShift ? "success" : "neutral"}>
-                  {currentShift ? t("reports.shiftOpen") : t("reports.shiftClosed")}
-                </Badge>
-              </div>
-
-              {currentShift && liveShiftSummary ? (
-                <div className="mt-6 space-y-4">
-                  <div className="rounded-3xl bg-shell p-4">
-                    <p className="text-sm font-semibold text-ink">{formatDateTime(currentShift.startedAt, locale)}</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">{t("reports.liveShiftHint")}</p>
-                  </div>
-                  <div className="space-y-3">
-                    <SummaryRow label={t("cashControl.openingCash")} value={formatCurrency(liveShiftSummary.openingCash, currency, locale)} />
-                    <SummaryRow label={t("cashControl.cashSales")} value={formatCurrency(liveShiftSummary.cashSales, currency, locale)} />
-                    <SummaryRow label={t("cashControl.cashIn")} value={formatCurrency(liveShiftSummary.cashIn, currency, locale)} />
-                    <SummaryRow label={t("cashControl.cashOut")} value={formatCurrency(liveShiftSummary.cashOut, currency, locale)} />
-                    <SummaryRow label={t("cashControl.expectedCash")} value={formatCurrency(liveShiftSummary.expectedCash, currency, locale)} />
-                  </div>
-                </div>
-              ) : latestShift && latestShiftSummary ? (
-                <div className="mt-6 space-y-4">
-                  <div className="rounded-3xl bg-shell p-4">
-                    <p className="text-sm font-semibold text-ink">{formatDateTime(latestShift.endedAt, locale)}</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">{t("reports.latestShiftHint")}</p>
-                  </div>
-                  <div className="space-y-3">
-                    <SummaryRow label={t("cashControl.expectedCash")} value={formatCurrency(latestShiftSummary.expectedCash, currency, locale)} />
-                    <SummaryRow label={t("cashControl.countedCash")} value={formatCurrency(latestShiftSummary.countedCash ?? 0, currency, locale)} />
-                    <SummaryRow label={t("cashControl.difference")} value={formatCurrency(latestShiftSummary.difference ?? 0, currency, locale)} />
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-6 rounded-3xl border border-dashed border-line bg-shell/70 p-5 text-sm leading-6 text-slate-600">
-                  {t("reports.noShiftData")}
-                </div>
-              )}
-            </Card>
-
-            <Card className="p-6">
-              <div className="flex items-center gap-2">
-                <BarChart3 className="h-5 w-5 text-ink" />
-                <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.cashRegisterTitle")}</h2>
-              </div>
-              <p className="mt-4 text-sm leading-6 text-slate-600">{t("reports.cashFormula")}</p>
-              {liveShiftSummary ? (
-                <div className="mt-5 space-y-3">
-                  <SummaryRow label={t("cashControl.openingCash")} value={formatCurrency(liveShiftSummary.openingCash, currency, locale)} />
-                  <SummaryRow label={t("cashControl.cashSales")} value={formatCurrency(liveShiftSummary.cashSales, currency, locale)} />
-                  <SummaryRow label={t("cashControl.cashIn")} value={formatCurrency(liveShiftSummary.cashIn, currency, locale)} />
-                  <SummaryRow label={t("cashControl.cashOut")} value={formatCurrency(liveShiftSummary.cashOut, currency, locale)} />
-                  <SummaryRow label={t("cashControl.expectedCash")} value={formatCurrency(liveShiftSummary.expectedCash, currency, locale)} />
-                </div>
-              ) : (
-                <p className="mt-5 text-sm leading-6 text-slate-600">{t("reports.waitingForShift")}</p>
-              )}
-            </Card>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MetricCard label="Suppliers" value={supplierSummary.length} />
+            <MetricCard label="Purchase orders" value={purchaseOrdersInRange.length} />
+            <MetricCard accent="green" label="Ordered amount" value={formatCurrency(supplierSummary.reduce((sum, row) => sum + row.ordered, 0), currency, locale)} />
+            <MetricCard accent="yellow" label="Paid amount" value={formatCurrency(supplierSummary.reduce((sum, row) => sum + row.paid, 0), currency, locale)} />
           </div>
-
-          <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-            <Card className="p-6">
-              <div className="flex items-center gap-2">
-                <CalendarRange className="h-5 w-5 text-ink" />
-                <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.dayClosingHistory")}</h2>
-              </div>
-              <div className="mt-5 space-y-3">
-                {filteredDayCloses.length > 0 ? (
-                  filteredDayCloses.map((dayClose) => (
-                    <div key={dayClose.id} className="rounded-3xl bg-shell p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <p className="text-sm font-semibold text-ink">{formatBusinessDate(dayClose.businessDate, locale)}</p>
-                        <Badge variant={dayClose.cashDifference === 0 ? "success" : "warning"}>
-                          {formatCurrency(dayClose.cashDifference, currency, locale)}
-                        </Badge>
-                      </div>
-                      <p className="mt-2 text-sm text-slate-600">{formatDateTime(dayClose.closedAt, locale)}</p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm leading-6 text-slate-600">{t("reports.rangeEmpty")}</p>
-                )}
-              </div>
-            </Card>
-
-            <Card className="p-6">
-              <div className="flex items-center gap-2">
-                <Clock3 className="h-5 w-5 text-ink" />
-                <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.shiftHistory")}</h2>
-              </div>
-              <div className="mt-5 space-y-3">
-                {filteredShopShifts.length > 0 ? (
-                  filteredShopShifts.map((shift) => {
-                    const cashier = state.users.find((user) => user.id === shift.cashierId);
-
-                    return (
-                      <div key={shift.id} className="rounded-3xl bg-shell p-4">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <p className="text-sm font-semibold text-ink">{cashier?.name ?? t("common.notAvailable")}</p>
-                          <Badge variant={shift.endedAt ? "neutral" : "success"}>
-                            {shift.endedAt ? t("reports.shiftClosed") : t("reports.shiftOpen")}
-                          </Badge>
-                        </div>
-                        <p className="mt-2 text-sm text-slate-600">{formatDateTime(shift.startedAt, locale)}</p>
-                        <p className="mt-1 text-sm text-slate-600">{formatBusinessDate(shift.businessDate, locale)}</p>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <p className="text-sm leading-6 text-slate-600">{t("reports.rangeEmpty")}</p>
-                )}
-              </div>
-            </Card>
+          <div className="grid gap-6 xl:grid-cols-2">
+            <ReportPanel icon={<Truck className="h-5 w-5" />} title="Supplier summary">
+              {tableRows(supplierSummary.map((row) => ({
+                label: row.name,
+                value: formatCurrency(row.ordered, currency, locale),
+                detail: `${row.orderCount} POs | paid ${formatCurrency(row.paid, currency, locale)} | balance ${formatCurrency(row.balance, currency, locale)} | received ${row.receivedQuantity}`
+              })))}
+            </ReportPanel>
+            <ReportPanel icon={<ReceiptText className="h-5 w-5" />} title="Purchase orders">
+              {tableRows(purchaseOrdersInRange.map((order) => ({
+                label: `${order.number} | ${order.supplierName}`,
+                value: formatCurrency(order.totalAmount ?? 0, currency, locale),
+                detail: `${order.status} | paid ${formatCurrency(order.paidAmount ?? 0, currency, locale)} | ${formatDateTime(order.createdAt, locale)}`
+              })))}
+            </ReportPanel>
           </div>
-
-          <Card className="p-6">
-            <div className="flex items-center gap-2">
-              <WalletCards className="h-5 w-5 text-ink" />
-              <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.cashMovementLog")}</h2>
-            </div>
-            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {filteredMovements.length > 0 ? (
-                filteredMovements.map((movement) => (
-                  <div key={movement.id} className="rounded-3xl bg-shell p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold text-ink">
-                        {movement.type === "cash_in" ? t("cashControl.cashIn") : t("cashControl.cashOut")}
-                      </p>
-                      <Badge variant={movement.type === "cash_in" ? "success" : "warning"}>
-                        {formatCurrency(movement.amount, currency, locale)}
-                      </Badge>
-                    </div>
-                    <p className="mt-2 text-sm text-slate-600">{movement.reason}</p>
-                    <p className="mt-2 text-xs text-slate-500">{formatDateTime(movement.createdAt, locale)}</p>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm leading-6 text-slate-600">{t("reports.rangeEmpty")}</p>
-              )}
-            </div>
-          </Card>
         </div>
       ) : null}
 
       {activeView === "expenses" ? (
         <div className="space-y-6">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <MetricCard
-              description={t("reports.sectionExpensesDesc")}
-              label={t("reports.expenseTotal")}
-              value={formatCurrency(expenseReportSummary.totalExpenses, currency, locale)}
-            />
-            <MetricCard
-              description={t("reports.sectionExpensesDesc")}
-              label={t("reports.expenseCount")}
-              value={filteredExpenses.length}
-            />
-            <MetricCard
-              description={t("cashControl.drawerAdjustmentHint")}
-              label={t("cashControl.cashIn")}
-              value={formatCurrency(expenseReportSummary.cashIn, currency, locale)}
-            />
-            <MetricCard
-              description={t("cashControl.drawerAdjustmentHint")}
-              label={t("cashControl.cashOut")}
-              value={formatCurrency(expenseReportSummary.cashOut, currency, locale)}
-            />
-            <MetricCard
-              description={t("reports.drawerAdjustmentReportTitle")}
-              label={t("reports.drawerAdjustmentCount")}
-              value={filteredMovements.length}
-            />
+            <MetricCard label="Total expenses" value={formatCurrency(expenseReportSummary.totalExpenses, currency, locale)} />
+            <MetricCard label="Entries" value={periodExpenses.length} />
+            <MetricCard accent="green" label="Cash in" value={formatCurrency(expenseReportSummary.cashIn, currency, locale)} />
+            <MetricCard accent="yellow" label="Cash out" value={formatCurrency(expenseReportSummary.cashOut, currency, locale)} />
+            <MetricCard label="Drawer adjustments" value={periodMovements.length} />
           </div>
-
           <div className="grid gap-6 xl:grid-cols-2">
-            <Card className="overflow-hidden p-0">
-              <div className="border-b border-slate-200 p-6">
-                <div className="flex items-center gap-2">
-                  <WalletCards className="h-5 w-5 text-ink" />
-                  <div>
-                    <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.expenseLog")}</h2>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">{selectedRangeLabel}</p>
-                  </div>
-                </div>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {filteredExpenses.length > 0 ? (
-                  filteredExpenses.map((expense) => (
-                    <div key={expense.id} className="grid gap-3 p-4 md:grid-cols-[1fr_1fr_auto]">
-                      <div>
-                        <p className="text-sm font-semibold text-ink">{expense.categoryName}</p>
-                        <p className="mt-1 text-xs text-slate-500">{formatDateTime(expense.createdAt, locale)}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-slate-600">{expense.vendorName || expense.paymentMethod.toUpperCase()}</p>
-                        {expense.note ? <p className="mt-1 text-xs text-slate-500">{expense.note}</p> : null}
-                      </div>
-                      <p className="text-sm font-semibold text-ink md:text-right">{formatCurrency(expense.amount, currency, locale)}</p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="p-6 text-sm leading-6 text-slate-600">{t("expense.none")}</p>
-                )}
-              </div>
-            </Card>
-
-            <Card className="overflow-hidden p-0">
-              <div className="border-b border-slate-200 p-6">
-                <div className="flex items-center gap-2">
-                  <WalletCards className="h-5 w-5 text-ink" />
-                  <div>
-                    <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.drawerAdjustmentLog")}</h2>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">{selectedRangeLabel}</p>
-                  </div>
-                </div>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {filteredMovements.length > 0 ? (
-                  filteredMovements.map((movement) => (
-                    <div key={movement.id} className="grid gap-3 p-4 md:grid-cols-[1fr_1.5fr_auto]">
-                      <div>
-                        <p className="text-sm font-semibold text-ink">
-                          {movement.type === "cash_in" ? t("cashControl.cashIn") : t("cashControl.cashOut")}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">{formatDateTime(movement.createdAt, locale)}</p>
-                      </div>
-                      <p className="text-sm text-slate-600">{movement.reason}</p>
-                      <Badge variant={movement.type === "cash_in" ? "success" : "warning"}>
-                        {formatCurrency(movement.amount, currency, locale)}
-                      </Badge>
-                    </div>
-                  ))
-                ) : (
-                  <p className="p-6 text-sm leading-6 text-slate-600">{t("cashControl.noMovements")}</p>
-                )}
-              </div>
-            </Card>
-          </div>
-        </div>
-      ) : null}
-
-      {activeView === "inventory" ? (
-        <div className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <MetricCard
-              description={t("reports.inventoryReportDesc")}
-              label={t("reports.inventoryItems")}
-              value={inventorySummary.itemCount}
-            />
-            <MetricCard
-              description={t("reports.inventoryReportDesc")}
-              label={t("reports.inventoryUnits")}
-              value={inventorySummary.unitsOnHand}
-            />
-            <MetricCard
-              description={t("reports.inventoryReportDesc")}
-              label={t("reports.inventoryCostValue")}
-              value={formatCurrency(inventorySummary.costValue, currency, locale)}
-            />
-            <MetricCard
-              description={t("reports.inventoryReportDesc")}
-              label={t("reports.inventorySalesValue")}
-              value={formatCurrency(inventorySummary.salesValue, currency, locale)}
-            />
-            <MetricCard
-              description={t("reports.lowStockItemsDesc")}
-              label={t("reports.lowStockItems")}
-              value={inventorySummary.lowStockCount}
-            />
-          </div>
-
-          <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-            <Card className="p-6">
-              <div className="flex items-center gap-2">
-                <Package className="h-5 w-5 text-ink" />
-                <div>
-                  <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.lowStockItems")}</h2>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">{t("reports.lowStockItemsDesc")}</p>
-                </div>
-              </div>
-
-              <div className="mt-5 space-y-3">
-                {lowStockProducts.length > 0 ? (
-                  lowStockProducts.map((product) => (
-                    <div key={product.id} className="rounded-3xl border border-line bg-white p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-ink">{product.name[locale] || product.name.en}</p>
-                          <p className="mt-1 text-sm text-slate-600">
-                            {product.stockQuantity} / {product.reorderLevel}
-                          </p>
-                        </div>
-                        <Badge variant="warning">{t("products.reorderNeeded")}</Badge>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-3xl border border-dashed border-line bg-shell/70 p-5 text-sm leading-6 text-slate-600">
-                    {t("reports.inventoryHealthy")}
-                  </div>
-                )}
-              </div>
-            </Card>
-
-            <Card className="p-6">
-              <div className="flex items-center gap-2">
-                <BarChart3 className="h-5 w-5 text-ink" />
-                <div>
-                  <h2 className="font-display text-2xl font-semibold text-ink">{t("reports.inventoryReportTitle")}</h2>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">{t("reports.inventoryReportDesc")}</p>
-                </div>
-              </div>
-
-              <div className="mt-5 space-y-3">
-                {highestValueProducts.length > 0 ? (
-                  highestValueProducts.map((product) => (
-                    <div key={product.id} className="rounded-3xl border border-line bg-shell px-4 py-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-ink">{product.name[locale] || product.name.en}</p>
-                          <p className="mt-1 text-sm text-slate-600">
-                            {product.stockQuantity} {t("reports.inventoryUnits").toLowerCase()}
-                          </p>
-                        </div>
-                        <Badge variant="neutral">
-                          {formatCurrency(product.stockQuantity * product.costPrice, currency, locale)}
-                        </Badge>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm leading-6 text-slate-600">{t("reports.inventoryHealthy")}</p>
-                )}
-              </div>
-            </Card>
+            <ReportPanel icon={<WalletCards className="h-5 w-5" />} title="Expense log">
+              {tableRows(periodExpenses.map((expense) => ({
+                label: `${expense.categoryName} | ${formatDateTime(expense.createdAt, locale)}`,
+                value: formatCurrency(expense.amount, currency, locale),
+                detail: `${expense.paymentMethod.toUpperCase()}${expense.vendorName ? ` | ${expense.vendorName}` : ""}${expense.note ? ` | ${expense.note}` : ""}`
+              })))}
+            </ReportPanel>
+            <ReportPanel icon={<WalletCards className="h-5 w-5" />} title="Drawer adjustment log">
+              {tableRows(periodMovements.map((movement) => ({
+                label: `${movement.type === "cash_in" ? "Cash in" : "Cash out"} | ${formatDateTime(movement.createdAt, locale)}`,
+                value: formatCurrency(movement.amount, currency, locale),
+                detail: movement.reason
+              })))}
+            </ReportPanel>
           </div>
         </div>
       ) : null}
@@ -1775,71 +1555,81 @@ export function ReportsOverview() {
       {activeView === "refunds" ? (
         <div className="space-y-6">
           <div className="grid gap-4 md:grid-cols-3">
-            <MetricCard
-              description={t("reports.refundReportDesc")}
-              label={t("reports.exportRefundCount")}
-              value={filteredRefunds.length}
-            />
-            <MetricCard
-              description={t("reports.sectionRefundsDesc")}
-              label={t("reports.refundsTotal")}
-              value={formatCurrency(filteredRefunds.reduce((sum, refund) => sum + refund.amount, 0), currency, locale)}
-            />
-            <MetricCard
-              description={t("reports.sectionRefundsDesc")}
-              label={t("reports.profitAdjustments")}
-              value={formatCurrency(filteredRefunds.reduce((sum, refund) => sum + refund.profitAdjustment, 0), currency, locale)}
-            />
+            <MetricCard label="Refund count" value={periodRefunds.length} />
+            <MetricCard accent="yellow" label="Refund amount" value={formatCurrency(periodRefunds.reduce((sum, refund) => sum + refund.amount, 0), currency, locale)} />
+            <MetricCard label="Profit adjustment" value={formatCurrency(periodRefunds.reduce((sum, refund) => sum + refund.profitAdjustment, 0), currency, locale)} />
           </div>
+          <div className="grid gap-6 xl:grid-cols-2">
+            <ReportPanel icon={<BarChart3 className="h-5 w-5" />} title="Refunds by category">
+              {tableRows(refundsByCategory.map((row) => ({
+                label: row.name,
+                value: formatCurrency(row.amount, currency, locale),
+                detail: `${row.items} items | ${row.quantity} qty | profit adjustment ${formatCurrency(row.profit, currency, locale)}`
+              })))}
+            </ReportPanel>
+            <ReportPanel icon={<Package className="h-5 w-5" />} title="Refunds by item">
+              {tableRows(refundsByItem.map((row) => ({
+                label: row.name,
+                value: formatCurrency(row.amount, currency, locale),
+                detail: `${row.category} | qty ${row.quantity} | profit adjustment ${formatCurrency(row.profit, currency, locale)}`
+              })))}
+            </ReportPanel>
+          </div>
+          <ReportPanel icon={<ReceiptText className="h-5 w-5" />} title="Refund audit">
+            {tableRows(periodRefunds.map((refund) => {
+              const bill = billById.get(refund.originalBillId);
+              return {
+                label: `${bill?.number ?? refund.originalBillId} | ${formatDateTime(refund.returnDate, locale)}`,
+                value: formatCurrency(refund.amount, currency, locale),
+                detail: `${refund.reason} | original sale ${refund.originalSaleDate}`
+              };
+            }))}
+          </ReportPanel>
+        </div>
+      ) : null}
 
-          <Card className="overflow-hidden p-0">
-            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-950">{t("reports.refundReportTitle")}</h2>
-                <p className="text-sm text-slate-500">{t("reports.refundReportDesc")}</p>
-              </div>
-              <Badge variant="neutral">{selectedRangeLabel}</Badge>
-            </div>
-
-            {filteredRefunds.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[860px] text-left text-sm">
-                  <thead className="bg-slate-50 text-xs uppercase tracking-[0.14em] text-slate-500">
-                    <tr>
-                      <th className="px-5 py-3">{t("reports.originalReceipt")}</th>
-                      <th className="px-5 py-3">{t("reports.refundDate")}</th>
-                      <th className="px-5 py-3">{t("reports.refundReason")}</th>
-                      <th className="px-5 py-3">{t("reports.refundAmount")}</th>
-                      <th className="px-5 py-3">{t("reports.profitAdjustments")}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredRefunds.map((refund) => {
-                      const originalBill = state.bills.find((bill) => bill.id === refund.originalBillId);
-
-                      return (
-                        <tr key={refund.id}>
-                          <td className="px-5 py-4 font-semibold text-slate-950">
-                            {originalBill?.number ?? refund.originalBillId}
-                          </td>
-                          <td className="px-5 py-4 text-slate-600">{formatDateTime(refund.returnDate, locale)}</td>
-                          <td className="px-5 py-4 text-slate-600">{refund.reason}</td>
-                          <td className="px-5 py-4 text-slate-950">{formatCurrency(refund.amount, currency, locale)}</td>
-                          <td className="px-5 py-4 text-slate-950">
-                            {formatCurrency(refund.profitAdjustment, currency, locale)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="p-6 text-sm text-slate-600">{t("reports.noRefunds")}</div>
-            )}
-          </Card>
+      {activeView === "tax" ? (
+        <div className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MetricCard label="Invoice VAT output" value={formatCurrency(taxSummary.invoiceTax, currency, locale)} />
+            <MetricCard label="VAT reversed" value={formatCurrency(-taxSummary.refundTax, currency, locale)} />
+            <MetricCard accent="green" label="Net VAT payable" value={formatCurrency(taxSummary.netPayableTax, currency, locale)} />
+            <MetricCard accent="yellow" label="Remaining VAT" value={formatCurrency(taxSummary.remainingPayableTax, currency, locale)} />
+          </div>
+          <div className="grid gap-6 xl:grid-cols-2">
+            <ReportPanel icon={<ReceiptText className="h-5 w-5" />} title="Tax payable">
+              {tableRows([
+                { label: "Invoice VAT output", value: formatCurrency(taxSummary.invoiceTax, currency, locale) },
+                { label: "VAT reversed from refunds", value: formatCurrency(-taxSummary.refundTax, currency, locale) },
+                { label: "Net VAT payable", value: formatCurrency(taxSummary.netPayableTax, currency, locale) },
+                { label: "VAT collected from paid bills", value: formatCurrency(taxSummary.customerPaidTax, currency, locale) },
+                { label: "VAT still in customer dues", value: formatCurrency(taxSummary.customerDueTax, currency, locale) },
+                { label: "VAT paid to authority", value: formatCurrency(taxSummary.authorityPaidTax, currency, locale) },
+                { label: "Remaining VAT payable", value: formatCurrency(taxSummary.remainingPayableTax, currency, locale) }
+              ])}
+            </ReportPanel>
+            <ReportPanel icon={<WalletCards className="h-5 w-5" />} title="VAT by payment method">
+              {tableRows([
+                { label: "Cash VAT", value: formatCurrency(taxSummary.cashTax, currency, locale) },
+                { label: "Card VAT", value: formatCurrency(taxSummary.cardTax, currency, locale) },
+                { label: "Account VAT", value: formatCurrency(taxSummary.accountTax, currency, locale) },
+                { label: "Cash refund VAT", value: formatCurrency(-taxSummary.cashRefundTax, currency, locale) },
+                { label: "Card refund VAT", value: formatCurrency(-taxSummary.cardRefundTax, currency, locale) },
+                { label: "Account refund VAT", value: formatCurrency(-taxSummary.accountRefundTax, currency, locale) }
+              ])}
+            </ReportPanel>
+          </div>
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24">
+      <path d="M12 7v5l3 2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+      <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" stroke="currentColor" strokeWidth="2" />
+    </svg>
   );
 }

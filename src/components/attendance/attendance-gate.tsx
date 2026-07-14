@@ -1,0 +1,273 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Camera, CheckCircle2, Clock3, LocateFixed, QrCode, ShieldCheck } from "lucide-react";
+import { buildAttendanceScanUrl } from "@/lib/attendance";
+import { buildQrCodeImageUrl } from "@/lib/qr-code";
+import { cn, formatBusinessDate, formatDateTime } from "@/lib/utils";
+import { usePosApp } from "@/components/providers/app-provider";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import type { AttendanceLocation } from "@/types/pos";
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("Unable to read selfie."));
+    reader.readAsDataURL(file);
+  });
+}
+
+export function AttendanceGate({ children }: { children: React.ReactNode }) {
+  const {
+    clockIn,
+    currentBusinessDay,
+    currentSettings,
+    currentShop,
+    currentShopId,
+    locale,
+    session,
+    state
+  } = usePosApp();
+  const selfieInputRef = useRef<HTMLInputElement | null>(null);
+  const [location, setLocation] = useState<AttendanceLocation | null>(null);
+  const [selfieUrl, setSelfieUrl] = useState("");
+  const [feedback, setFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
+  const [scanUrl, setScanUrl] = useState("");
+
+  const openAttendance = useMemo(
+    () =>
+      currentShopId && session?.workspace === "shop" && currentBusinessDay
+        ? state.attendanceRecords.find(
+            (record) =>
+              record.shopId === currentShopId &&
+              record.userId === session.id &&
+              record.businessDate === currentBusinessDay.businessDate &&
+              !record.clockOutAt
+          ) ?? null
+        : null,
+    [currentBusinessDay, currentShopId, session, state.attendanceRecords]
+  );
+
+  useEffect(() => {
+    if (!currentShopId || !session || !currentBusinessDay || typeof window === "undefined") {
+      return;
+    }
+
+    setScanUrl(
+      buildAttendanceScanUrl({
+        businessDate: currentBusinessDay.businessDate,
+        origin: window.location.origin,
+        shopId: currentShopId,
+        userId: session.id
+      })
+    );
+  }, [currentBusinessDay, currentShopId, session]);
+
+  if (!session || session.workspace !== "shop" || !currentBusinessDay || openAttendance) {
+    return <>{children}</>;
+  }
+
+  const isAdmin = session.role === "shop_admin";
+  const qrImageUrl = buildQrCodeImageUrl(scanUrl, 220);
+
+  const captureLocation = () => {
+    setFeedback(null);
+
+    if (!navigator.geolocation) {
+      setFeedback({ tone: "error", message: "This device does not support location capture." });
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          capturedAt: new Date().toISOString()
+        });
+        setFeedback({ tone: "success", message: "Location captured." });
+      },
+      () => {
+        setFeedback({ tone: "error", message: "Location permission was blocked. Allow location to clock in." });
+      },
+      { enableHighAccuracy: true, timeout: 12_000 }
+    );
+  };
+
+  const captureSelfie = async (file?: File) => {
+    setFeedback(null);
+
+    if (!file) {
+      return;
+    }
+
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      setSelfieUrl(dataUrl);
+      setFeedback({ tone: "success", message: "Selfie captured." });
+    } catch {
+      setFeedback({ tone: "error", message: "Selfie could not be read. Try again." });
+    }
+  };
+
+  const submitClockIn = () => {
+    const result = clockIn({
+      location: location ?? undefined,
+      selfieUrl: selfieUrl || undefined,
+      source: "qr"
+    });
+
+    setFeedback({
+      tone: result.ok ? "success" : "error",
+      message: result.message ?? (result.ok ? "Clock-in saved." : "Clock-in failed.")
+    });
+  };
+
+  const bypassClockIn = () => {
+    const result = clockIn({
+      note: "Admin bypassed the attendance selfie/location gate.",
+      source: "admin_bypass"
+    });
+
+    setFeedback({
+      tone: result.ok ? "success" : "error",
+      message: result.message ?? (result.ok ? "Admin bypass saved." : "Bypass failed.")
+    });
+  };
+
+  return (
+    <div className="grid min-h-[72vh] place-items-center">
+      <Card className="w-full max-w-6xl overflow-hidden border-white/80 bg-white/95 shadow-[0_30px_90px_rgba(15,23,42,0.12)]">
+        <div className="grid gap-0 lg:grid-cols-[0.92fr_1.08fr]">
+          <div className="bg-[radial-gradient(circle_at_20%_20%,rgba(16,185,129,0.22),transparent_36%),linear-gradient(145deg,#07111f_0%,#12312e_100%)] p-7 text-white sm:p-9">
+            <span className="inline-flex h-14 w-14 items-center justify-center rounded-[22px] bg-white/12 ring-1 ring-white/15">
+              <Clock3 className="h-6 w-6" />
+            </span>
+            <p className="mt-8 text-xs font-bold uppercase tracking-[0.32em] text-emerald-100/70">Time clock required</p>
+            <h1 className="mt-3 font-display text-4xl font-semibold leading-tight">
+              Clock in before opening the POS.
+            </h1>
+            <p className="mt-4 max-w-md text-sm leading-6 text-white/76">
+              {currentSettings?.pos.shopName ?? currentShop?.name ?? "This store"} is open for{" "}
+              {formatBusinessDate(currentBusinessDay.businessDate, locale)}. Capture location and selfie once for today,
+              then continue billing normally.
+            </p>
+
+            <div className="mt-8 rounded-[30px] border border-white/15 bg-white/10 p-5 backdrop-blur">
+              <p className="text-xs font-bold uppercase tracking-[0.24em] text-white/54">Scan QR from staff phone</p>
+              <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center">
+                <div className="grid h-44 w-44 shrink-0 place-items-center rounded-[26px] bg-white p-4">
+                  {qrImageUrl ? <img alt="Clock-in QR" className="h-full w-full" src={qrImageUrl} /> : <QrCode className="h-16 w-16 text-slate-300" />}
+                </div>
+                <div className="text-sm leading-6 text-white/75">
+                  <p className="font-semibold text-white">QR clock-in link</p>
+                  <p className="mt-2 break-all text-xs text-white/55">{scanUrl || "Preparing secure clock-in link..."}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-7 sm:p-9">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.28em] text-emerald-700">Employee</p>
+                <h2 className="mt-2 font-display text-3xl font-semibold text-slate-950">{session.name}</h2>
+                <p className="mt-1 text-sm text-slate-500">{session.email}</p>
+              </div>
+              {isAdmin ? (
+                <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-amber-700">
+                  <ShieldCheck className="h-4 w-4" />
+                  Admin bypass available
+                </span>
+              ) : null}
+            </div>
+
+            <div className="mt-8 grid gap-4 sm:grid-cols-2">
+              <button
+                className={cn(
+                  "rounded-[28px] border p-5 text-left transition hover:-translate-y-0.5",
+                  location ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white hover:border-emerald-200"
+                )}
+                onClick={captureLocation}
+                type="button"
+              >
+                <span className="inline-flex h-11 w-11 items-center justify-center rounded-[18px] bg-slate-950 text-white">
+                  {location ? <CheckCircle2 className="h-5 w-5" /> : <LocateFixed className="h-5 w-5" />}
+                </span>
+                <p className="mt-4 font-semibold text-slate-950">Capture location</p>
+                <p className="mt-2 text-sm leading-5 text-slate-500">
+                  {location
+                    ? `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}`
+                    : "Required for verified daily attendance."}
+                </p>
+              </button>
+
+              <button
+                className={cn(
+                  "rounded-[28px] border p-5 text-left transition hover:-translate-y-0.5",
+                  selfieUrl ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white hover:border-emerald-200"
+                )}
+                onClick={() => selfieInputRef.current?.click()}
+                type="button"
+              >
+                <span className="inline-flex h-11 w-11 items-center justify-center rounded-[18px] bg-slate-950 text-white">
+                  {selfieUrl ? <CheckCircle2 className="h-5 w-5" /> : <Camera className="h-5 w-5" />}
+                </span>
+                <p className="mt-4 font-semibold text-slate-950">Take selfie</p>
+                <p className="mt-2 text-sm leading-5 text-slate-500">
+                  {selfieUrl ? "Selfie captured for this clock-in." : "Use the device camera or upload a selfie."}
+                </p>
+              </button>
+            </div>
+
+            <input
+              ref={selfieInputRef}
+              accept="image/*"
+              capture="user"
+              className="hidden"
+              onChange={(event) => void captureSelfie(event.target.files?.[0])}
+              type="file"
+            />
+
+            {selfieUrl ? (
+              <div className="mt-5 flex items-center gap-4 rounded-[24px] border border-slate-200 bg-slate-50 p-3">
+                <img alt="Selfie preview" className="h-16 w-16 rounded-[18px] object-cover" src={selfieUrl} />
+                <div className="text-sm">
+                  <p className="font-semibold text-slate-950">Selfie ready</p>
+                  <p className="text-slate-500">Captured at {formatDateTime(new Date().toISOString(), locale)}</p>
+                </div>
+              </div>
+            ) : null}
+
+            {feedback ? (
+              <div
+                className={cn(
+                  "mt-5 rounded-[22px] border px-4 py-3 text-sm font-semibold",
+                  feedback.tone === "success"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : "border-red-200 bg-red-50 text-red-700"
+                )}
+              >
+                {feedback.message}
+              </div>
+            ) : null}
+
+            <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+              <Button className="h-14 flex-1 rounded-[22px] text-base" disabled={!location || !selfieUrl} onClick={submitClockIn}>
+                Clock in and enter POS
+              </Button>
+              {isAdmin ? (
+                <Button className="h-14 rounded-[22px]" onClick={bypassClockIn} variant="secondary">
+                  Admin bypass
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}

@@ -2,6 +2,9 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  AttendanceLocation,
+  AttendanceRecord,
+  AttendanceSource,
   BusinessDay,
   CreateRefundInput,
   CheckoutBillInput,
@@ -64,6 +67,7 @@ import {
 import { calculateBillRefundState } from "@/lib/refunds";
 import { clearShopDataScope, ownerClearShopDataScopeLabels, type OwnerClearShopDataScope } from "@/lib/shop-data-reset";
 import { createPublicReceiptToken } from "@/lib/public-receipts";
+import { createAttendanceToken } from "@/lib/attendance";
 import { createId, getDirection, hashSecret } from "@/lib/utils";
 
 const STORAGE_KEY = "simple-pos-demo-state";
@@ -194,6 +198,8 @@ type ShopCloudStatePatch = Partial<
     DemoAppState,
     | "accountPaymentSequencesByShop"
     | "auditLogs"
+    | "attendanceQrSessions"
+    | "attendanceRecords"
     | "billItems"
     | "bills"
     | "brand"
@@ -213,6 +219,7 @@ type ShopCloudStatePatch = Partial<
     | "ledgerEntries"
     | "licenses"
     | "payments"
+    | "payrollRates"
     | "productKeys"
     | "products"
     | "purchaseOrderItems"
@@ -459,6 +466,36 @@ function resolveAccountPaymentSequencesByShop(stored: DemoAppState) {
   return sequences;
 }
 
+function calculateAttendanceHours(clockInAt: string, clockOutAt?: string, fallbackHours = 8) {
+  if (!clockOutAt) {
+    return Math.max(0, fallbackHours);
+  }
+
+  const startedAt = new Date(clockInAt).getTime();
+  const endedAt = new Date(clockOutAt).getTime();
+
+  if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt) || endedAt <= startedAt) {
+    return Math.max(0, fallbackHours);
+  }
+
+  return Math.round(((endedAt - startedAt) / 3_600_000) * 100) / 100;
+}
+
+function getPayrollRateForUser(state: DemoAppState, shopId: string, userId: string, currency = "SAR") {
+  return (
+    state.payrollRates.find((rate) => rate.shopId === shopId && rate.userId === userId) ?? {
+      id: "",
+      shopId,
+      userId,
+      hourlyRate: 0,
+      defaultDailyHours: 8,
+      currency,
+      createdAt: "",
+      updatedAt: ""
+    }
+  );
+}
+
 interface AppContextValue {
   isHydrated: boolean;
   isShopCloudReady: boolean;
@@ -472,6 +509,7 @@ interface AppContextValue {
   currentUsers: User[];
   currentBusinessDay: BusinessDay | null;
   currentShift: Shift | null;
+  currentAttendance: AttendanceRecord | null;
   locale: Locale;
   direction: "ltr" | "rtl";
   t: (key: TranslationKey, values?: TranslationValues) => string;
@@ -650,6 +688,43 @@ interface AppContextValue {
   startBusinessDay: (payload: { businessDate?: string; openingNote?: string }) => { ok: boolean; message?: string };
   closeBusinessDay: (payload: { countedCash: number; note?: string }) => { ok: boolean; message?: string };
   autoCloseAndStartNextBusinessDay: (payload?: { note?: string; startShift?: boolean }) => { ok: boolean; message?: string };
+  clockIn: (payload?: {
+    location?: AttendanceLocation;
+    note?: string;
+    selfieUrl?: string;
+    source?: AttendanceSource;
+    userId?: string;
+  }) => { ok: boolean; message?: string; attendanceId?: string };
+  clockOut: (payload?: {
+    location?: AttendanceLocation;
+    note?: string;
+    selfieUrl?: string;
+    userId?: string;
+  }) => { ok: boolean; message?: string };
+  submitAttendanceScan: (payload: {
+    businessDate: string;
+    location: AttendanceLocation;
+    selfieUrl: string;
+    shopId: string;
+    token: string;
+    userId: string;
+  }) => { ok: boolean; message?: string };
+  saveAttendanceRecord: (payload: {
+    businessDate?: string;
+    clockInAt: string;
+    clockOutAt?: string;
+    hourlyRate?: number;
+    id?: string;
+    note?: string;
+    paidHours?: number;
+    scheduledHours?: number;
+    userId: string;
+  }) => { ok: boolean; message?: string };
+  savePayrollRate: (payload: {
+    defaultDailyHours: number;
+    hourlyRate: number;
+    userId: string;
+  }) => { ok: boolean; message?: string };
   startShift: (payload: { openingCash: number }) => { ok: boolean; message?: string };
   forceCloseShiftAndStart: (payload: {
     adminPassword: string;
@@ -689,7 +764,13 @@ function mergeSettingsByShop(storedSettings: DemoAppState["settingsByShop"] | un
         ...(defaultBundle?.pos ?? {}),
         ...(storedBundle?.pos ?? {}),
         autoDayRolloverEnabled:
-          storedBundle?.pos?.autoDayRolloverEnabled ?? defaultBundle?.pos?.autoDayRolloverEnabled ?? false
+          storedBundle?.pos?.autoDayRolloverEnabled ?? defaultBundle?.pos?.autoDayRolloverEnabled ?? false,
+        rolePermissions:
+          storedBundle?.pos?.rolePermissions ?? defaultBundle?.pos?.rolePermissions ?? {
+            shop_admin: ["billing", "customers", "products", "inventory", "bills", "refunds", "reports", "settings", "backup"],
+            cashier: ["billing", "customers", "bills"],
+            support: ["reports", "settings"]
+          }
       },
       printer: {
         ...(defaultBundle?.printer ?? {}),
@@ -710,10 +791,20 @@ function mergeSettingsByShop(storedSettings: DemoAppState["settingsByShop"] | un
           storedBundle?.tax?.promotionEnabled ?? defaultBundle?.tax?.promotionEnabled ?? false,
         promotionTarget:
           storedBundle?.tax?.promotionTarget ?? defaultBundle?.tax?.promotionTarget ?? "bill",
+        promotionScope:
+          storedBundle?.tax?.promotionScope ?? defaultBundle?.tax?.promotionScope ?? "bill",
+        promotionStartsAt:
+          storedBundle?.tax?.promotionStartsAt ?? defaultBundle?.tax?.promotionStartsAt,
+        promotionEndsAt:
+          storedBundle?.tax?.promotionEndsAt ?? defaultBundle?.tax?.promotionEndsAt,
+        promotionProductIds:
+          storedBundle?.tax?.promotionProductIds ?? defaultBundle?.tax?.promotionProductIds ?? [],
         promotionDiscountType:
           storedBundle?.tax?.promotionDiscountType ?? defaultBundle?.tax?.promotionDiscountType ?? "percentage",
         promotionDiscountValue:
-          storedBundle?.tax?.promotionDiscountValue ?? defaultBundle?.tax?.promotionDiscountValue ?? 0
+          storedBundle?.tax?.promotionDiscountValue ?? defaultBundle?.tax?.promotionDiscountValue ?? 0,
+        permanentItemDiscounts:
+          storedBundle?.tax?.permanentItemDiscounts ?? defaultBundle?.tax?.permanentItemDiscounts ?? {}
       }
     };
 
@@ -829,6 +920,24 @@ function normalizeStoredState(stored: DemoAppState, ownerBootstrap: OwnerBootstr
     })),
     businessDays: stored.businessDays ?? [],
     shifts: stored.shifts ?? [],
+    attendanceRecords: (stored.attendanceRecords ?? []).map((record) => ({
+      ...record,
+      scheduledHours: Number.isFinite(record.scheduledHours) ? record.scheduledHours : 8,
+      hourlyRate: Number.isFinite(record.hourlyRate) ? record.hourlyRate : 0,
+      paidHours:
+        Number.isFinite(record.paidHours)
+          ? record.paidHours
+          : record.status === "closed" || record.status === "auto_closed"
+            ? calculateAttendanceHours(record.clockInAt, record.clockOutAt, record.scheduledHours)
+            : record.paidHours
+    })),
+    attendanceQrSessions: stored.attendanceQrSessions ?? [],
+    payrollRates: (stored.payrollRates ?? []).map((rate) => ({
+      ...rate,
+      defaultDailyHours: Number.isFinite(rate.defaultDailyHours) ? rate.defaultDailyHours : 8,
+      hourlyRate: Number.isFinite(rate.hourlyRate) ? rate.hourlyRate : 0,
+      currency: rate.currency || "SAR"
+    })),
     dayCloses: stored.dayCloses ?? [],
     cashMovements: stored.cashMovements ?? [],
     expenseCategories: stored.expenseCategories ?? initialAppState.expenseCategories ?? [],
@@ -1268,6 +1377,9 @@ function buildShopCloudSyncState(state: DemoAppState, shopId: string): ShopCloud
     ledgerEntries: rowsForShop(state.ledgerEntries, shopId),
     businessDays: rowsForShop(state.businessDays, shopId),
     shifts: rowsForShop(state.shifts, shopId),
+    attendanceRecords: rowsForShop(state.attendanceRecords, shopId),
+    attendanceQrSessions: rowsForShop(state.attendanceQrSessions, shopId),
+    payrollRates: rowsForShop(state.payrollRates, shopId),
     dayCloses: rowsForShop(state.dayCloses, shopId),
     cashMovements: rowsForShop(state.cashMovements, shopId),
     expenseCategories: rowsForShop(state.expenseCategories, shopId),
@@ -1337,6 +1449,9 @@ function mergeShopCloudStatePatch(current: DemoAppState, patch: ShopCloudStatePa
     ledgerEntries: replaceRowsForShop(current.ledgerEntries, patch.ledgerEntries, shopId),
     businessDays: replaceRowsForShop(current.businessDays, patch.businessDays, shopId),
     shifts: replaceRowsForShop(current.shifts, patch.shifts, shopId),
+    attendanceRecords: replaceRowsForShop(current.attendanceRecords, patch.attendanceRecords, shopId),
+    attendanceQrSessions: replaceRowsForShop(current.attendanceQrSessions, patch.attendanceQrSessions, shopId),
+    payrollRates: replaceRowsForShop(current.payrollRates, patch.payrollRates, shopId),
     dayCloses: replaceRowsForShop(current.dayCloses, patch.dayCloses, shopId),
     cashMovements: replaceRowsForShop(current.cashMovements, patch.cashMovements, shopId),
     expenseCategories: replaceRowsForShop(current.expenseCategories, patch.expenseCategories, shopId),
@@ -1427,6 +1542,9 @@ function removeShopFromLocalState(current: DemoAppState, shopId: string) {
     ledgerEntries: current.ledgerEntries.filter((entry) => entry.shopId !== shopId),
     businessDays: current.businessDays.filter((entry) => entry.shopId !== shopId),
     shifts: current.shifts.filter((entry) => entry.shopId !== shopId),
+    attendanceRecords: current.attendanceRecords.filter((entry) => entry.shopId !== shopId),
+    attendanceQrSessions: current.attendanceQrSessions.filter((entry) => entry.shopId !== shopId),
+    payrollRates: current.payrollRates.filter((entry) => entry.shopId !== shopId),
     dayCloses: current.dayCloses.filter((entry) => entry.shopId !== shopId),
     cashMovements: current.cashMovements.filter((entry) => entry.shopId !== shopId),
     expenseCategories: current.expenseCategories.filter((entry) => entry.shopId !== shopId),
@@ -1759,6 +1877,23 @@ export function AppProvider({
   const currentUsers = state.users.filter((user) => user.shopId === currentShopId);
   const currentBusinessDay = getActiveBusinessDay(state.businessDays, currentShopId);
   const currentShift = getActiveShift(state.shifts, currentShopId, session?.id ?? null);
+  const currentAttendance =
+    currentShopId && session?.workspace === "shop" && currentBusinessDay
+      ? state.attendanceRecords.find(
+          (record) =>
+            record.shopId === currentShopId &&
+            record.userId === session.id &&
+            record.businessDate === currentBusinessDay.businessDate &&
+            !record.clockOutAt
+        ) ??
+        state.attendanceRecords.find(
+          (record) =>
+            record.shopId === currentShopId &&
+            record.userId === session.id &&
+            record.businessDate === currentBusinessDay.businessDate
+        ) ??
+        null
+      : null;
   const currentBrowserInfo = typeof window === "undefined" ? "" : getCurrentBrowserInfo();
   const currentDeviceActivation =
     currentShopId
@@ -2261,6 +2396,7 @@ export function AppProvider({
       currentUsers,
       currentBusinessDay,
       currentShift,
+      currentAttendance,
       locale: state.ui.locale,
       direction: state.ui.direction,
       t: (key, values) => resolveTranslation(state.ui.locale, key, dictionaryOverrides, values),
@@ -3329,6 +3465,9 @@ export function AppProvider({
             ledgerEntries: current.ledgerEntries.filter((entry) => entry.shopId !== shopId),
             businessDays: current.businessDays.filter((entry) => entry.shopId !== shopId),
             shifts: current.shifts.filter((entry) => entry.shopId !== shopId),
+            attendanceRecords: current.attendanceRecords.filter((entry) => entry.shopId !== shopId),
+            attendanceQrSessions: current.attendanceQrSessions.filter((entry) => entry.shopId !== shopId),
+            payrollRates: current.payrollRates.filter((entry) => entry.shopId !== shopId),
             dayCloses: current.dayCloses.filter((entry) => entry.shopId !== shopId),
             cashMovements: current.cashMovements.filter((entry) => entry.shopId !== shopId),
             expenseCategories: current.expenseCategories.filter((entry) => entry.shopId !== shopId),
@@ -6076,7 +6215,20 @@ export function AppProvider({
                 closedAt
               },
               ...current.dayCloses
-            ]
+            ],
+            attendanceRecords: current.attendanceRecords.map((record) =>
+              record.shopId === currentShopId &&
+              record.businessDate === openDay.businessDate &&
+              !record.clockOutAt
+                ? {
+                    ...record,
+                    status: "auto_closed",
+                    clockOutAt: closedAt,
+                    paidHours: record.scheduledHours,
+                    note: record.note ?? "Auto closed at day close using default scheduled hours."
+                  }
+                : record
+            )
           };
         });
 
@@ -6197,6 +6349,19 @@ export function AppProvider({
                   ...shifts
                 ]
               : shifts,
+            attendanceRecords: current.attendanceRecords.map((record) =>
+              record.shopId === currentShopId &&
+              record.businessDate === openDay.businessDate &&
+              !record.clockOutAt
+                ? {
+                    ...record,
+                    status: "auto_closed",
+                    clockOutAt: closedAt,
+                    paidHours: record.scheduledHours,
+                    note: record.note ?? "Auto closed by day rollover using default scheduled hours."
+                  }
+                : record
+            ),
             dayCloses: [
               {
                 id: createId("day_close"),
@@ -6217,6 +6382,390 @@ export function AppProvider({
               },
               ...current.dayCloses
             ]
+          };
+        });
+
+        return result;
+      },
+      clockIn: (payload = {}) => {
+        if (!currentShopId || !session) {
+          return { ok: false, message: "Session unavailable." };
+        }
+
+        const source = payload.source ?? "qr";
+        const targetUserId = payload.userId ?? session.id;
+
+        if (targetUserId !== session.id && session.role !== "shop_admin") {
+          return { ok: false, message: "Only the shop admin can clock in another employee." };
+        }
+
+        if (source === "admin_bypass" && session.role !== "shop_admin") {
+          return { ok: false, message: "Only the shop admin can bypass clock-in verification." };
+        }
+
+        if (source !== "admin_bypass" && (!payload.location || !payload.selfieUrl)) {
+          return { ok: false, message: "Capture location and selfie before clocking in." };
+        }
+
+        let result: { ok: boolean; message?: string; attendanceId?: string } = {
+          ok: false,
+          message: "Unable to clock in."
+        };
+
+        setState((current) => {
+          const openDay = getActiveBusinessDay(current.businessDays, currentShopId);
+
+          if (!openDay) {
+            result = { ok: false, message: "Open the business day before clocking in." };
+            return current;
+          }
+
+          const employee = current.users.find(
+            (user) => user.id === targetUserId && user.shopId === currentShopId && user.isActive
+          );
+
+          if (!employee) {
+            result = { ok: false, message: "Employee not found or inactive." };
+            return current;
+          }
+
+          const existingOpen = current.attendanceRecords.find(
+            (record) =>
+              record.shopId === currentShopId &&
+              record.userId === targetUserId &&
+              record.businessDate === openDay.businessDate &&
+              !record.clockOutAt
+          );
+
+          if (existingOpen) {
+            result = { ok: true, message: "Employee is already clocked in.", attendanceId: existingOpen.id };
+            return current;
+          }
+
+          const rate = getPayrollRateForUser(current, currentShopId, targetUserId, currentSettings?.pos.currency ?? "SAR");
+          const now = new Date().toISOString();
+          const attendanceId = createId("att");
+
+          result = { ok: true, attendanceId };
+
+          return {
+            ...current,
+            attendanceRecords: [
+              {
+                id: attendanceId,
+                shopId: currentShopId,
+                userId: targetUserId,
+                businessDate: openDay.businessDate,
+                status: "open",
+                source,
+                clockInAt: now,
+                clockInLocation: payload.location,
+                clockInSelfieUrl: payload.selfieUrl,
+                scheduledHours: rate.defaultDailyHours,
+                hourlyRate: rate.hourlyRate,
+                note: payload.note?.trim() || undefined,
+                createdAt: now
+              },
+              ...current.attendanceRecords
+            ],
+            auditLogs:
+              source === "admin_bypass" || targetUserId !== session.id
+                ? [
+                    {
+                      id: createId("audit"),
+                      shopId: currentShopId,
+                      actorId: session.id,
+                      action: source === "admin_bypass" ? "attendance.clock_in.bypass" : "attendance.clock_in.manual",
+                      targetId: targetUserId,
+                      detail:
+                        source === "admin_bypass"
+                          ? `Clock-in bypass used for ${employee.name}.`
+                          : `Manual clock-in created for ${employee.name}.`,
+                      createdAt: now
+                    },
+                    ...current.auditLogs
+                  ]
+                : current.auditLogs
+          };
+        });
+
+        return result;
+      },
+      clockOut: (payload = {}) => {
+        if (!currentShopId || !session) {
+          return { ok: false, message: "Session unavailable." };
+        }
+
+        const targetUserId = payload.userId ?? session.id;
+
+        if (targetUserId !== session.id && session.role !== "shop_admin") {
+          return { ok: false, message: "Only the shop admin can clock out another employee." };
+        }
+
+        let result: { ok: boolean; message?: string } = { ok: false, message: "Unable to clock out." };
+
+        setState((current) => {
+          const openDay = getActiveBusinessDay(current.businessDays, currentShopId);
+          const activeAttendance = current.attendanceRecords.find(
+            (record) =>
+              record.shopId === currentShopId &&
+              record.userId === targetUserId &&
+              (!openDay || record.businessDate === openDay.businessDate) &&
+              !record.clockOutAt
+          );
+
+          if (!activeAttendance) {
+            result = { ok: false, message: "No open clock-in found for this employee." };
+            return current;
+          }
+
+          const clockOutAt = new Date().toISOString();
+          const paidHours = calculateAttendanceHours(
+            activeAttendance.clockInAt,
+            clockOutAt,
+            activeAttendance.scheduledHours
+          );
+
+          result = { ok: true };
+
+          return {
+            ...current,
+            attendanceRecords: current.attendanceRecords.map((record) =>
+              record.id === activeAttendance.id
+                ? {
+                    ...record,
+                    status: "closed",
+                    clockOutAt,
+                    clockOutLocation: payload.location,
+                    clockOutSelfieUrl: payload.selfieUrl,
+                    paidHours,
+                    note: payload.note?.trim() || record.note
+                  }
+                : record
+            ),
+            auditLogs:
+              targetUserId !== session.id
+                ? [
+                    {
+                      id: createId("audit"),
+                      shopId: currentShopId,
+                      actorId: session.id,
+                      action: "attendance.clock_out.manual",
+                      targetId: targetUserId,
+                      detail: "Shop admin manually clocked out an employee.",
+                      createdAt: clockOutAt
+                    },
+                    ...current.auditLogs
+                  ]
+                : current.auditLogs
+          };
+        });
+
+        return result;
+      },
+      submitAttendanceScan: ({ businessDate, location, selfieUrl, shopId, token, userId }) => {
+        if (!shopId || !userId || !businessDate || !token) {
+          return { ok: false, message: "Attendance QR is missing required details." };
+        }
+
+        if (token !== createAttendanceToken(shopId, userId, businessDate)) {
+          return { ok: false, message: "This attendance QR is not valid." };
+        }
+
+        if (!location || !selfieUrl) {
+          return { ok: false, message: "Location and selfie are required for QR clock-in." };
+        }
+
+        let result: { ok: boolean; message?: string } = { ok: false, message: "Unable to save clock-in." };
+
+        setState((current) => {
+          const openDay = getActiveBusinessDay(current.businessDays, shopId);
+
+          if (!openDay || openDay.businessDate !== businessDate) {
+            result = { ok: false, message: "This QR is not for the current open business day." };
+            return current;
+          }
+
+          const employee = current.users.find((user) => user.id === userId && user.shopId === shopId && user.isActive);
+
+          if (!employee) {
+            result = { ok: false, message: "Employee not found or inactive." };
+            return current;
+          }
+
+          const existingOpen = current.attendanceRecords.find(
+            (record) =>
+              record.shopId === shopId &&
+              record.userId === userId &&
+              record.businessDate === businessDate &&
+              !record.clockOutAt
+          );
+
+          if (existingOpen) {
+            result = { ok: true, message: "You are already clocked in." };
+            return current;
+          }
+
+          const shop = current.shops.find((entry) => entry.id === shopId);
+          const rate = getPayrollRateForUser(current, shopId, userId, shop?.currency ?? "SAR");
+          const now = new Date().toISOString();
+          const attendanceId = createId("att");
+
+          result = { ok: true, message: "Clock-in saved. You can return to the POS." };
+
+          return {
+            ...current,
+            attendanceRecords: [
+              {
+                id: attendanceId,
+                shopId,
+                userId,
+                businessDate,
+                status: "open",
+                source: "qr",
+                clockInAt: now,
+                clockInLocation: location,
+                clockInSelfieUrl: selfieUrl,
+                scheduledHours: rate.defaultDailyHours,
+                hourlyRate: rate.hourlyRate,
+                createdAt: now
+              },
+              ...current.attendanceRecords
+            ],
+            auditLogs: [
+              {
+                id: createId("audit"),
+                shopId,
+                actorId: userId,
+                action: "attendance.clock_in.qr_scan",
+                targetId: attendanceId,
+                detail: `QR clock-in captured for ${employee.name}.`,
+                createdAt: now
+              },
+              ...current.auditLogs
+            ]
+          };
+        });
+
+        return result;
+      },
+      saveAttendanceRecord: (payload) => {
+        if (!currentShopId || !session) {
+          return { ok: false, message: "Session unavailable." };
+        }
+
+        if (session.role !== "shop_admin") {
+          return { ok: false, message: "Only the shop admin can adjust attendance." };
+        }
+
+        let result: { ok: boolean; message?: string } = { ok: false, message: "Unable to save attendance." };
+
+        setState((current) => {
+          const employee = current.users.find(
+            (user) => user.id === payload.userId && user.shopId === currentShopId && user.isActive
+          );
+
+          if (!employee) {
+            result = { ok: false, message: "Employee not found or inactive." };
+            return current;
+          }
+
+          const openDay = getActiveBusinessDay(current.businessDays, currentShopId);
+          const businessDate =
+            payload.businessDate?.trim() || openDay?.businessDate || getBusinessDateInTimezone(currentShop?.timezone ?? "Asia/Riyadh");
+          const rate = getPayrollRateForUser(current, currentShopId, payload.userId, currentSettings?.pos.currency ?? "SAR");
+          const scheduledHours = Math.max(0, payload.scheduledHours ?? rate.defaultDailyHours);
+          const hourlyRate = Math.max(0, payload.hourlyRate ?? rate.hourlyRate);
+          const paidHours =
+            typeof payload.paidHours === "number"
+              ? Math.max(0, payload.paidHours)
+              : calculateAttendanceHours(payload.clockInAt, payload.clockOutAt, scheduledHours);
+          const now = new Date().toISOString();
+          const nextRecord: AttendanceRecord = {
+            id: payload.id ?? createId("att"),
+            shopId: currentShopId,
+            userId: payload.userId,
+            businessDate,
+            status: payload.clockOutAt ? "closed" : "open",
+            source: "manual",
+            clockInAt: payload.clockInAt,
+            clockOutAt: payload.clockOutAt?.trim() || undefined,
+            scheduledHours,
+            paidHours: payload.clockOutAt ? paidHours : undefined,
+            hourlyRate,
+            note: payload.note?.trim() || undefined,
+            editedBy: session.id,
+            editedAt: now,
+            createdAt: current.attendanceRecords.find((record) => record.id === payload.id)?.createdAt ?? now
+          };
+
+          result = { ok: true };
+
+          return {
+            ...current,
+            attendanceRecords: payload.id
+              ? current.attendanceRecords.map((record) => (record.id === payload.id ? { ...record, ...nextRecord } : record))
+              : [nextRecord, ...current.attendanceRecords],
+            auditLogs: [
+              {
+                id: createId("audit"),
+                shopId: currentShopId,
+                actorId: session.id,
+                action: payload.id ? "attendance.adjust" : "attendance.manual_create",
+                targetId: nextRecord.id,
+                detail: `Attendance record saved for ${employee.name}.`,
+                createdAt: now
+              },
+              ...current.auditLogs
+            ]
+          };
+        });
+
+        return result;
+      },
+      savePayrollRate: ({ userId, hourlyRate, defaultDailyHours }) => {
+        if (!currentShopId || !session) {
+          return { ok: false, message: "Session unavailable." };
+        }
+
+        if (session.role !== "shop_admin") {
+          return { ok: false, message: "Only the shop admin can update payroll rates." };
+        }
+
+        if (hourlyRate < 0 || defaultDailyHours <= 0) {
+          return { ok: false, message: "Enter valid salary and default hours." };
+        }
+
+        let result: { ok: boolean; message?: string } = { ok: false, message: "Unable to save payroll rate." };
+
+        setState((current) => {
+          const employee = current.users.find((user) => user.id === userId && user.shopId === currentShopId);
+
+          if (!employee) {
+            result = { ok: false, message: "Employee not found." };
+            return current;
+          }
+
+          const existing = current.payrollRates.find((rate) => rate.shopId === currentShopId && rate.userId === userId);
+          const now = new Date().toISOString();
+          const nextRate = {
+            id: existing?.id ?? createId("payroll"),
+            shopId: currentShopId,
+            userId,
+            hourlyRate: Math.round(Math.max(0, hourlyRate) * 100) / 100,
+            defaultDailyHours: Math.round(Math.max(0.25, defaultDailyHours) * 100) / 100,
+            currency: currentSettings?.pos.currency ?? "SAR",
+            createdAt: existing?.createdAt ?? now,
+            updatedAt: now
+          };
+
+          result = { ok: true };
+
+          return {
+            ...current,
+            payrollRates: existing
+              ? current.payrollRates.map((rate) => (rate.id === existing.id ? nextRate : rate))
+              : [nextRate, ...current.payrollRates]
           };
         });
 
@@ -7454,6 +8003,7 @@ export function AppProvider({
       }
     }),
     [
+      currentAttendance,
       currentBusinessDay,
       currentDeviceActivation,
       currentLicense,
