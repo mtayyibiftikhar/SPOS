@@ -14,6 +14,7 @@ import type {
   DeviceActivation,
   DictionaryEntry,
   Locale,
+  License,
   LicenseStatus,
   Product,
   ProductCategory,
@@ -70,7 +71,7 @@ import { createPublicReceiptToken } from "@/lib/public-receipts";
 import { createAttendanceToken } from "@/lib/attendance";
 import { createId, getDirection, hashSecret } from "@/lib/utils";
 
-const STORAGE_KEY = "simple-pos-demo-state";
+const STORAGE_KEY = "simple-pos-state-v3";
 const SHARED_STATE_ENDPOINT = "/api/local-state";
 const SHOP_CLOUD_STATE_ENDPOINT = "/api/shop-state";
 const SHARED_STATE_REFRESH_INTERVAL_MS = 2_500;
@@ -102,6 +103,18 @@ function validatePasswordLength(password: string, label = "Password") {
   return password.trim().length >= MIN_PASSWORD_LENGTH
     ? null
     : `${label} must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+}
+
+function validateInternationalPhone(phone: string | undefined) {
+  const value = phone?.trim() ?? "";
+
+  if (!value) {
+    return null;
+  }
+
+  return /^\+[1-9]\d{7,14}$/.test(value.replace(/[\s()-]/g, ""))
+    ? null
+    : "Phone must include a valid country code, for example +966501234567.";
 }
 
 function parseJsonPayload<TPayload>(raw: string, fallback: TPayload) {
@@ -147,6 +160,8 @@ type OwnerCreateShopInput = {
   setupEmail: string;
   setupPassword: string;
   address?: string;
+  country?: string;
+  city?: string;
   planName: string;
   billingCycle?: Shop["billingCycle"];
   packagePrice?: number;
@@ -257,6 +272,7 @@ type OwnerLicenseInput = {
   billingCycle?: Shop["billingCycle"];
   packagePrice?: number;
   totalPaid?: number;
+  autoPaymentEnabled?: boolean;
   allowedDevices?: number;
   autoLockDaysAfterExpiry?: number;
   lockReason?: string;
@@ -270,6 +286,13 @@ type OwnerShopProfileInput = {
   setupPassword?: string;
   phone?: string;
   address?: string;
+};
+
+type OwnerCloudHydrationInput = {
+  devices: DeviceActivation[];
+  licenses: License[];
+  shops: Shop[];
+  users: User[];
 };
 
 type SettingsSection = keyof ShopSettingsBundle;
@@ -533,6 +556,7 @@ interface AppContextValue {
     shopId?: string;
   };
   ownerCreateShop: (payload: OwnerCreateShopInput) => { ok: boolean; message?: string; shopId?: string; productKey?: string };
+  ownerHydrateCloudState: (payload: OwnerCloudHydrationInput) => void;
   ownerDeleteShop: (payload: {
     shopId: string;
     confirmName: string;
@@ -1099,8 +1123,7 @@ function syncOwnerStateToCloud(state: DemoAppState) {
   void fetch("/api/owner/sync-state", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "x-owner-email": ownerEmail
+      "Content-Type": "application/json"
     },
     body: JSON.stringify({
       state: buildOwnerCloudSyncState(state)
@@ -1116,8 +1139,7 @@ function deleteOwnerProductKeyFromCloud(productKey: string, ownerEmail?: string)
   void fetch("/api/owner/delete-product-key", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "x-owner-email": ownerEmail
+      "Content-Type": "application/json"
     },
     body: JSON.stringify({ productKey })
   }).catch(() => undefined);
@@ -1131,8 +1153,7 @@ function deleteOwnerDeviceActivationFromCloud(deviceActivationId: string, ownerE
   void fetch("/api/owner/delete-device-activation", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "x-owner-email": ownerEmail
+      "Content-Type": "application/json"
     },
     body: JSON.stringify({ deviceActivationId })
   }).catch(() => undefined);
@@ -1146,8 +1167,7 @@ function deleteOwnerShopDevicesFromCloud(shopId: string, ownerEmail?: string) {
   void fetch("/api/owner/delete-device-activation", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "x-owner-email": ownerEmail
+      "Content-Type": "application/json"
     },
     body: JSON.stringify({ allForShop: true, shopId })
   }).catch(() => undefined);
@@ -1168,8 +1188,7 @@ async function clearOwnerShopDataInCloud(
   const response = await fetch("/api/owner/clear-shop-data", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "x-owner-email": ownerEmail
+      "Content-Type": "application/json"
     },
     body: JSON.stringify(payload)
   });
@@ -1191,8 +1210,7 @@ async function deleteOwnerShopFromCloud(
   const response = await fetch("/api/owner/delete-shop", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "x-owner-email": ownerEmail
+      "Content-Type": "application/json"
     },
     body: JSON.stringify(payload)
   });
@@ -1221,8 +1239,7 @@ async function resetOwnerShopUserPasswordInCloud(
   const response = await fetch("/api/owner/reset-shop-user-password", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "x-owner-email": ownerEmail
+      "Content-Type": "application/json"
     },
     body: JSON.stringify({
       password: payload.password,
@@ -3084,6 +3101,8 @@ export function AppProvider({
         setupEmail,
         setupPassword,
         address,
+        country,
+        city,
         planName,
         billingCycle,
         packagePrice,
@@ -3106,9 +3125,14 @@ export function AppProvider({
         }
 
         const setupPasswordError = validatePasswordLength(normalizedSetupPassword, "Setup password");
+        const phoneError = validateInternationalPhone(phone);
 
         if (setupPasswordError) {
           return { ok: false, message: setupPasswordError };
+        }
+
+        if (phoneError) {
+          return { ok: false, message: phoneError };
         }
 
         if (allowedDevices < 1) {
@@ -3158,6 +3182,8 @@ export function AppProvider({
             phone: phone?.trim() || "",
             email: email?.trim() || undefined,
             address: address?.trim() || "",
+            country: country?.trim() || "Saudi Arabia",
+            city: city?.trim() || "",
             currency: "SAR",
             timezone: "Asia/Riyadh",
             planName: planName.trim() || "Starter",
@@ -3273,6 +3299,39 @@ export function AppProvider({
         });
 
         return result;
+      },
+      ownerHydrateCloudState: ({ devices, licenses, shops, users }) => {
+        setState((current) => {
+          const authoritativeShopIds = new Set(shops.map((shop) => shop.id));
+          const incomingOwnerUsers = users.filter((user) => !user.shopId);
+          const incomingOwnerIds = new Set(incomingOwnerUsers.map((user) => user.id));
+          const incomingOwnerEmails = new Set(incomingOwnerUsers.map((user) => user.email.trim().toLowerCase()));
+          const retainedOwnerUsers = current.users.filter(
+            (user) =>
+              !user.shopId &&
+              !incomingOwnerIds.has(user.id) &&
+              !incomingOwnerEmails.has(user.email.trim().toLowerCase())
+          );
+          const currentShopsById = new Map(current.shops.map((shop) => [shop.id, shop]));
+          const currentLicensesByShop = new Map(current.licenses.map((license) => [license.shopId, license]));
+          const currentUsersById = new Map(current.users.map((user) => [user.id, user]));
+          const currentDevicesById = new Map(current.deviceActivations.map((device) => [device.id, device]));
+
+          return {
+            ...current,
+            shops: shops.map((shop) => ({ ...currentShopsById.get(shop.id), ...shop })),
+            licenses: licenses.map((license) => ({ ...currentLicensesByShop.get(license.shopId), ...license })),
+            users: [
+              ...retainedOwnerUsers,
+              ...users.map((user) => ({ ...currentUsersById.get(user.id), ...user }))
+            ],
+            deviceActivations: devices.map((device) => ({ ...currentDevicesById.get(device.id), ...device })),
+            productKeys: current.productKeys.filter((productKey) => authoritativeShopIds.has(productKey.shopId)),
+            settingsByShop: Object.fromEntries(
+              Object.entries(current.settingsByShop).filter(([shopId]) => authoritativeShopIds.has(shopId))
+            )
+          };
+        });
       },
       ownerUpdateShopProfile: ({ shopId, shopName, email, setupEmail, setupPassword, phone, address }) => {
         if (!session || session.role !== "super_admin") {
@@ -3392,8 +3451,7 @@ export function AppProvider({
         }
 
         const shopToDelete = state.shops.find((entry) => entry.id === shopId);
-        const ownerEmail =
-          state.users.find((user) => user.role === "super_admin" && user.isActive)?.email ?? session.email;
+        const ownerEmail = session.email;
         let result: { ok: boolean; message?: string } = {
           ok: false,
           message: "Unable to delete store."
@@ -3517,18 +3575,6 @@ export function AppProvider({
         const ownerEmail =
           state.users.find((user) => user.role === "super_admin" && user.isActive)?.email ?? session.email;
 
-        setState((current) => {
-          const nextState = clearShopDataScope(current, shopId, scope, {
-            actorId: session.id,
-            createdAt: clearedAt,
-            shopName: shop.name
-          });
-
-          persistLocalOwnerStateSnapshot(nextState);
-
-          return nextState;
-        });
-
         try {
           const cloudResult = await clearOwnerShopDataInCloud(
             {
@@ -3541,18 +3587,28 @@ export function AppProvider({
 
           if (!cloudResult.ok) {
             return {
-              ok: true,
-              message: `${ownerClearShopDataScopeLabels[scope]} cleared locally for ${shop.name}. Cloud reset warning: ${
-                cloudResult.message ?? "Unable to clear this store data in cloud."
-              }`
+              ok: false,
+              message: cloudResult.message ?? `Unable to clear ${ownerClearShopDataScopeLabels[scope].toLowerCase()} in cloud.`
             };
           }
         } catch {
           return {
-            ok: true,
-            message: `${ownerClearShopDataScopeLabels[scope]} cleared locally for ${shop.name}. Cloud reset warning: unable to reach cloud reset service.`
+            ok: false,
+            message: "Unable to reach the cloud reset service. No local data was cleared."
           };
         }
+
+        setState((current) => {
+          const nextState = clearShopDataScope(current, shopId, scope, {
+            actorId: session.id,
+            createdAt: clearedAt,
+            shopName: shop.name
+          });
+
+          persistLocalOwnerStateSnapshot(nextState);
+
+          return nextState;
+        });
 
         return { ok: true, message: `${ownerClearShopDataScopeLabels[scope]} cleared for ${shop.name}.` };
       },
@@ -3944,7 +4000,7 @@ export function AppProvider({
       mergeCloudActivationState: (payload) => {
         setState((current) => mergeCloudActivationStatePatch(current, payload));
       },
-      ownerSetLicense: ({ shopId, status, expiresAt, planName, billingCycle, packagePrice, totalPaid, allowedDevices, autoLockDaysAfterExpiry, lockReason }) => {
+      ownerSetLicense: ({ shopId, status, expiresAt, planName, billingCycle, packagePrice, totalPaid, autoPaymentEnabled, allowedDevices, autoLockDaysAfterExpiry, lockReason }) => {
         if (!session || session.role !== "super_admin") {
           return { ok: false, message: "Only the POS owner can update licenses." };
         }
@@ -3998,6 +4054,7 @@ export function AppProvider({
                     packagePrice: packagePrice === undefined ? entry.packagePrice ?? 0 : Math.max(0, Number(packagePrice || 0)),
                     totalPaid: normalizedTotalPaid,
                     lastOwnerPaymentAt: totalPaidChanged ? updatedAt : entry.lastOwnerPaymentAt,
+                    autoPaymentEnabled: autoPaymentEnabled ?? entry.autoPaymentEnabled ?? false,
                     licenseStatus: status
                   }
                 : entry
@@ -4182,8 +4239,7 @@ export function AppProvider({
           return { ok: false, message: passwordError };
         }
 
-        const ownerEmail =
-          state.users.find((user) => user.role === "super_admin" && user.isActive)?.email ?? session.email;
+        const ownerEmail = session.email;
         const localTarget = state.users.find((user) => user.id === userId && user.role !== "super_admin");
         const shouldResetCloud = isLikelyCloudUserId(userId) || !localTarget;
         let cloudUser: User | undefined;
@@ -4309,17 +4365,12 @@ export function AppProvider({
           const existingUser = id ? current.users.find((user) => user.id === id && !user.shopId) : undefined;
           const createdAt = new Date().toISOString();
 
-          if (id && !existingUser) {
-            result = { ok: false, message: "Owner portal user not found." };
-            return current;
-          }
-
           if (!existingUser && !normalizedPassword) {
             result = { ok: false, message: "Password is required for a new owner portal user." };
             return current;
           }
 
-          const userId = existingUser?.id ?? createId("owner_user");
+          const userId = existingUser?.id ?? id ?? createId("owner_user");
           const nextUser: User = {
             id: userId,
             name: normalizedName,

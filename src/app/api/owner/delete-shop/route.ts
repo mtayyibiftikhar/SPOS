@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { stableUuid } from "@/lib/cloud-sync";
 import { POS_ASSETS_BUCKET } from "@/lib/supabase/storage-assets";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getAuthorizedOwnerSession } from "@/lib/supabase/owner-session";
 
 const SNAPSHOT_BUCKET = "shop-cloud-snapshots";
 
@@ -50,35 +51,6 @@ async function resolveCloudShopId(supabase: ReturnType<typeof createSupabaseAdmi
   }
 
   return data?.[0]?.id ?? candidateIds[0];
-}
-
-async function isAuthorizedOwnerUser(
-  supabase: ReturnType<typeof createSupabaseAdminClient>,
-  ownerEmail: string
-) {
-  const expectedOwnerEmail = clean(process.env.POS_OWNER_EMAIL).toLowerCase();
-
-  if (!ownerEmail) {
-    return false;
-  }
-
-  if (expectedOwnerEmail && ownerEmail === expectedOwnerEmail) {
-    return true;
-  }
-
-  const { data: ownerProfile, error } = await supabase
-    .from("profiles")
-    .select("id, shop_id, role, is_active")
-    .eq("email", ownerEmail)
-    .eq("is_active", true)
-    .in("role", ["super_admin", "support"])
-    .maybeSingle();
-
-  if (error) {
-    throw error;
-  }
-
-  return Boolean(ownerProfile && !ownerProfile.shop_id);
 }
 
 async function listStorageObjectsRecursively(
@@ -140,6 +112,11 @@ async function removeStoragePrefix(
 
 async function deleteShopRows(supabase: ReturnType<typeof createSupabaseAdminClient>, shopId: string) {
   const deletePlan: Array<[string, string]> = [
+    ["attendance_records", "shop_id"],
+    ["attendance_qr_sessions", "shop_id"],
+    ["payroll_rates", "shop_id"],
+    ["product_barcodes", "shop_id"],
+    ["owner_subscription_payments", "shop_id"],
     ["refund_items", "shop_id"],
     ["payments", "shop_id"],
     ["bill_items", "shop_id"],
@@ -182,8 +159,6 @@ async function deleteShopRows(supabase: ReturnType<typeof createSupabaseAdminCli
 }
 
 export async function POST(request: Request) {
-  const ownerEmail = request.headers.get("x-owner-email")?.trim().toLowerCase();
-
   let body: DeleteShopRequest;
 
   try {
@@ -199,12 +174,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    const supabase = createSupabaseAdminClient();
-    const isAuthorized = await isAuthorizedOwnerUser(supabase, ownerEmail ?? "");
-
-    if (!isAuthorized) {
+    const authorization = await getAuthorizedOwnerSession(request, ["super_admin"]);
+    if (!authorization) {
       return NextResponse.json({ ok: false, message: "Owner shop delete is not authorized." }, { status: 401 });
     }
+    const { supabase } = authorization;
 
     const cloudShopId = await resolveCloudShopId(supabase, requestedShopId);
     const candidateShopIds = getCandidateShopIds(requestedShopId);

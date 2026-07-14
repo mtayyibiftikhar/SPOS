@@ -6,6 +6,7 @@ import {
   BarChart3,
   Bell,
   Building2,
+  CalendarDays,
   Copy,
   CreditCard,
   FileClock,
@@ -46,12 +47,12 @@ const productKeyStatuses: ProductKeyStatus[] = ["unused", "active", "expired", "
 
 const ownerSections = [
   { id: "overview", label: "Overview", description: "Owner health", icon: LayoutDashboard },
-  { id: "create", label: "Create shop", description: "Prepare client", icon: UserRoundPlus },
   { id: "stores", label: "Stores", description: "Status groups", icon: Building2 },
   { id: "keys", label: "Activation keys", description: "Copy and revoke", icon: KeyRound },
   { id: "billing", label: "Billing", description: "Packages and paid", icon: CreditCard },
   { id: "reports", label: "Reports", description: "Licenses and sales", icon: BarChart3 },
   { id: "branding", label: "Branding", description: "POS company", icon: Palette },
+  { id: "team", label: "Owner team", description: "Portal access", icon: UsersRound },
   { id: "access", label: "Access", description: "Support and reset", icon: UserCog },
   { id: "audit", label: "Audit", description: "Activity trail", icon: FileClock }
 ] as const;
@@ -59,6 +60,7 @@ const ownerSections = [
 type OwnerSectionId = (typeof ownerSections)[number]["id"];
 type StoreFilter = "all" | "active" | "trial" | "expiring" | "locked" | "expired";
 type ReportRange = "today" | "week" | "month" | "year" | "custom";
+type BillingFilter = "all" | "paid" | "pending" | "cancelled";
 
 type OwnerCloudSummary = {
   brand?: Partial<BrandProfile> | null;
@@ -78,6 +80,30 @@ type OwnerCloudSummary = {
     shop_id: string;
     status: ProductKeyStatus;
   }>;
+  packages: Array<{
+    billing_cycle: BillingCycle;
+    created_at: string;
+    currency: string;
+    duration_days: number;
+    id: string;
+    is_active: boolean;
+    name: string;
+    price: number;
+    updated_at: string;
+  }>;
+  subscriptionPayments: Array<{
+    amount: number;
+    created_at: string;
+    currency: string;
+    id: string;
+    note: string | null;
+    package_id: string | null;
+    payment_method: string | null;
+    period_end: string | null;
+    period_start: string | null;
+    shop_id: string;
+    status: "paid" | "pending" | "cancelled";
+  }>;
   profiles: Array<{
     created_at: string | null;
     email: string;
@@ -89,14 +115,33 @@ type OwnerCloudSummary = {
     role: User["role"];
     shop_id: string | null;
   }>;
+  licenses: Array<{
+    auto_lock_days_after_expiry: number | null;
+    expires_at: string | null;
+    id: string;
+    last_payment_at: string | null;
+    lock_reason: string | null;
+    locked_at: string | null;
+    shop_id: string;
+    status: LicenseStatus;
+  }>;
   shops: Array<{
     address: string | null;
+    auto_payment_enabled?: boolean | null;
+    billing_cycle?: BillingCycle | null;
+    cancelled_at?: string | null;
+    city?: string | null;
+    country?: string | null;
+    created_at?: string | null;
     email: string | null;
     id: string;
+    last_owner_payment_at?: string | null;
     license_status: LicenseStatus;
     name: string;
+    package_price?: number | null;
     phone: string | null;
     plan_name: string | null;
+    total_paid?: number | null;
   }>;
 };
 
@@ -212,7 +257,12 @@ function getDefaultPlanName(billingCycle: BillingCycle) {
 }
 
 function getExpiryDateForBillingCycle(billingCycle: BillingCycle) {
-  const expiry = new Date();
+  return getExtendedExpiryDate(billingCycle);
+}
+
+function getExtendedExpiryDate(billingCycle: BillingCycle, currentExpiry?: string) {
+  const current = currentExpiry ? new Date(currentExpiry) : new Date();
+  const expiry = Number.isFinite(current.getTime()) && current.getTime() > Date.now() ? current : new Date();
 
   if (billingCycle === "monthly") {
     expiry.setMonth(expiry.getMonth() + 1);
@@ -310,7 +360,7 @@ function SectionButton({
   return (
     <button
       className={cn(
-        "group flex w-full items-center gap-3 rounded-[22px] border px-3 py-3 text-left transition hover:-translate-y-0.5",
+        "group flex min-w-fit items-center justify-center gap-2 rounded-[18px] border px-3 py-2 text-left transition hover:-translate-y-0.5",
         active
           ? "border-white/80 bg-[linear-gradient(135deg,#ffffff_0%,#f4fff9_46%,#f6f1ff_100%)] text-slate-950 shadow-[0_20px_46px_rgba(16,185,129,0.18)]"
           : "border-white/70 bg-white/58 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] hover:border-emerald-200 hover:bg-white/86 hover:shadow-[0_16px_34px_rgba(88,28,135,0.08)]"
@@ -319,7 +369,7 @@ function SectionButton({
       type="button"
     >
       <span className={cn(
-        "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[17px]",
+        "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[14px]",
         active
           ? "bg-[linear-gradient(135deg,#059669_0%,#7c3aed_100%)] text-white shadow-[0_14px_30px_rgba(124,58,237,0.22)]"
           : "bg-[linear-gradient(135deg,#ecfdf5_0%,#f5f3ff_100%)] text-slate-700"
@@ -328,7 +378,7 @@ function SectionButton({
       </span>
       <span className="min-w-0">
         <span className="block text-sm font-semibold text-slate-950">{label}</span>
-        <span className={cn("mt-0.5 block truncate text-xs", active ? "text-slate-500" : "text-slate-500")}>{description}</span>
+        <span className="sr-only">{description}</span>
       </span>
     </button>
   );
@@ -370,6 +420,7 @@ export default function OwnerPage() {
     ownerDeleteShop,
     ownerDeleteProductKey,
     ownerGenerateProductKey,
+    ownerHydrateCloudState,
     ownerLogoutAllShopDevices,
     ownerRemoveDeviceActivation,
     ownerResetShopUserPassword,
@@ -391,7 +442,13 @@ export default function OwnerPage() {
   const [selectedShopId, setSelectedShopId] = useState(state.shops[0]?.id ?? "");
   const [message, setMessage] = useState<string | null>(null);
   const [storeDetailOpen, setStoreDetailOpen] = useState(false);
+  const [storeCreateOpen, setStoreCreateOpen] = useState(false);
   const [storeSearch, setStoreSearch] = useState("");
+  const [storeCountryFilter, setStoreCountryFilter] = useState("all");
+  const [storeCityFilter, setStoreCityFilter] = useState("all");
+  const [storeCreatedFrom, setStoreCreatedFrom] = useState("");
+  const [storeCreatedTo, setStoreCreatedTo] = useState("");
+  const [storePage, setStorePage] = useState(1);
   const [lastGeneratedKey, setLastGeneratedKey] = useState<{ key: string; shopId: string } | null>(null);
   const [createShopForm, setCreateShopForm] = useState({
     shopName: "",
@@ -400,6 +457,8 @@ export default function OwnerPage() {
     setupPassword: "",
     phone: "",
     address: "",
+    country: "Saudi Arabia",
+    city: "",
     planName: getDefaultPlanName("monthly"),
     billingCycle: "monthly" as BillingCycle,
     packagePrice: 0,
@@ -410,7 +469,7 @@ export default function OwnerPage() {
     autoLockDaysAfterExpiry: 3
   });
   const [licenseDrafts, setLicenseDrafts] = useState<
-    Record<string, { status: LicenseStatus; expiresAt: string; planName: string; billingCycle: BillingCycle; packagePrice: number; totalPaid: number; allowedDevices: number; autoLockDaysAfterExpiry: number; lockReason: string }>
+    Record<string, { status: LicenseStatus; expiresAt: string; planName: string; billingCycle: BillingCycle; packagePrice: number; totalPaid: number; autoPaymentEnabled: boolean; allowedDevices: number; autoLockDaysAfterExpiry: number; lockReason: string }>
   >({});
   const [shopProfileDrafts, setShopProfileDrafts] = useState<
     Record<string, { shopName: string; email: string; setupEmail: string; setupPassword: string; phone: string; address: string }>
@@ -457,6 +516,15 @@ export default function OwnerPage() {
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [isDeletingShop, setIsDeletingShop] = useState(false);
   const [reportRange, setReportRange] = useState<ReportRange>("month");
+  const [billingFilter, setBillingFilter] = useState<BillingFilter>("all");
+  const [paymentAmount, setPaymentAmount] = useState(0);
+  const [packageForm, setPackageForm] = useState({
+    name: "",
+    billingCycle: "monthly" as BillingCycle,
+    durationDays: 30,
+    price: 0
+  });
+  const [isSavingPackage, setIsSavingPackage] = useState(false);
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const ownerUser = state.users.find((user) => user.role === "super_admin" && user.isActive);
@@ -477,10 +545,7 @@ export default function OwnerPage() {
     const loadCloudSummary = async () => {
       try {
         const response = await fetch("/api/owner/cloud-summary", {
-          cache: "no-store",
-          headers: {
-            "x-owner-email": ownerUser.email
-          }
+          cache: "no-store"
         });
         const payload = (await response.json()) as ({ ok: true } & OwnerCloudSummary) | { ok: false; message?: string };
 
@@ -496,9 +561,91 @@ export default function OwnerPage() {
         setCloudSummary({
           brand: payload.brand,
           devices: payload.devices,
+          licenses: payload.licenses,
+          packages: payload.packages,
           productKeys: payload.productKeys,
           profiles: payload.profiles,
-          shops: payload.shops
+          shops: payload.shops,
+          subscriptionPayments: payload.subscriptionPayments
+        });
+
+        const cloudShopIdToStateId = new Map<string, string>();
+        const hydratedShops = payload.shops.map((cloudShop) => {
+          const existingShop = state.shops.find(
+            (shop) =>
+              shop.id === cloudShop.id ||
+              (normalizedMatch(shop.email) && normalizedMatch(shop.email) === normalizedMatch(cloudShop.email)) ||
+              (normalizedMatch(shop.phone) && normalizedMatch(shop.phone) === normalizedMatch(cloudShop.phone)) ||
+              (normalizedMatch(shop.name) && normalizedMatch(shop.name) === normalizedMatch(cloudShop.name))
+          );
+          const stateShopId = existingShop?.id ?? cloudShop.id;
+
+          cloudShopIdToStateId.set(cloudShop.id, stateShopId);
+
+          return {
+            ...existingShop,
+            id: stateShopId,
+            name: cloudShop.name,
+            slug: existingShop?.slug ?? `shop-${cloudShop.id.slice(0, 8)}`,
+            email: cloudShop.email ?? existingShop?.email,
+            phone: cloudShop.phone ?? existingShop?.phone ?? "",
+            address: cloudShop.address ?? existingShop?.address ?? "",
+            country: cloudShop.country ?? existingShop?.country ?? "Saudi Arabia",
+            city: cloudShop.city ?? existingShop?.city ?? "",
+            currency: existingShop?.currency ?? "SAR",
+            timezone: existingShop?.timezone ?? "Asia/Riyadh",
+            planName: cloudShop.plan_name ?? existingShop?.planName ?? "Standard",
+            billingCycle: cloudShop.billing_cycle ?? existingShop?.billingCycle ?? "monthly",
+            packagePrice: Number(cloudShop.package_price ?? existingShop?.packagePrice ?? 0),
+            totalPaid: Number(cloudShop.total_paid ?? existingShop?.totalPaid ?? 0),
+            lastOwnerPaymentAt: cloudShop.last_owner_payment_at ?? existingShop?.lastOwnerPaymentAt,
+            autoPaymentEnabled: cloudShop.auto_payment_enabled ?? existingShop?.autoPaymentEnabled ?? false,
+            cancelledAt: cloudShop.cancelled_at ?? existingShop?.cancelledAt,
+            licenseStatus: cloudShop.license_status,
+            createdAt: cloudShop.created_at ?? existingShop?.createdAt ?? new Date().toISOString()
+          } satisfies Shop;
+        });
+        const hydratedLicenses = payload.licenses
+          .filter((license) => cloudShopIdToStateId.has(license.shop_id))
+          .map((license) => ({
+            id: license.id,
+            shopId: cloudShopIdToStateId.get(license.shop_id)!,
+            status: license.status,
+            expiresAt: license.expires_at ?? undefined,
+            lastPaymentAt: license.last_payment_at ?? undefined,
+            autoLockDaysAfterExpiry: license.auto_lock_days_after_expiry ?? 7,
+            lockedAt: license.locked_at ?? undefined,
+            lockReason: license.lock_reason ?? undefined
+          }));
+        const hydratedUsers = payload.profiles
+          .filter((profile) => !profile.shop_id || cloudShopIdToStateId.has(profile.shop_id))
+          .map((profile) => ({
+            id: profile.id,
+            shopId: profile.shop_id ? cloudShopIdToStateId.get(profile.shop_id)! : undefined,
+            name: profile.name,
+            email: profile.email,
+            phone: profile.phone ?? undefined,
+            role: profile.role,
+            isActive: profile.is_active,
+            lastLoginAt: profile.last_login_at ?? undefined,
+            createdAt: profile.created_at ?? new Date().toISOString()
+          }));
+        const hydratedDevices = payload.devices
+          .filter((device) => cloudShopIdToStateId.has(device.shop_id))
+          .map((device) => ({
+            id: device.id,
+            shopId: cloudShopIdToStateId.get(device.shop_id)!,
+            productKeyId: device.product_key_id,
+            browserInfo: device.browser_info ?? "Unknown browser",
+            activatedAt: device.activated_at ?? new Date().toISOString(),
+            lastSeenAt: device.last_seen_at ?? device.activated_at ?? new Date().toISOString()
+          }));
+
+        ownerHydrateCloudState({
+          devices: hydratedDevices,
+          licenses: hydratedLicenses,
+          shops: hydratedShops,
+          users: hydratedUsers
         });
 
         if (payload.brand) {
@@ -636,11 +783,19 @@ export default function OwnerPage() {
     return { rows, counts };
   }, [cloudSummary, state.deviceActivations, state.licenses, state.productKeys, state.shops, state.users]);
 
+  const storeCountries = Array.from(new Set(ownerMetrics.rows.map((row) => row.shop.country || "Unspecified"))).sort();
+  const storeCities = Array.from(
+    new Set(
+      ownerMetrics.rows
+        .filter((row) => storeCountryFilter === "all" || (row.shop.country || "Unspecified") === storeCountryFilter)
+        .map((row) => row.shop.city || "Unspecified")
+    )
+  ).sort();
   const filteredStoreRows = ownerMetrics.rows.filter((row) => {
     const normalizedSearch = storeSearch.trim().toLowerCase();
     const matchesSearch =
       !normalizedSearch ||
-      [row.shop.name, row.shop.email, row.shop.phone, row.shop.address, row.shop.planName]
+      [row.shop.name, row.shop.email, row.shop.phone, row.shop.address, row.shop.city, row.shop.country, row.shop.planName]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(normalizedSearch));
     const matchesFilter =
@@ -650,24 +805,50 @@ export default function OwnerPage() {
           ? row.expiryDays !== null && row.expiryDays >= 0 && row.expiryDays <= 7 && row.status !== "locked"
           : row.status === storeFilter;
 
-    return matchesSearch && matchesFilter;
+    const createdAt = new Date(row.shop.createdAt).getTime();
+    const createdFrom = storeCreatedFrom ? new Date(`${storeCreatedFrom}T00:00:00`).getTime() : Number.NEGATIVE_INFINITY;
+    const createdTo = storeCreatedTo ? new Date(`${storeCreatedTo}T23:59:59`).getTime() : Number.POSITIVE_INFINITY;
+    const matchesCountry = storeCountryFilter === "all" || (row.shop.country || "Unspecified") === storeCountryFilter;
+    const matchesCity = storeCityFilter === "all" || (row.shop.city || "Unspecified") === storeCityFilter;
+
+    return matchesSearch && matchesFilter && matchesCountry && matchesCity && createdAt >= createdFrom && createdAt <= createdTo;
   });
+  const storesPerPage = 12;
+  const totalStorePages = Math.max(1, Math.ceil(filteredStoreRows.length / storesPerPage));
+  const visibleStoreRows = filteredStoreRows.slice((Math.min(storePage, totalStorePages) - 1) * storesPerPage, Math.min(storePage, totalStorePages) * storesPerPage);
 
   const reportMetrics = useMemo(() => {
     const { start, end } = buildRange(reportRange, customStart, customEnd);
-    const bills = state.bills.filter((bill) => bill.status !== "cancelled" && inRange(bill.createdAt, start, end));
-    const refunds = state.refunds.filter((refund) => inRange(refund.returnDate, start, end));
-    const customerSales = bills.reduce((sum, bill) => sum + bill.total, 0);
-    const refundTotal = refunds.reduce((sum, refund) => sum + Math.abs(refund.amount), 0);
-    const netSales = customerSales - refundTotal;
-    const paid = bills.reduce((sum, bill) => sum + bill.paidAmount, 0);
-    const due = bills.reduce((sum, bill) => sum + bill.dueAmount, 0);
-    const activeUsers = ownerMetrics.rows.reduce((sum, row) => sum + row.users.filter((user) => user.isActive).length, 0);
-    const connectedDevices = ownerMetrics.rows.reduce((sum, row) => sum + row.devices.length, 0);
-    const expiringSoon = ownerMetrics.counts.expiring;
+    const createdStores = ownerMetrics.rows.filter((row) => inRange(row.shop.createdAt, start, end));
+    const periodPayments = (cloudSummary?.subscriptionPayments ?? []).filter(
+      (payment) => payment.status === "paid" && inRange(payment.created_at, start, end)
+    );
+    const paidStoreIds = new Set(periodPayments.map((payment) => payment.shop_id));
+    const fallbackPaidStores = ownerMetrics.rows.filter(
+      (row) => (row.shop.totalPaid ?? 0) > 0 && inRange(row.shop.lastOwnerPaymentAt, start, end)
+    );
+    const revenue =
+      periodPayments.length > 0
+        ? periodPayments.reduce((sum, payment) => sum + Number(payment.amount ?? 0), 0)
+        : fallbackPaidStores.reduce((sum, row) => sum + (row.shop.totalPaid ?? 0), 0);
+    const pendingBalance = ownerMetrics.rows.reduce(
+      (sum, row) => sum + Math.max((row.shop.packagePrice ?? 0) - (row.shop.totalPaid ?? 0), 0),
+      0
+    );
 
-    return { start, end, bills, refunds, customerSales, refundTotal, netSales, paid, due, activeUsers, connectedDevices, expiringSoon };
-  }, [customEnd, customStart, ownerMetrics, reportRange, state.bills, state.refunds]);
+    return {
+      start,
+      end,
+      createdStores,
+      revenue,
+      pendingBalance,
+      paidStores: periodPayments.length > 0 ? paidStoreIds.size : fallbackPaidStores.length,
+      activeStores: ownerMetrics.counts.active,
+      expiringSoon: ownerMetrics.counts.expiring,
+      lockedStores: ownerMetrics.counts.locked,
+      expiredStores: ownerMetrics.counts.expired
+    };
+  }, [cloudSummary?.subscriptionPayments, customEnd, customStart, ownerMetrics, reportRange]);
 
   const showResult = (result: { ok: boolean; message?: string; productKey?: string; shopId?: string }, contextShopId?: string) => {
     if (result.ok) {
@@ -735,6 +916,7 @@ export default function OwnerPage() {
         billingCycle: shop?.billingCycle ?? "monthly",
         packagePrice: shop?.packagePrice ?? 0,
         totalPaid: shop?.totalPaid ?? 0,
+        autoPaymentEnabled: shop?.autoPaymentEnabled ?? false,
         allowedDevices: productKey?.allowedDevices ?? 2,
         autoLockDaysAfterExpiry: license?.autoLockDaysAfterExpiry ?? 3,
         lockReason: license?.lockReason ?? "Payment not received."
@@ -823,6 +1005,8 @@ export default function OwnerPage() {
         setupPassword: "",
         phone: "",
         address: "",
+        country: "Saudi Arabia",
+        city: "",
         planName: getDefaultPlanName(current.billingCycle),
         licenseStatus: "active",
         expiresAt: getExpiryDateForBillingCycle(current.billingCycle)
@@ -842,11 +1026,112 @@ export default function OwnerPage() {
         billingCycle: draft.billingCycle,
         packagePrice: draft.packagePrice,
         totalPaid: draft.totalPaid,
+        autoPaymentEnabled: draft.autoPaymentEnabled,
         allowedDevices: draft.allowedDevices,
         autoLockDaysAfterExpiry: draft.autoLockDaysAfterExpiry,
         lockReason: draft.lockReason
       })
     );
+  };
+
+  const recordStorePayment = async (shopId: string) => {
+    const draft = getLicenseDraft(shopId);
+    const amount = Math.max(0, Number(paymentAmount));
+
+    if (amount <= 0) {
+      setMessage("Enter a payment amount greater than zero.");
+      return;
+    }
+
+    const nextExpiry = getExtendedExpiryDate(draft.billingCycle, draft.expiresAt);
+
+    try {
+      const response = await fetch("/api/owner/record-payment", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          amount,
+          billingCycle: draft.billingCycle,
+          expiresAt: nextExpiry,
+          packagePrice: draft.packagePrice,
+          shopId
+        })
+      });
+      const payload = (await response.json()) as { ok: boolean; message?: string };
+
+      if (!response.ok || !payload.ok) {
+        setMessage(payload.message ?? "Unable to record this payment in cloud billing.");
+        return;
+      }
+    } catch {
+      setMessage("Unable to reach cloud billing. The payment was not recorded.");
+      return;
+    }
+
+    const result = ownerSetLicense({
+      shopId,
+      status: "active",
+      expiresAt: nextExpiry,
+      planName: draft.planName,
+      billingCycle: draft.billingCycle,
+      packagePrice: draft.packagePrice,
+      totalPaid: draft.totalPaid + amount,
+      autoPaymentEnabled: draft.autoPaymentEnabled,
+      allowedDevices: draft.allowedDevices,
+      autoLockDaysAfterExpiry: draft.autoLockDaysAfterExpiry,
+      lockReason: ""
+    });
+
+    if (result.ok) {
+      updateLicenseDraft(shopId, { status: "active", expiresAt: nextExpiry, totalPaid: draft.totalPaid + amount });
+      setPaymentAmount(0);
+    }
+
+    showResult(result);
+  };
+
+  const createOwnerPackage = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!packageForm.name.trim() || packageForm.price < 0 || packageForm.durationDays < 1) {
+      setMessage("Enter a package name, valid duration, and non-negative price.");
+      return;
+    }
+
+    setIsSavingPackage(true);
+
+    try {
+      const response = await fetch("/api/owner/packages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(packageForm)
+      });
+      const payload = (await response.json()) as { ok: boolean; message?: string; package?: OwnerCloudSummary["packages"][number] };
+
+      if (!response.ok || !payload.ok || !payload.package) {
+        setMessage(payload.message ?? "Unable to create package.");
+        return;
+      }
+
+      setCloudSummary((current) =>
+        current
+          ? {
+              ...current,
+              packages: [...current.packages.filter((entry) => entry.id !== payload.package!.id), payload.package!]
+            }
+          : current
+      );
+      setPackageForm({ name: "", billingCycle: "monthly", durationDays: 30, price: 0 });
+      setMessage("Package created and ready to assign.");
+    } catch {
+      setMessage("Unable to reach cloud package management.");
+    } finally {
+      setIsSavingPackage(false);
+    }
   };
 
   const generateKey = (shopId: string) => {
@@ -1120,13 +1405,49 @@ export default function OwnerPage() {
     setBrandingView("team");
   };
 
-  const saveOwnerTeamUser = () => {
-    const result = saveOwnerPortalUser(ownerUserForm);
+  const saveOwnerTeamUser = async () => {
+    try {
+      const response = await fetch("/api/owner/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ownerUserForm)
+      });
+      const payload = (await response.json()) as { ok: boolean; message?: string; user?: User };
 
-    showResult(result);
+      if (!payload.ok || !payload.user) {
+        showResult({ ok: false, message: payload.message ?? "Unable to save owner portal user." });
+        return;
+      }
 
-    if (result.ok) {
-      resetOwnerUserForm();
+      const result = saveOwnerPortalUser({
+        ...ownerUserForm,
+        id: payload.user.id
+      });
+      showResult(result);
+
+      if (result.ok) resetOwnerUserForm();
+    } catch {
+      showResult({ ok: false, message: "Unable to reach owner team management." });
+    }
+  };
+
+  const updateOwnerTeamUserAccess = async (user: User, isActive: boolean) => {
+    try {
+      const response = await fetch("/api/owner/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: user.id, isActive })
+      });
+      const payload = (await response.json()) as { ok: boolean; message?: string };
+
+      if (!payload.ok) {
+        showResult({ ok: false, message: payload.message ?? "Unable to update owner user access." });
+        return;
+      }
+
+      showResult(setOwnerPortalUserActive(user.id, isActive));
+    } catch {
+      showResult({ ok: false, message: "Unable to reach owner team management." });
     }
   };
 
@@ -1209,34 +1530,44 @@ export default function OwnerPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {[
           {
-            icon: Building2,
-            label: "Stores live",
-            value: ownerMetrics.counts.all,
-            tone: "bg-[linear-gradient(135deg,#059669_0%,#7c3aed_100%)] text-white shadow-[0_14px_34px_rgba(124,58,237,0.18)]"
+            icon: ShieldCheck,
+            label: "Active stores",
+            value: ownerMetrics.counts.active,
+            tone: "bg-emerald-50 text-emerald-800",
+            filter: "active" as StoreFilter
           },
           {
-            icon: ShieldCheck,
-            label: "Active licenses",
-            value: ownerMetrics.counts.active,
-            tone: "bg-emerald-50 text-emerald-800"
+            icon: Building2,
+            label: "Total stores",
+            value: ownerMetrics.counts.all,
+            tone: "bg-[linear-gradient(135deg,#059669_0%,#7c3aed_100%)] text-white shadow-[0_14px_34px_rgba(124,58,237,0.18)]",
+            filter: "all" as StoreFilter
           },
           {
             icon: Bell,
             label: "Expiring soon",
             value: ownerMetrics.counts.expiring,
-            tone: "bg-amber-50 text-amber-800"
+            tone: "bg-amber-50 text-amber-800",
+            filter: "expiring" as StoreFilter
           },
           {
             icon: Lock,
             label: "Locked stores",
             value: ownerMetrics.counts.locked,
-            tone: "bg-rose-50 text-rose-800"
+            tone: "bg-rose-50 text-rose-800",
+            filter: "locked" as StoreFilter
           }
         ].map((item) => {
           const Icon = item.icon;
 
           return (
-            <Card className="overflow-hidden p-5" key={item.label}>
+            <button
+              className="overflow-hidden rounded-[28px] text-left transition hover:-translate-y-1"
+              key={item.label}
+              onClick={() => { setStoreFilter(item.filter); setStoreDetailOpen(false); setStoreCreateOpen(false); setActiveSection("stores"); }}
+              type="button"
+            >
+            <Card className="h-full p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{item.label}</p>
@@ -1247,6 +1578,7 @@ export default function OwnerPage() {
                 </span>
               </div>
             </Card>
+            </button>
           );
         })}
       </div>
@@ -1263,9 +1595,9 @@ export default function OwnerPage() {
             </div>
             <div className="mt-6 grid gap-3 md:grid-cols-2">
               {[
-                { label: "Create a shop", icon: UserRoundPlus, section: "create" as OwnerSectionId },
-                { label: "Control stores", icon: Building2, section: "stores" as OwnerSectionId },
+                { label: "Manage stores", icon: Building2, section: "stores" as OwnerSectionId },
                 { label: "Generate keys", icon: KeyRound, section: "keys" as OwnerSectionId },
+                { label: "Store billing", icon: CreditCard, section: "billing" as OwnerSectionId },
                 { label: "Brand the POS", icon: Palette, section: "branding" as OwnerSectionId }
               ].map((action) => {
                 const Icon = action.icon;
@@ -1324,6 +1656,7 @@ export default function OwnerPage() {
             ) : null}
           </div>
         </Card>
+
       </div>
     </div>
   );
@@ -1359,12 +1692,20 @@ export default function OwnerPage() {
           <Input minLength={8} type="password" value={createShopForm.setupPassword} onChange={(event) => setCreateShopForm((current) => ({ ...current, setupPassword: event.target.value }))} />
         </label>
         <label className="space-y-2">
-          <span className="text-sm font-semibold text-slate-950">Phone</span>
-          <Input value={createShopForm.phone} onChange={(event) => setCreateShopForm((current) => ({ ...current, phone: event.target.value }))} />
+          <span className="text-sm font-semibold text-slate-950">Phone with country code</span>
+          <Input inputMode="tel" placeholder="+966501234567" value={createShopForm.phone} onChange={(event) => setCreateShopForm((current) => ({ ...current, phone: event.target.value }))} />
         </label>
         <label className="space-y-2 md:col-span-2">
           <span className="text-sm font-semibold text-slate-950">Address</span>
           <Input value={createShopForm.address} onChange={(event) => setCreateShopForm((current) => ({ ...current, address: event.target.value }))} />
+        </label>
+        <label className="space-y-2">
+          <span className="text-sm font-semibold text-slate-950">Country</span>
+          <Input value={createShopForm.country} onChange={(event) => setCreateShopForm((current) => ({ ...current, country: event.target.value }))} />
+        </label>
+        <label className="space-y-2">
+          <span className="text-sm font-semibold text-slate-950">City</span>
+          <Input value={createShopForm.city} onChange={(event) => setCreateShopForm((current) => ({ ...current, city: event.target.value }))} />
         </label>
         <label className="space-y-2">
           <span className="text-sm font-semibold text-slate-950">Billing cycle</span>
@@ -1439,17 +1780,62 @@ export default function OwnerPage() {
     const draft = selectedShopSafeId ? getLicenseDraft(selectedShopSafeId) : null;
     const profileDraft = selectedShop ? getShopProfileDraft(selectedShop) : null;
 
+    if (storeCreateOpen) {
+      return (
+        <div className="grid gap-4">
+          <Button className="w-fit" onClick={() => setStoreCreateOpen(false)} type="button" variant="secondary">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to stores
+          </Button>
+          {renderCreateShop()}
+        </div>
+      );
+    }
+
     if (!storeDetailOpen) {
       return (
         <div className="grid gap-5">
           <Card className="p-4">
-            <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
+            <div className="grid gap-3 xl:grid-cols-[minmax(280px,1fr)_repeat(4,minmax(140px,0.38fr))_auto] xl:items-end">
+              <label className="space-y-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Search stores</span>
               <Input
-                placeholder="Search store by name, email, phone, address, or plan"
+                placeholder="Name, email, phone, city, country"
                 value={storeSearch}
-                onChange={(event) => setStoreSearch(event.target.value)}
+                onChange={(event) => {
+                  setStoreSearch(event.target.value);
+                  setStorePage(1);
+                }}
               />
-              <div className="flex flex-wrap gap-2">
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Country</span>
+                <Select value={storeCountryFilter} onChange={(event) => { setStoreCountryFilter(event.target.value); setStoreCityFilter("all"); setStorePage(1); }}>
+                  <option value="all">All countries</option>
+                  {storeCountries.map((country) => <option key={country} value={country}>{country}</option>)}
+                </Select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">City</span>
+                <Select value={storeCityFilter} onChange={(event) => { setStoreCityFilter(event.target.value); setStorePage(1); }}>
+                  <option value="all">All cities</option>
+                  {storeCities.map((city) => <option key={city} value={city}>{city}</option>)}
+                </Select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Created from</span>
+                <Input type="date" value={storeCreatedFrom} onChange={(event) => { setStoreCreatedFrom(event.target.value); setStorePage(1); }} />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Created to</span>
+                <Input type="date" value={storeCreatedTo} onChange={(event) => { setStoreCreatedTo(event.target.value); setStorePage(1); }} />
+              </label>
+              <Button onClick={() => setStoreCreateOpen(true)} type="button">
+                <UserRoundPlus className="mr-2 h-4 w-4" />
+                New store
+              </Button>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
                 {[
                   ["all", "All"],
                   ["active", "Active"],
@@ -1463,15 +1849,14 @@ export default function OwnerPage() {
                     count={ownerMetrics.counts[id as StoreFilter]}
                     key={id}
                     label={label}
-                    onClick={() => setStoreFilter(id as StoreFilter)}
+                    onClick={() => { setStoreFilter(id as StoreFilter); setStorePage(1); }}
                   />
                 ))}
-              </div>
             </div>
           </Card>
 
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {filteredStoreRows.map((row) => (
+            {visibleStoreRows.map((row) => (
               <button
                 className="rounded-[28px] border border-white/80 bg-white/86 p-5 text-left shadow-[0_18px_48px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_20px_46px_rgba(124,58,237,0.10)]"
                 key={row.shop.id}
@@ -1509,6 +1894,16 @@ export default function OwnerPage() {
           {filteredStoreRows.length === 0 ? (
             <Card className="p-8 text-center">
               <p className="font-display text-2xl font-semibold text-slate-950">No stores found</p>
+            </Card>
+          ) : null}
+          {filteredStoreRows.length > 0 ? (
+            <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+              <p className="text-sm text-slate-600">Showing {(Math.min(storePage, totalStorePages) - 1) * storesPerPage + 1}-{Math.min(Math.min(storePage, totalStorePages) * storesPerPage, filteredStoreRows.length)} of {filteredStoreRows.length}</p>
+              <div className="flex items-center gap-2">
+                <Button disabled={storePage <= 1} onClick={() => setStorePage((page) => Math.max(1, page - 1))} size="sm" variant="secondary">Previous</Button>
+                <Badge variant="neutral">Page {Math.min(storePage, totalStorePages)} / {totalStorePages}</Badge>
+                <Button disabled={storePage >= totalStorePages} onClick={() => setStorePage((page) => Math.min(totalStorePages, page + 1))} size="sm" variant="secondary">Next</Button>
+              </div>
             </Card>
           ) : null}
         </div>
@@ -1871,6 +2266,18 @@ export default function OwnerPage() {
 
   const renderBilling = () => {
     const draft = selectedShopSafeId ? getLicenseDraft(selectedShopSafeId) : null;
+    const billingStatusFor = (row: (typeof ownerMetrics.rows)[number]): BillingFilter => {
+      if (row.shop.cancelledAt || row.status === "expired") return "cancelled";
+      if ((row.shop.packagePrice ?? 0) > 0 && (row.shop.totalPaid ?? 0) >= (row.shop.packagePrice ?? 0)) return "paid";
+      return "pending";
+    };
+    const billingCounts = {
+      all: ownerMetrics.rows.length,
+      paid: ownerMetrics.rows.filter((row) => billingStatusFor(row) === "paid").length,
+      pending: ownerMetrics.rows.filter((row) => billingStatusFor(row) === "pending").length,
+      cancelled: ownerMetrics.rows.filter((row) => billingStatusFor(row) === "cancelled").length
+    };
+    const billingRows = billingFilter === "all" ? ownerMetrics.rows : ownerMetrics.rows.filter((row) => billingStatusFor(row) === billingFilter);
     const recurring = state.shops.reduce(
       (totals, shop) => {
         const amount = shop.packagePrice ?? 0;
@@ -1908,20 +2315,92 @@ export default function OwnerPage() {
           </div>
         </Card>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {[
-            { label: "Monthly packages", value: formatCurrency(recurring.monthly, "SAR", locale) },
-            { label: "Quarterly packages", value: formatCurrency(recurring.quarterly, "SAR", locale) },
-            { label: "Yearly packages", value: formatCurrency(recurring.yearly, "SAR", locale) },
-            { label: "Total collected", value: formatCurrency(recurring.totalPaid, "SAR", locale) },
-            { label: "Open package balance", value: formatCurrency(recurring.openPackageBalance, "SAR", locale) }
+            { id: "paid" as BillingFilter, label: "Paid stores", value: billingCounts.paid },
+            { id: "pending" as BillingFilter, label: "Pending payments", value: billingCounts.pending },
+            { id: "cancelled" as BillingFilter, label: "Cancelled / expired", value: billingCounts.cancelled },
+            { id: "all" as BillingFilter, label: "Total collected", value: formatCurrency(recurring.totalPaid, "SAR", locale) }
           ].map((item) => (
-            <Card className="p-5" key={item.label}>
+            <button className="text-left transition hover:-translate-y-1" key={item.label} onClick={() => setBillingFilter(item.id)} type="button">
+            <Card className={cn("h-full p-5", billingFilter === item.id && "border-emerald-300 bg-emerald-50/60")}>
               <p className="text-sm text-slate-500">{item.label}</p>
               <p className="mt-2 font-display text-2xl font-semibold text-slate-950">{item.value}</p>
             </Card>
+            </button>
           ))}
         </div>
+
+        <Card className="p-6">
+          <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+            <form className="grid gap-4" onSubmit={createOwnerPackage}>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-violet-700">Package catalog</p>
+                <h3 className="mt-2 font-display text-2xl font-semibold text-slate-950">Create reusable package</h3>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="space-y-2 sm:col-span-2">
+                  <span className="text-sm font-semibold text-slate-950">Package name</span>
+                  <Input value={packageForm.name} onChange={(event) => setPackageForm((current) => ({ ...current, name: event.target.value }))} />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-slate-950">Billing cycle</span>
+                  <Select
+                    value={packageForm.billingCycle}
+                    onChange={(event) => {
+                      const billingCycle = event.target.value as BillingCycle;
+                      setPackageForm((current) => ({
+                        ...current,
+                        billingCycle,
+                        durationDays: billingCycle === "monthly" ? 30 : billingCycle === "quarterly" ? 90 : 365
+                      }));
+                    }}
+                  >
+                    <option value="monthly">Monthly</option>
+                    <option value="quarterly">Quarterly</option>
+                    <option value="yearly">Yearly</option>
+                  </Select>
+                </label>
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-slate-950">Price (SAR)</span>
+                  <Input min={0} type="number" value={packageForm.price} onChange={(event) => setPackageForm((current) => ({ ...current, price: Number(event.target.value) }))} />
+                </label>
+              </div>
+              <Button disabled={isSavingPackage} type="submit">{isSavingPackage ? "Creating package..." : "Create package"}</Button>
+            </form>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Available packages</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                {(cloudSummary?.packages ?? []).length > 0 ? (
+                  cloudSummary!.packages.map((ownerPackage) => (
+                    <button
+                      className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50"
+                      key={ownerPackage.id}
+                      onClick={() => {
+                        if (!selectedShop) return;
+                        updateLicenseDraft(selectedShop.id, {
+                          billingCycle: ownerPackage.billing_cycle,
+                          packagePrice: Number(ownerPackage.price),
+                          planName: ownerPackage.name
+                        });
+                        setMessage(`${ownerPackage.name} applied to ${selectedShop.name}. Save billing to confirm.`);
+                      }}
+                      type="button"
+                    >
+                      <p className="font-semibold text-slate-950">{ownerPackage.name}</p>
+                      <p className="mt-1 text-sm capitalize text-slate-500">{ownerPackage.billing_cycle} | {ownerPackage.duration_days} days</p>
+                      <p className="mt-3 font-display text-xl font-semibold text-emerald-700">{formatCurrency(Number(ownerPackage.price), ownerPackage.currency, locale)}</p>
+                    </button>
+                  ))
+                ) : (
+                  <p className="rounded-3xl border border-dashed border-slate-200 p-5 text-sm text-slate-600 sm:col-span-2">
+                    No reusable packages yet. Create the first package here.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </Card>
 
         {selectedShop && draft ? (
           <Card className="p-6">
@@ -1982,7 +2461,23 @@ export default function OwnerPage() {
                   {formatCurrency(Math.max(draft.packagePrice - draft.totalPaid, 0), "SAR", locale)}
                 </p>
               </div>
-              <Button className="xl:col-span-4" onClick={() => saveLicense(selectedShop.id)}>
+              <label className="space-y-2 xl:col-span-2">
+                <span className="text-sm font-semibold text-slate-950">Record payment and renew</span>
+                <Input min={0} type="number" value={paymentAmount} onChange={(event) => setPaymentAmount(Number(event.target.value))} />
+              </label>
+              <label className="flex items-center gap-3 rounded-3xl border border-violet-200 bg-violet-50 p-4 text-sm font-semibold text-slate-900">
+                <input
+                  checked={draft.autoPaymentEnabled}
+                  onChange={(event) => updateLicenseDraft(selectedShop.id, { autoPaymentEnabled: event.target.checked })}
+                  type="checkbox"
+                />
+                Auto-payment ready
+                <span className="font-normal text-slate-500">Activates only after a payment gateway is connected.</span>
+              </label>
+              <Button className="self-end" onClick={() => recordStorePayment(selectedShop.id)}>
+                Record payment
+              </Button>
+              <Button className="self-end" onClick={() => saveLicense(selectedShop.id)} variant="secondary">
                 Save billing and license
               </Button>
             </div>
@@ -1998,7 +2493,7 @@ export default function OwnerPage() {
             <span>Status</span>
             <span>Expiry</span>
           </div>
-          {ownerMetrics.rows.map((row) => (
+          {billingRows.map((row) => (
             <div className="grid gap-3 border-t border-slate-200 p-4 xl:grid-cols-[1fr_0.35fr_0.35fr_0.35fr_0.35fr_0.35fr] xl:items-center" key={row.shop.id}>
               <div>
                 <p className="font-semibold text-slate-950">{row.shop.name}</p>
@@ -2024,7 +2519,7 @@ export default function OwnerPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Owner reporting</p>
             <h2 className="mt-2 font-display text-3xl font-semibold text-slate-950">Business and license reports</h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              This reports client POS activity and license health. Owner subscription revenue comes next when payment collection is connected.
+              Subscription revenue, new stores, payment position, and license health for the selected period.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-[180px_150px_150px]">
@@ -2043,14 +2538,14 @@ export default function OwnerPage() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {[
-          { label: "Processed sales", value: formatCurrency(reportMetrics.customerSales, "SAR", locale) },
-          { label: "Refunds", value: formatCurrency(reportMetrics.refundTotal, "SAR", locale) },
-          { label: "Net processed", value: formatCurrency(reportMetrics.netSales, "SAR", locale) },
-          { label: "Open dues", value: formatCurrency(reportMetrics.due, "SAR", locale) },
-          { label: "Active users", value: reportMetrics.activeUsers },
-          { label: "Connected devices", value: reportMetrics.connectedDevices },
+          { label: "Subscription revenue", value: formatCurrency(reportMetrics.revenue, "SAR", locale) },
+          { label: "New stores", value: reportMetrics.createdStores.length },
+          { label: "Paid stores", value: reportMetrics.paidStores },
+          { label: "Pending balance", value: formatCurrency(reportMetrics.pendingBalance, "SAR", locale) },
+          { label: "Active stores", value: reportMetrics.activeStores },
           { label: "Expiring soon", value: reportMetrics.expiringSoon },
-          { label: "Locked stores", value: ownerMetrics.counts.locked }
+          { label: "Locked stores", value: reportMetrics.lockedStores },
+          { label: "Expired stores", value: reportMetrics.expiredStores }
         ].map((item) => (
           <Card className="p-5" key={item.label}>
             <p className="text-sm text-slate-500">{item.label}</p>
@@ -2329,7 +2824,7 @@ export default function OwnerPage() {
                       onChange={(event) => setOwnerUserForm((current) => ({ ...current, password: event.target.value }))}
                     />
                     <div className="flex flex-wrap gap-2">
-                      <Button onClick={saveOwnerTeamUser} type="button">{ownerUserForm.id ? "Save owner user" : "Add owner user"}</Button>
+                      <Button onClick={() => void saveOwnerTeamUser()} type="button">{ownerUserForm.id ? "Save owner user" : "Add owner user"}</Button>
                       <Button onClick={resetOwnerUserForm} type="button" variant="secondary">Clear</Button>
                     </div>
                   </div>
@@ -2352,7 +2847,7 @@ export default function OwnerPage() {
                       <div className="mt-4 flex flex-wrap gap-2">
                         <Button onClick={() => editOwnerPortalUser(user)} size="sm" type="button" variant="secondary">Edit</Button>
                         <Button
-                          onClick={() => showResult(setOwnerPortalUserActive(user.id, !user.isActive))}
+                          onClick={() => void updateOwnerTeamUserAccess(user, !user.isActive)}
                           size="sm"
                           type="button"
                           variant={user.isActive ? "danger" : "secondary"}
@@ -2583,17 +3078,10 @@ export default function OwnerPage() {
   );
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
-      <aside className="xl:sticky xl:top-4 xl:self-start">
-        <Card className="overflow-hidden border-white/70 bg-white/58 p-3 text-slate-950 shadow-[0_28px_70px_rgba(15,23,42,0.10)] backdrop-blur-2xl">
-          <div className="relative overflow-hidden rounded-[26px] border border-white/70 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.24),transparent_42%),radial-gradient(circle_at_88%_18%,rgba(124,58,237,0.20),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
-            <div className="pointer-events-none absolute -right-10 -top-12 h-28 w-28 rounded-full bg-purple-300/30 blur-2xl" />
-            <p className="relative text-[11px] font-semibold uppercase tracking-[0.28em] text-emerald-700">Owner menu</p>
-            <h2 className="relative mt-2 font-display text-2xl font-semibold text-slate-950">Command center</h2>
-            <p className="relative mt-2 text-sm leading-5 text-slate-600">Create shops, control licenses, branding, access, and audit from one calm owner workspace.</p>
-          </div>
-
-          <div className="mt-3 grid gap-2">
+    <div className="space-y-5">
+      <div className="sticky top-2 z-30">
+        <Card className="overflow-x-auto border-white/80 bg-white/82 p-2 text-slate-950 shadow-[0_20px_54px_rgba(15,23,42,0.10)] backdrop-blur-2xl">
+          <nav className="flex min-w-max items-center gap-2" aria-label="Owner portal navigation">
             {ownerSections.map((section) => (
               <SectionButton
                 active={activeSection === section.id}
@@ -2605,6 +3093,7 @@ export default function OwnerPage() {
                   setActiveSection(section.id);
                   if (section.id === "stores") {
                     setStoreDetailOpen(false);
+                    setStoreCreateOpen(false);
                   }
                   if (section.id === "branding") {
                     setBrandingView("menu");
@@ -2612,23 +3101,26 @@ export default function OwnerPage() {
                   if (section.id === "access") {
                     setAccessDetailOpen(false);
                   }
+                  if (section.id === "team") {
+                    setBrandingView("team");
+                  }
                 }}
               />
             ))}
-          </div>
+          </nav>
         </Card>
-      </aside>
+      </div>
 
       <section className="min-w-0 space-y-4">
         {message ? <div className="rounded-3xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-900">{message}</div> : null}
 
         {activeSection === "overview" ? renderOverview() : null}
-        {activeSection === "create" ? renderCreateShop() : null}
         {activeSection === "stores" ? renderStores() : null}
         {activeSection === "keys" ? renderKeys() : null}
         {activeSection === "billing" ? renderBilling() : null}
         {activeSection === "reports" ? renderReports() : null}
         {activeSection === "branding" ? renderBranding() : null}
+        {activeSection === "team" ? renderBranding() : null}
         {activeSection === "access" ? renderAccess() : null}
         {activeSection === "audit" ? renderAudit() : null}
       </section>

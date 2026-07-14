@@ -14,7 +14,7 @@ import { resizeImageFileToDataUrl } from "@/lib/image-upload";
 import { cn } from "@/lib/utils";
 import type { DemoAppState } from "@/types/pos";
 
-const CLOUD_ACTIVATION_STORAGE_KEY = "simple-pos-cloud-activation-state";
+const CLOUD_ACTIVATION_STORAGE_KEY = "simple-pos-cloud-activation-state-v3";
 
 const steps = [
   { id: "setup", label: "Store login", icon: ShieldCheck },

@@ -11,6 +11,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
+    "db:reset-stores": "node scripts/reset-all-store-data.cjs",
     "desktop:dev": "electron apps/desktop/main.cjs",
     "desktop:build": "electron-builder --config apps/desktop/electron-builder.yml --win nsis",
     "native:icons": "node scripts/generate-native-icons.cjs",

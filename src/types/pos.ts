@@ -51,6 +51,8 @@ export interface Shop {
   website?: string;
   phone: string;
   address: string;
+  country?: string;
+  city?: string;
   currency: string;
   timezone: string;
   planName: string;
@@ -58,6 +60,8 @@ export interface Shop {
   packagePrice?: number;
   totalPaid?: number;
   lastOwnerPaymentAt?: string;
+  autoPaymentEnabled?: boolean;
+  cancelledAt?: string;
   licenseStatus: LicenseStatus;
   createdAt: string;
 }

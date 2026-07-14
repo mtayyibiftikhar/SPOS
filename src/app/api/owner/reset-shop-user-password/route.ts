@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getAuthorizedOwnerSession } from "@/lib/supabase/owner-session";
 
 type ResetShopUserPasswordRequest = {
   password?: string;
@@ -16,45 +16,13 @@ function isValidPassword(password: string) {
   return password.trim().length >= 8;
 }
 
-async function isAuthorizedOwnerUser(
-  supabase: ReturnType<typeof createSupabaseAdminClient>,
-  ownerEmail: string
-) {
-  const expectedOwnerEmail = clean(process.env.POS_OWNER_EMAIL).toLowerCase();
-
-  if (!ownerEmail) {
-    return false;
-  }
-
-  if (expectedOwnerEmail && ownerEmail === expectedOwnerEmail) {
-    return true;
-  }
-
-  const { data: ownerProfile, error } = await supabase
-    .from("profiles")
-    .select("id, shop_id, role, is_active")
-    .eq("email", ownerEmail)
-    .eq("is_active", true)
-    .in("role", ["super_admin", "support"])
-    .maybeSingle();
-
-  if (error) {
-    throw error;
-  }
-
-  return Boolean(ownerProfile && !ownerProfile.shop_id);
-}
-
 export async function POST(request: Request) {
-  const ownerEmail = clean(request.headers.get("x-owner-email")).toLowerCase();
-
   try {
-    const supabase = createSupabaseAdminClient();
-    const isAuthorized = await isAuthorizedOwnerUser(supabase, ownerEmail);
-
-    if (!isAuthorized) {
+    const authorization = await getAuthorizedOwnerSession(request);
+    if (!authorization) {
       return NextResponse.json({ ok: false, message: "Owner password reset is not authorized." }, { status: 401 });
     }
+    const { session, supabase } = authorization;
 
     let body: ResetShopUserPasswordRequest;
 
@@ -92,7 +60,23 @@ export async function POST(request: Request) {
       query = query.eq("shop_id", shopId);
     }
 
-    const { data: profile, error: profileError } = await query.maybeSingle();
+    let { data: profile, error: profileError } = await query.maybeSingle();
+
+    if (!profile && userId && userEmail) {
+      let emailQuery = supabase
+        .from("profiles")
+        .select("id, shop_id, name, email, phone, role, is_active, last_login_at, created_at")
+        .eq("email", userEmail)
+        .neq("role", "super_admin");
+
+      if (shopId) {
+        emailQuery = emailQuery.eq("shop_id", shopId);
+      }
+
+      const fallback = await emailQuery.maybeSingle();
+      profile = fallback.data;
+      profileError = fallback.error;
+    }
 
     if (profileError) {
       throw profileError;
@@ -112,7 +96,7 @@ export async function POST(request: Request) {
 
     await supabase.from("audit_logs").insert({
       action: "owner.user_password.reset",
-      detail: `Owner ${ownerEmail || "unknown"} reset temporary POS sign-in password for ${profile.email}.`,
+      detail: `Owner ${session.email} reset temporary POS sign-in password for ${profile.email}.`,
       shop_id: profile.shop_id,
       target_id: profile.id
     });

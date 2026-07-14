@@ -1,27 +1,25 @@
 import { NextResponse } from "next/server";
 import { loadBrandProfileSnapshot } from "@/lib/supabase/brand-assets";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { isMissingOwnerExtension } from "@/lib/supabase/owner-authorization";
+import { getAuthorizedOwnerSession } from "@/lib/supabase/owner-session";
 
 function isMissingOwnerBillingColumnsError(error: { code?: string; message?: string }) {
   return (
     error.code === "PGRST204" ||
-    /billing_cycle|package_price|total_paid|last_owner_payment_at/i.test(error.message ?? "")
+    /billing_cycle|package_price|total_paid|last_owner_payment_at|country|city|auto_payment_enabled|cancelled_at/i.test(error.message ?? "")
   );
 }
 
 export async function GET(request: Request) {
-  const ownerEmail = request.headers.get("x-owner-email")?.trim().toLowerCase();
-  const expectedOwnerEmail = process.env.POS_OWNER_EMAIL?.trim().toLowerCase();
-
-  if (expectedOwnerEmail && ownerEmail !== expectedOwnerEmail) {
-    return NextResponse.json({ ok: false, message: "Owner summary is not authorized." }, { status: 401 });
-  }
-
   try {
-    const supabase = createSupabaseAdminClient();
+    const authorization = await getAuthorizedOwnerSession(request);
+    if (!authorization) {
+      return NextResponse.json({ ok: false, message: "Owner summary is not authorized." }, { status: 401 });
+    }
+    const { supabase } = authorization;
     const shopsResult = await supabase
       .from("shops")
-      .select("id, name, email, phone, address, plan_name, billing_cycle, package_price, total_paid, last_owner_payment_at, license_status, created_at");
+      .select("id, name, email, phone, address, country, city, plan_name, billing_cycle, package_price, total_paid, last_owner_payment_at, auto_payment_enabled, cancelled_at, license_status, created_at");
     const shops =
       shopsResult.error && isMissingOwnerBillingColumnsError(shopsResult.error)
         ? await supabase.from("shops").select("id, name, email, phone, address, plan_name, license_status, created_at")
@@ -46,10 +44,27 @@ export async function GET(request: Request) {
     if (devicesError) throw devicesError;
     if (licensesError) throw licensesError;
 
+    const [{ data: packages, error: packagesError }, { data: subscriptionPayments, error: subscriptionPaymentsError }] =
+      await Promise.all([
+        supabase
+          .from("owner_packages")
+          .select("id, name, billing_cycle, duration_days, price, currency, is_active, created_at, updated_at")
+          .order("price", { ascending: true }),
+        supabase
+          .from("owner_subscription_payments")
+          .select("id, shop_id, package_id, amount, currency, status, payment_method, period_start, period_end, note, created_at")
+          .order("created_at", { ascending: false })
+      ]);
+
+    if (packagesError && !isMissingOwnerExtension(packagesError)) throw packagesError;
+    if (subscriptionPaymentsError && !isMissingOwnerExtension(subscriptionPaymentsError)) throw subscriptionPaymentsError;
+
     return NextResponse.json({
       ok: true,
       shops: shops.data ?? [],
       brand,
+      packages: packages ?? [],
+      subscriptionPayments: subscriptionPayments ?? [],
       productKeys: productKeys ?? [],
       profiles: profiles ?? [],
       devices: devices ?? [],

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { hashProductKey, stableUuid } from "@/lib/cloud-sync";
 import { deletePrivatePosAsset, getPrivatePosAssetPathFromUrl, uploadPrivatePosAsset } from "@/lib/supabase/storage-assets";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getAuthorizedOwnerSession } from "@/lib/supabase/owner-session";
 
 type UploadScope = "category" | "owner-ad" | "owner-login-hero" | "owner-logo" | "product" | "shop-logo";
 
@@ -116,16 +117,16 @@ export async function POST(request: Request) {
   }
 
   try {
-    const ownerEmail = request.headers.get("x-owner-email")?.trim().toLowerCase();
-    const expectedOwnerEmail = process.env.POS_OWNER_EMAIL?.trim().toLowerCase();
     let folder: string;
     let supabase = createSupabaseAdminClient();
 
     if (ownerScopes.has(scope)) {
-      if (expectedOwnerEmail && ownerEmail !== expectedOwnerEmail) {
+      const authorization = await getAuthorizedOwnerSession(request, ["super_admin"]);
+      if (!authorization) {
         return NextResponse.json({ ok: false, message: "Owner upload is not authorized." }, { status: 401 });
       }
 
+      supabase = authorization.supabase;
       folder = folderForScope(scope);
     } else {
       if (!requestedShopId) {
@@ -186,14 +187,12 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ ok: true, ...deleted });
     }
 
-    const ownerEmail = request.headers.get("x-owner-email")?.trim().toLowerCase();
-    const expectedOwnerEmail = process.env.POS_OWNER_EMAIL?.trim().toLowerCase();
-
-    if (expectedOwnerEmail && ownerEmail !== expectedOwnerEmail) {
+    const authorization = await getAuthorizedOwnerSession(request, ["super_admin"]);
+    if (!authorization) {
       return NextResponse.json({ ok: false, message: "Owner delete is not authorized." }, { status: 401 });
     }
 
-    const deleted = await deletePrivatePosAsset(createSupabaseAdminClient(), storagePath);
+    const deleted = await deletePrivatePosAsset(authorization.supabase, storagePath);
 
     return NextResponse.json({ ok: true, ...deleted });
   } catch (error) {

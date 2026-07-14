@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 import type { DemoAppState } from "@/types/pos";
 
 const DEVICE_FINGERPRINT_KEY = "simple-pos-device-fingerprint";
-const CLOUD_ACTIVATION_STORAGE_KEY = "simple-pos-cloud-activation-state";
+const CLOUD_ACTIVATION_STORAGE_KEY = "simple-pos-cloud-activation-state-v3";
 
 type CloudActivationResponse = {
   ok: boolean;
@@ -34,6 +34,8 @@ type ShopCloudLoginResponse = {
   message?: string;
   user?: DemoAppState["users"][number];
 };
+
+type OwnerCloudLoginResponse = ShopCloudLoginResponse;
 
 function getBrowserInfo() {
   return typeof window === "undefined" ? "" : window.navigator.userAgent;
@@ -246,10 +248,41 @@ export function LoginForm() {
     setError(null);
     setIsPending(true);
 
+    if (isOwnerMode) {
+      try {
+        const response = await fetch("/api/auth/owner-login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password })
+        });
+        const payload = (await response.json()) as OwnerCloudLoginResponse;
+
+        if (!payload.ok || !payload.user) {
+          setError(payload.message ?? t("login.error"));
+          return;
+        }
+
+        const cloudResult = completeCloudLogin({ user: payload.user, workspace: "owner" });
+
+        if (!cloudResult.ok) {
+          setError(cloudResult.message ?? t("login.error"));
+          return;
+        }
+
+        router.push("/owner");
+      } catch {
+        setError("Unable to reach the owner authentication service.");
+      } finally {
+        setIsPending(false);
+      }
+
+      return;
+    }
+
     const result = login({
       email,
       password,
-      workspace: isOwnerMode ? "owner" : "shop"
+      workspace: "shop"
     });
 
     if (result.ok) {
@@ -258,7 +291,7 @@ export function LoginForm() {
       return;
     }
 
-    if (isOwnerMode || !activatedShop) {
+    if (!activatedShop) {
       setError(result.message ?? t("login.error"));
       setIsPending(false);
       return;

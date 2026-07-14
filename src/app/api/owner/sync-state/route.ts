@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { hashProductKey, previewProductKey, stableUuid } from "@/lib/cloud-sync";
 import { saveBrandProfileSnapshot } from "@/lib/supabase/brand-assets";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getAuthorizedOwnerSession } from "@/lib/supabase/owner-session";
 import type { DemoAppState, ProductKeyStatus, User } from "@/types/pos";
 
 type SyncRequest = {
@@ -28,17 +28,18 @@ function normalizeStatus(status: ProductKeyStatus) {
     : "unused";
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 function isMissingOwnerBillingColumnsError(error: { code?: string; message?: string }) {
   return (
     error.code === "PGRST204" ||
-    /billing_cycle|package_price|total_paid|last_owner_payment_at/i.test(error.message ?? "")
+    /billing_cycle|package_price|total_paid|last_owner_payment_at|country|city|auto_payment_enabled|cancelled_at/i.test(error.message ?? "")
   );
 }
 
 export async function POST(request: Request) {
-  const ownerEmail = request.headers.get("x-owner-email")?.trim().toLowerCase();
-  const expectedOwnerEmail = process.env.POS_OWNER_EMAIL?.trim().toLowerCase();
-
   let body: SyncRequest;
 
   try {
@@ -52,18 +53,16 @@ export async function POST(request: Request) {
   }
 
   const state = body.state;
-  const ownerInPayload = state.users?.some((user) => user.role === "super_admin" && user.isActive);
-
-  if (expectedOwnerEmail && ownerEmail !== expectedOwnerEmail && !ownerInPayload) {
-    return NextResponse.json({ ok: false, message: "Owner sync is not authorized." }, { status: 401 });
-  }
-
   const shops = (state.shops ?? []).filter((shop) => shop.id && shop.name);
-  const shopIdMap = new Map(shops.map((shop) => [shop.id, stableUuid(`shop:${shop.id}`)]));
+  const shopIdMap = new Map(shops.map((shop) => [shop.id, isUuid(shop.id) ? shop.id : stableUuid(`shop:${shop.id}`)]));
   const now = new Date().toISOString();
 
   try {
-    const supabase = createSupabaseAdminClient();
+    const authorization = await getAuthorizedOwnerSession(request, ["super_admin"]);
+    if (!authorization) {
+      return NextResponse.json({ ok: false, message: "Owner sync is not authorized." }, { status: 401 });
+    }
+    const { supabase } = authorization;
 
     if (state.brand) {
       await saveBrandProfileSnapshot(supabase, state.brand);
@@ -81,6 +80,8 @@ export async function POST(request: Request) {
           website: shop.website ?? null,
           phone: shop.phone ?? "",
           address: shop.address ?? "",
+          country: shop.country ?? "Saudi Arabia",
+          city: shop.city ?? "",
           currency: shop.currency || "SAR",
           timezone: shop.timezone || "Asia/Riyadh",
           plan_name: shop.planName || "Starter",
@@ -88,6 +89,8 @@ export async function POST(request: Request) {
           package_price: Math.max(0, Number(shop.packagePrice ?? 0)),
           total_paid: Math.max(0, Number(shop.totalPaid ?? 0)),
           last_owner_payment_at: shop.lastOwnerPaymentAt ?? null,
+          auto_payment_enabled: shop.autoPaymentEnabled ?? false,
+          cancelled_at: shop.cancelledAt ?? null,
           license_status: shop.licenseStatus || "trial",
           created_at: shop.createdAt || now,
           updated_at: now
@@ -101,7 +104,7 @@ export async function POST(request: Request) {
         }
 
         const fallbackRows = shopRows.map(
-          ({ billing_cycle, package_price, total_paid, last_owner_payment_at, ...row }) => row
+          ({ billing_cycle, package_price, total_paid, last_owner_payment_at, country, city, auto_payment_enabled, cancelled_at, ...row }) => row
         );
         const { error: fallbackError } = await supabase.from("shops").upsert(fallbackRows, { onConflict: "id" });
 
@@ -114,7 +117,7 @@ export async function POST(request: Request) {
     const licenseRows = (state.licenses ?? [])
       .filter((license) => shopIdMap.has(license.shopId))
       .map((license) => ({
-        id: stableUuid(`license:${license.shopId}`),
+        id: isUuid(license.id) ? license.id : stableUuid(`license:${license.shopId}`),
         shop_id: shopIdMap.get(license.shopId)!,
         status: license.status,
         expires_at: license.expiresAt ?? null,

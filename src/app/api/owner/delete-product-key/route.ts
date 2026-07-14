@@ -1,19 +1,12 @@
 import { NextResponse } from "next/server";
 import { hashProductKey } from "@/lib/cloud-sync";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getAuthorizedOwnerSession } from "@/lib/supabase/owner-session";
 
 type DeleteProductKeyRequest = {
   productKey?: string;
 };
 
 export async function POST(request: Request) {
-  const ownerEmail = request.headers.get("x-owner-email")?.trim().toLowerCase();
-  const expectedOwnerEmail = process.env.POS_OWNER_EMAIL?.trim().toLowerCase();
-
-  if (expectedOwnerEmail && !ownerEmail) {
-    return NextResponse.json({ ok: false, message: "Owner key delete is not authorized." }, { status: 401 });
-  }
-
   let body: DeleteProductKeyRequest;
 
   try {
@@ -29,7 +22,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    const supabase = createSupabaseAdminClient();
+    const authorization = await getAuthorizedOwnerSession(request, ["super_admin"]);
+    if (!authorization) {
+      return NextResponse.json({ ok: false, message: "Owner key delete is not authorized." }, { status: 401 });
+    }
+    const { supabase } = authorization;
     const { error } = await supabase.from("product_keys").delete().eq("key_hash", hashProductKey(productKey));
 
     if (error) {

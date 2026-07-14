@@ -1,20 +1,26 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
 import { LocaleSwitcher } from "@/components/shared/locale-switcher";
 import { Button } from "@/components/ui/button";
 
 export function OwnerShell({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const { state, logout, t } = usePosApp();
-  const lockedShops = state.licenses.filter((license) => license.status === "locked").length;
-  const activeLicenses = state.licenses.filter((license) => license.status === "active").length;
+
+  const signOut = async () => {
+    await fetch("/api/auth/owner-login", { method: "DELETE" }).catch(() => undefined);
+    logout();
+    router.push("/login");
+  };
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(124,58,237,0.13),transparent_32%),linear-gradient(180deg,#f7f4ee_0%,#eef3fb_48%,#eef7f2_100%)]">
       <div className="mx-auto max-w-[1560px] px-4 py-4 sm:px-6 lg:px-8">
-        <div className="relative overflow-hidden rounded-[36px] border border-white/75 bg-white/68 p-4 text-slate-950 shadow-[0_30px_90px_rgba(15,23,42,0.12)] backdrop-blur-2xl">
+        <div className="relative overflow-hidden rounded-[30px] border border-white/75 bg-white/72 p-4 text-slate-950 shadow-[0_24px_70px_rgba(15,23,42,0.10)] backdrop-blur-2xl">
           <div className="pointer-events-none absolute -left-24 top-0 h-56 w-56 rounded-full bg-emerald-300/24 blur-3xl" />
           <div className="pointer-events-none absolute right-0 top-0 h-72 w-72 rounded-full bg-purple-300/18 blur-3xl" />
           <div className="relative grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
@@ -47,30 +53,12 @@ export function OwnerShell({ children }: { children: React.ReactNode }) {
                     </span>
                   </Link>
                 </Button>
-              <Button className="h-11 rounded-[18px] bg-[linear-gradient(135deg,#ecfdf5_0%,#f5f3ff_100%)] px-4 text-slate-950 ring-1 ring-white/80 hover:bg-white" variant="secondary" onClick={logout}>
+              <Button className="h-11 rounded-[18px] bg-[linear-gradient(135deg,#ecfdf5_0%,#f5f3ff_100%)] px-4 text-slate-950 ring-1 ring-white/80 hover:bg-white" variant="secondary" onClick={signOut}>
                   {t("common.signOut")}
                 </Button>
               </div>
           </div>
 
-          <div className="relative mt-5 grid gap-3 md:grid-cols-3">
-            {[
-              { label: t("owner.totalShops"), value: state.shops.length, tone: "from-white/90 to-slate-50/80", accent: "bg-slate-900" },
-              { label: t("owner.activeLicenses"), value: activeLicenses, tone: "from-emerald-50/95 to-white/75", accent: "bg-emerald-500" },
-              { label: "Locked stores", value: lockedShops, tone: "from-purple-50/95 to-amber-50/80", accent: "bg-purple-500" }
-            ].map((metric) => (
-              <div
-                className={`rounded-[26px] border border-white/80 bg-gradient-to-br ${metric.tone} px-5 py-4 shadow-[0_18px_42px_rgba(15,23,42,0.06),inset_0_1px_0_rgba(255,255,255,0.9)]`}
-                key={metric.label}
-              >
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{metric.label}</p>
-                <div className="mt-2 flex items-end justify-between gap-3">
-                  <p className="font-display text-4xl font-semibold text-slate-950">{metric.value}</p>
-                  <span className={`h-2 w-12 rounded-full ${metric.accent}`} />
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
 
         <div className="mt-4">{children}</div>

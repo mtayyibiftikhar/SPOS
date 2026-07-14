@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getAuthorizedOwnerSession } from "@/lib/supabase/owner-session";
 
 type DeleteDeviceActivationRequest = {
   deviceActivationId?: string;
@@ -8,13 +8,6 @@ type DeleteDeviceActivationRequest = {
 };
 
 export async function POST(request: Request) {
-  const ownerEmail = request.headers.get("x-owner-email")?.trim().toLowerCase();
-  const expectedOwnerEmail = process.env.POS_OWNER_EMAIL?.trim().toLowerCase();
-
-  if (expectedOwnerEmail && ownerEmail !== expectedOwnerEmail) {
-    return NextResponse.json({ ok: false, message: "Owner device removal is not authorized." }, { status: 401 });
-  }
-
   let body: DeleteDeviceActivationRequest;
 
   try {
@@ -31,7 +24,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    const supabase = createSupabaseAdminClient();
+    const authorization = await getAuthorizedOwnerSession(request, ["super_admin"]);
+    if (!authorization) {
+      return NextResponse.json({ ok: false, message: "Owner device removal is not authorized." }, { status: 401 });
+    }
+    const { supabase } = authorization;
     const query = supabase.from("device_activations").delete();
     const { error } = body.allForShop && shopId ? await query.eq("shop_id", shopId) : await query.eq("id", deviceActivationId);
 

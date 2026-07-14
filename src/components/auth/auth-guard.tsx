@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { usePosApp } from "@/components/providers/app-provider";
@@ -14,7 +15,35 @@ export function AuthGuard({
   children: React.ReactNode;
   requiredWorkspace: WorkspaceKind;
 }) {
-  const { isHydrated, isShopCloudReady, session, t } = usePosApp();
+  const { isHydrated, isShopCloudReady, logout, session, t } = usePosApp();
+  const [ownerSessionStatus, setOwnerSessionStatus] = useState<"checking" | "valid" | "invalid">(
+    requiredWorkspace === "owner" ? "checking" : "valid"
+  );
+
+  useEffect(() => {
+    if (!isHydrated || requiredWorkspace !== "owner" || session?.workspace !== "owner") {
+      return;
+    }
+
+    let active = true;
+
+    void fetch("/api/auth/owner-login", { cache: "no-store" })
+      .then((response) => {
+        if (!active) return;
+        setOwnerSessionStatus(response.ok ? "valid" : "invalid");
+
+        if (!response.ok) logout();
+      })
+      .catch(() => {
+        if (!active) return;
+        setOwnerSessionStatus("invalid");
+        logout();
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isHydrated, logout, requiredWorkspace, session?.workspace]);
 
   if (!isHydrated) {
     return <BrandedLoadingScreen />;
@@ -22,6 +51,10 @@ export function AuthGuard({
 
   if (requiredWorkspace === "shop" && session?.workspace === "shop" && !isShopCloudReady) {
     return <BrandedLoadingScreen message="Syncing the latest shop data from cloud..." />;
+  }
+
+  if (requiredWorkspace === "owner" && session?.workspace === "owner" && ownerSessionStatus === "checking") {
+    return <BrandedLoadingScreen message="Verifying the secure owner session..." />;
   }
 
   if (!session || session.workspace !== requiredWorkspace) {

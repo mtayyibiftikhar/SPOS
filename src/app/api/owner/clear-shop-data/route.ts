@@ -3,6 +3,7 @@ import { stableUuid } from "@/lib/cloud-sync";
 import { POS_ASSETS_BUCKET } from "@/lib/supabase/storage-assets";
 import { clearShopDataScope, ownerClearShopDataScopeLabels, type OwnerClearShopDataScope } from "@/lib/shop-data-reset";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getAuthorizedOwnerSession } from "@/lib/supabase/owner-session";
 import type { DemoAppState } from "@/types/pos";
 
 const SNAPSHOT_BUCKET = "shop-cloud-snapshots";
@@ -115,35 +116,6 @@ async function resolveCloudShopId(supabase: ReturnType<typeof createSupabaseAdmi
   return data?.[0]?.id ?? candidateIds[0];
 }
 
-async function isAuthorizedOwnerUser(
-  supabase: ReturnType<typeof createSupabaseAdminClient>,
-  ownerEmail: string
-) {
-  const expectedOwnerEmail = clean(process.env.POS_OWNER_EMAIL).toLowerCase();
-
-  if (!ownerEmail) {
-    return false;
-  }
-
-  if (expectedOwnerEmail && ownerEmail === expectedOwnerEmail) {
-    return true;
-  }
-
-  const { data: ownerProfile, error } = await supabase
-    .from("profiles")
-    .select("id, shop_id, role, is_active")
-    .eq("email", ownerEmail)
-    .eq("is_active", true)
-    .in("role", ["super_admin", "support"])
-    .maybeSingle();
-
-  if (error) {
-    throw error;
-  }
-
-  return Boolean(ownerProfile && !ownerProfile.shop_id);
-}
-
 async function listStorageObjectsRecursively(
   supabase: ReturnType<typeof createSupabaseAdminClient>,
   bucket: string,
@@ -232,6 +204,8 @@ async function clearShopRowsForScope(
       ["customer_account_payments", "shop_id"],
       ["day_closes", "shop_id"],
       ["cash_movements", "shop_id"],
+      ["attendance_records", "shop_id"],
+      ["attendance_qr_sessions", "shop_id"],
       ["refunds", "shop_id"],
       ["bills", "shop_id"],
       ["shifts", "shop_id"],
@@ -251,6 +225,7 @@ async function clearShopRowsForScope(
       ["inventory_adjustments", "shop_id"],
       ["inventory_batches", "shop_id"],
       ["purchase_orders", "shop_id"],
+      ["product_barcodes", "shop_id"],
       ["deleted_products", "shop_id"],
       ["products", "shop_id"],
       ["product_categories", "shop_id"],
@@ -271,6 +246,7 @@ async function clearShopRowsForScope(
       ["expense_categories", "shop_id"],
       ["support_sessions", "shop_id"],
       ["support_tickets", "shop_id"],
+      ["payroll_rates", "shop_id"],
       ["customers", "shop_id"]
     ];
 
@@ -335,8 +311,6 @@ async function saveSnapshot(
 }
 
 export async function POST(request: Request) {
-  const ownerEmail = request.headers.get("x-owner-email")?.trim().toLowerCase();
-
   let body: ClearShopDataRequest;
 
   try {
@@ -353,17 +327,16 @@ export async function POST(request: Request) {
   }
 
   try {
-    const supabase = createSupabaseAdminClient();
-    const isAuthorized = await isAuthorizedOwnerUser(supabase, ownerEmail ?? "");
-
-    if (!isAuthorized) {
+    const authorization = await getAuthorizedOwnerSession(request, ["super_admin"]);
+    if (!authorization) {
       return NextResponse.json({ ok: false, message: "Owner data reset is not authorized." }, { status: 401 });
     }
+    const { session, supabase } = authorization;
 
     const cloudShopId = await resolveCloudShopId(supabase, shopId);
     const snapshot = await loadSnapshot(supabase, cloudShopId);
     const clearedState = clearShopDataScope(snapshot.state ?? {}, cloudShopId, scope, {
-      actorId: ownerEmail || "owner",
+      actorId: session.email,
       shopName: body.shopName,
       createdAt: new Date().toISOString()
     });

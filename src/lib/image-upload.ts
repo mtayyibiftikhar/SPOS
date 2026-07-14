@@ -204,7 +204,6 @@ export async function uploadImageAssetToCloud(input: UploadImageAssetInput): Pro
 
     const headers: Record<string, string> = {};
 
-    if (input.ownerEmail) headers["x-owner-email"] = input.ownerEmail;
     if (input.productKey) headers["x-product-key"] = input.productKey;
     if (input.shopId) headers["x-shop-id"] = input.shopId;
     if (input.userEmail) headers["x-user-email"] = input.userEmail;
@@ -266,7 +265,6 @@ export async function deleteImageAssetFromCloud(input: {
     "Content-Type": "application/json"
   };
 
-  if (input.ownerEmail) headers["x-owner-email"] = input.ownerEmail;
   if (input.productKey) headers["x-product-key"] = input.productKey;
   if (input.shopId) headers["x-shop-id"] = input.shopId;
   if (input.userEmail) headers["x-user-email"] = input.userEmail;
