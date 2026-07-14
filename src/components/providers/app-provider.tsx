@@ -625,6 +625,7 @@ interface AppContextValue {
       paymentMethod?: DemoAppState["purchaseOrders"][number]["paymentMethod"];
     }
   ) => { ok: boolean; message?: string };
+  cancelPurchaseOrder: (purchaseOrderId: string) => { ok: boolean; message?: string };
   deleteProduct: (productId: string, reason: string) => void;
   restoreDeletedProduct: (deletedProductId: string) => void;
   permanentlyDeleteProduct: (deletedProductId: string) => void;
@@ -5664,6 +5665,78 @@ export function AppProvider({
                   }
                 : entry
             )
+          };
+        });
+
+        return result;
+      },
+      cancelPurchaseOrder: (purchaseOrderId) => {
+        if (!currentShopId || !session) {
+          return { ok: false, message: "Session unavailable." };
+        }
+
+        if (session.role !== "shop_admin") {
+          return { ok: false, message: "Only the shop admin can cancel purchase orders." };
+        }
+
+        let result: { ok: boolean; message?: string } = {
+          ok: false,
+          message: "Unable to cancel purchase order."
+        };
+
+        setState((current) => {
+          const accessBlock = getShopAccessBlock(current, currentShopId);
+
+          if (accessBlock) {
+            result = { ok: false, message: accessBlock };
+            return current;
+          }
+
+          const order = current.purchaseOrders.find(
+            (entry) => entry.id === purchaseOrderId && entry.shopId === currentShopId
+          );
+
+          if (!order) {
+            result = { ok: false, message: "Purchase order not found." };
+            return current;
+          }
+
+          if (order.status === "received") {
+            result = { ok: false, message: "Received purchase orders cannot be cancelled." };
+            return current;
+          }
+
+          if (order.status === "cancelled") {
+            result = { ok: false, message: "Purchase order is already cancelled." };
+            return current;
+          }
+
+          const updatedAt = new Date().toISOString();
+          const unpaidAmount = Math.max(0, Math.round(((order.totalAmount ?? 0) - (order.paidAmount ?? 0)) * 100) / 100);
+
+          result = { ok: true };
+
+          return {
+            ...current,
+            purchaseOrders: current.purchaseOrders.map((entry) =>
+              entry.id === order.id
+                ? {
+                    ...entry,
+                    status: "cancelled"
+                  }
+                : entry
+            ),
+            suppliers: order.supplierId
+              ? current.suppliers.map((supplier) =>
+                  supplier.id === order.supplierId
+                    ? {
+                        ...supplier,
+                        accountBalance: Math.max(0, Math.round(((supplier.accountBalance ?? 0) - unpaidAmount) * 100) / 100),
+                        updatedAt
+                      }
+                    : supplier
+                )
+              : current.suppliers
           };
         });
 
