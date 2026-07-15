@@ -1,11 +1,15 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { NextResponse, type NextRequest } from "next/server";
+import { rejectOutsideLocalDevelopment } from "@/lib/server/local-development-only";
 
 const stateDirectory = path.join(process.cwd(), ".local");
 const stateFile = path.join(stateDirectory, "simple-pos-state.json");
 
 export async function GET() {
+  const rejection = rejectOutsideLocalDevelopment();
+  if (rejection) return rejection;
+
   try {
     const raw = await fs.readFile(stateFile, "utf8");
     return NextResponse.json(JSON.parse(raw));
@@ -15,6 +19,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const rejection = rejectOutsideLocalDevelopment();
+  if (rejection) return rejection;
+
   const body = await request.json();
 
   await fs.mkdir(stateDirectory, { recursive: true });

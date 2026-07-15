@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { stableUuid } from "@/lib/cloud-sync";
+import { consumeRateLimit } from "@/lib/server/rate-limit";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
   createOwnerSessionToken,
@@ -84,6 +85,21 @@ export async function POST(request: Request) {
 
   if (!email || !password) {
     return NextResponse.json({ ok: false, message: "Email and password are required." }, { status: 400 });
+  }
+
+  const rateLimit = await consumeRateLimit(request, {
+    blockSeconds: 1_800,
+    identifier: email,
+    limit: 8,
+    scope: "owner_login",
+    windowSeconds: 900
+  });
+
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { ok: false, message: "Too many sign-in attempts. Please wait and try again." },
+      { headers: { "Retry-After": String(rateLimit.retryAfterSeconds) }, status: 429 }
+    );
   }
 
   try {

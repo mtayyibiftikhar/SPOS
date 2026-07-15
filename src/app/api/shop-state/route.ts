@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
-import { hashProductKey } from "@/lib/cloud-sync";
+import { applyCriticalShopMutation, type CriticalShopMutation } from "@/lib/server/shop-snapshot-mutations";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { loadBrandProfileSnapshot } from "@/lib/supabase/brand-assets";
-import type { DemoAppState, ProductKey } from "@/types/pos";
+import { readShopDeviceSession, readShopUserSession } from "@/lib/supabase/shop-session";
+import type { DemoAppState, ProductKey, UserRole } from "@/types/pos";
 
 const SNAPSHOT_BUCKET = "shop-cloud-snapshots";
 
 type ShopStateRequest = {
+  expectedRevision?: number;
+  mutation?: CriticalShopMutation;
+  operationId?: string;
   shopId?: string;
   state?: Partial<DemoAppState>;
 };
@@ -17,6 +21,14 @@ function clean(value: string | null | undefined) {
 
 function isMissingSnapshotTableError(error: { code?: string; message?: string }) {
   return error.code === "42P01" || error.code === "PGRST205" || /shop_cloud_snapshots/i.test(error.message ?? "");
+}
+
+function isMissingTransactionalSnapshotError(error: { code?: string; message?: string }) {
+  return (
+    error.code === "42883" ||
+    error.code === "PGRST202" ||
+    /commit_shop_cloud_snapshot|revision/i.test(error.message ?? "")
+  );
 }
 
 function resolveEffectiveLicenseStatus(license: {
@@ -56,7 +68,9 @@ async function loadOwnerControlledShopState(
     { data: devices, error: devicesError },
     { data: settings, error: settingsError },
     { data: profiles, error: profilesError },
-    { data: auditLogs, error: auditLogsError }
+    { data: auditLogs, error: auditLogsError },
+    { data: attendanceRecords, error: attendanceRecordsError },
+    { data: payrollRates, error: payrollRatesError }
   ] = await Promise.all([
     supabase
       .from("shops")
@@ -92,7 +106,20 @@ async function loadOwnerControlledShopState(
       .select("id, shop_id, action, target_id, detail, created_at")
       .eq("shop_id", shopId)
       .order("created_at", { ascending: false })
-      .limit(75)
+      .limit(75),
+    supabase
+      .from("attendance_records")
+      .select(
+        "id, shop_id, user_id, business_date, clock_in_at, clock_out_at, scheduled_hours, paid_hours, hourly_rate, source, clock_in_latitude, clock_in_longitude, clock_out_latitude, clock_out_longitude, clock_in_selfie_url, clock_out_selfie_url, note, created_at, updated_at"
+      )
+      .eq("shop_id", shopId)
+      .order("clock_in_at", { ascending: false })
+      .limit(500),
+    supabase
+      .from("payroll_rates")
+      .select("id, shop_id, user_id, hourly_rate, default_daily_hours, created_at, updated_at")
+      .eq("shop_id", shopId)
+      .order("effective_from", { ascending: false })
   ]);
 
   if (shopError) throw shopError;
@@ -102,6 +129,8 @@ async function loadOwnerControlledShopState(
   if (settingsError) throw settingsError;
   if (profilesError) throw profilesError;
   if (auditLogsError) throw auditLogsError;
+  if (attendanceRecordsError) throw attendanceRecordsError;
+  if (payrollRatesError) throw payrollRatesError;
 
   const existingProductKeys = currentState.productKeys?.filter((key) => key.shopId === shopId) ?? [];
   const authoritativeProductKeys = (productKeys ?? []).reduce<ProductKey[]>((keys, keyRow) => {
@@ -200,6 +229,52 @@ async function loadOwnerControlledShopState(
         targetId: log.target_id ?? undefined,
         detail: log.detail ?? undefined,
         createdAt: log.created_at ?? new Date().toISOString()
+      })) ?? [],
+    attendanceRecords:
+      attendanceRecords?.map((record) => ({
+        id: record.id,
+        shopId: record.shop_id,
+        userId: record.user_id,
+        businessDate: record.business_date,
+        status: record.clock_out_at ? "closed" : "open",
+        source: record.source,
+        clockInAt: record.clock_in_at,
+        clockOutAt: record.clock_out_at ?? undefined,
+        clockInLocation:
+          record.clock_in_latitude != null && record.clock_in_longitude != null
+            ? {
+                latitude: Number(record.clock_in_latitude),
+                longitude: Number(record.clock_in_longitude),
+                capturedAt: record.clock_in_at
+              }
+            : undefined,
+        clockOutLocation:
+          record.clock_out_latitude != null && record.clock_out_longitude != null && record.clock_out_at
+            ? {
+                latitude: Number(record.clock_out_latitude),
+                longitude: Number(record.clock_out_longitude),
+                capturedAt: record.clock_out_at
+              }
+            : undefined,
+        clockInSelfieUrl: record.clock_in_selfie_url ?? undefined,
+        clockOutSelfieUrl: record.clock_out_selfie_url ?? undefined,
+        scheduledHours: Number(record.scheduled_hours ?? 8),
+        paidHours: record.paid_hours == null ? undefined : Number(record.paid_hours),
+        hourlyRate: Number(record.hourly_rate ?? 0),
+        note: record.note ?? undefined,
+        editedAt: record.updated_at ?? undefined,
+        createdAt: record.created_at
+      })) ?? [],
+    payrollRates:
+      payrollRates?.map((rate) => ({
+        id: rate.id,
+        shopId: rate.shop_id,
+        userId: rate.user_id,
+        hourlyRate: Number(rate.hourly_rate ?? 0),
+        defaultDailyHours: Number(rate.default_daily_hours ?? 8),
+        currency: currentState.shops?.find((entry) => entry.id === shopId)?.currency ?? "SAR",
+        createdAt: rate.created_at,
+        updatedAt: rate.updated_at
       })) ?? [],
     ...(shop
       ? {
@@ -374,59 +449,179 @@ async function saveSnapshotToStorage(
   }
 }
 
-async function authorizeShopStateAccess(request: Request, shopId: string) {
+async function authorizeShopStateAccess(request: Request, shopId: string, requireUser = false) {
   const supabase = createSupabaseAdminClient();
-  const userId = clean(request.headers.get("x-user-id"));
-  const userEmail = clean(request.headers.get("x-user-email")).toLowerCase();
-  const productKey = clean(request.headers.get("x-product-key"));
   const shopCanAccessCloudState = await assertShopCanAccessCloudState(supabase, shopId);
 
   if (!shopCanAccessCloudState.ok) {
-    return { ...shopCanAccessCloudState, supabase, userId: null };
+    return { ...shopCanAccessCloudState, role: null, supabase, userId: null };
   }
 
-  if (userId) {
-    let query = supabase
+  const userSession = readShopUserSession(request);
+
+  if (userSession?.shopId === shopId) {
+    const { data: profile, error } = await supabase
       .from("profiles")
       .select("id, shop_id, email, role, is_active")
       .eq("shop_id", shopId)
-      .eq("id", userId)
+      .eq("id", userSession.userId)
+      .eq("email", userSession.email)
+      .eq("role", userSession.role)
       .eq("is_active", true)
-      .neq("role", "super_admin");
-
-    if (userEmail) {
-      query = query.eq("email", userEmail);
-    }
-
-    const { data: profile, error } = await query.maybeSingle();
-
-    if (error) {
-      throw error;
-    }
-
-    if (profile) {
-      return { ok: true, supabase, userId: profile.id };
-    }
-  }
-
-  if (productKey.length >= 30) {
-    const { data: keyRow, error } = await supabase
-      .from("product_keys")
-      .select("id, shop_id, status")
-      .eq("key_hash", hashProductKey(productKey))
-      .eq("shop_id", shopId)
+      .neq("role", "super_admin")
       .maybeSingle();
 
     if (error) {
       throw error;
     }
 
-    if (keyRow && keyRow.status !== "revoked" && keyRow.status !== "locked" && keyRow.status !== "expired") {
-      return { ok: true, supabase, userId: null };
+    if (profile) {
+      return { ok: true, role: profile.role as UserRole, supabase, userId: profile.id };
     }
   }
 
-  return { ok: false, message: "Shop cloud state is not authorized.", status: "unauthorized" as const, supabase, userId: null };
+  if (requireUser) {
+    return { ok: false, message: "A signed-in shop user is required to save cloud data.", status: "unauthorized" as const, role: null, supabase, userId: null };
+  }
+
+  const deviceSession = readShopDeviceSession(request);
+
+  if (deviceSession?.shopId === shopId) {
+    const [{ data: keyRow, error: keyError }, { data: activation, error: activationError }] = await Promise.all([
+      supabase
+      .from("product_keys")
+      .select("id, shop_id, status")
+      .eq("id", deviceSession.productKeyId)
+      .eq("shop_id", shopId)
+      .maybeSingle(),
+      supabase
+        .from("device_activations")
+        .select("id")
+        .eq("product_key_id", deviceSession.productKeyId)
+        .eq("shop_id", shopId)
+        .eq("device_fingerprint", deviceSession.deviceFingerprint)
+        .maybeSingle()
+    ]);
+
+    if (keyError) throw keyError;
+    if (activationError) throw activationError;
+
+    if (activation && keyRow && !["revoked", "locked", "expired"].includes(keyRow.status)) {
+      return { ok: true, role: null, supabase, userId: null };
+    }
+  }
+
+  return { ok: false, message: "Shop cloud state is not authorized.", status: "unauthorized" as const, role: null, supabase, userId: null };
+}
+
+async function commitCriticalMutation(
+  authorization: Awaited<ReturnType<typeof authorizeShopStateAccess>> & {
+    ok: true;
+    role: UserRole;
+    userId: string;
+  },
+  shopId: string,
+  operationId: string,
+  mutation: CriticalShopMutation
+) {
+  const { data: snapshot, error: snapshotError } = await authorization.supabase
+    .from("shop_cloud_snapshots")
+    .select("state, revision")
+    .eq("shop_id", shopId)
+    .maybeSingle();
+
+  if (snapshotError) {
+    if (isMissingSnapshotTableError(snapshotError) || isMissingTransactionalSnapshotError(snapshotError)) {
+      return NextResponse.json(
+        { ok: false, message: "The transactional shop-state migration must be applied before checkout." },
+        { status: 503 }
+      );
+    }
+
+    throw snapshotError;
+  }
+
+  let revision = Math.max(0, Number(snapshot?.revision ?? 0));
+  let latestState = ((snapshot?.state as Partial<DemoAppState> | null) ?? {}) as Partial<DemoAppState>;
+  let allowedShiftCount: number | undefined;
+
+  if (mutation.type === "start_shift") {
+    const { data: productKeys, error: productKeysError } = await authorization.supabase
+      .from("product_keys")
+      .select("status, allowed_devices")
+      .eq("shop_id", shopId);
+
+    if (productKeysError) throw productKeysError;
+
+    allowedShiftCount = Math.max(
+      1,
+      (productKeys ?? [])
+        .filter((key) => !["revoked", "locked", "expired"].includes(key.status))
+        .reduce((highest, key) => Math.max(highest, Number(key.allowed_devices ?? 1)), 0)
+    );
+  }
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const mutationResult = applyCriticalShopMutation(latestState, mutation, {
+      allowedShiftCount,
+      role: authorization.role,
+      shopId,
+      userId: authorization.userId
+    });
+
+    if (!mutationResult.result.ok) {
+      const status = mutation.type === "create_refund" && authorization.role !== "shop_admin" ? 403 : 400;
+      return NextResponse.json(mutationResult.result, { status });
+    }
+
+    const { data, error } = await authorization.supabase.rpc("commit_shop_cloud_snapshot", {
+      p_expected_revision: revision,
+      p_operation_id: operationId,
+      p_result: mutationResult.result,
+      p_shop_id: shopId,
+      p_state: mutationResult.state,
+      p_updated_by: authorization.userId
+    });
+
+    if (error) {
+      if (isMissingSnapshotTableError(error) || isMissingTransactionalSnapshotError(error)) {
+        return NextResponse.json(
+          { ok: false, message: "The transactional shop-state migration must be applied before checkout." },
+          { status: 503 }
+        );
+      }
+
+      throw error;
+    }
+
+    const commit = (data ?? {}) as {
+      conflict?: boolean;
+      duplicate?: boolean;
+      ok?: boolean;
+      result?: Record<string, unknown>;
+      revision?: number;
+      state?: Partial<DemoAppState>;
+    };
+
+    if (commit.conflict) {
+      revision = Math.max(0, Number(commit.revision ?? revision));
+      latestState = commit.state ?? latestState;
+      continue;
+    }
+
+    return NextResponse.json({
+      duplicate: Boolean(commit.duplicate),
+      ok: commit.ok !== false,
+      result: commit.result ?? mutationResult.result,
+      revision: Math.max(revision + 1, Number(commit.revision ?? revision + 1)),
+      state: commit.state ?? mutationResult.state
+    });
+  }
+
+  return NextResponse.json(
+    { conflict: true, ok: false, message: "The shop changed on another device. Please retry." },
+    { status: 409 }
+  );
 }
 
 export async function GET(request: Request) {
@@ -451,7 +646,7 @@ export async function GET(request: Request) {
 
     const { data, error } = await authorization.supabase
       .from("shop_cloud_snapshots")
-      .select("state, updated_at")
+      .select("state, updated_at, revision")
       .eq("shop_id", shopId)
       .maybeSingle();
 
@@ -465,6 +660,7 @@ export async function GET(request: Request) {
           ok: true,
           state: mergeOwnerControlledShopState((state ?? {}) as Partial<DemoAppState>, ownerState, brand),
           storageFallback: true,
+          revision: 0,
           updatedAt: null
         });
       }
@@ -478,6 +674,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       ok: true,
+      revision: Number(data?.revision ?? 0),
       state: mergeOwnerControlledShopState(snapshotState, ownerState, brand),
       updatedAt: data?.updated_at ?? null
     });
@@ -500,12 +697,12 @@ export async function POST(request: Request) {
 
   const shopId = clean(body.shopId ?? request.headers.get("x-shop-id"));
 
-  if (!shopId || !body.state) {
-    return NextResponse.json({ ok: false, message: "Shop id and state are required." }, { status: 400 });
+  if (!shopId || (!body.state && !body.mutation)) {
+    return NextResponse.json({ ok: false, message: "Shop id and state or mutation are required." }, { status: 400 });
   }
 
   try {
-    const authorization = await authorizeShopStateAccess(request, shopId);
+    const authorization = await authorizeShopStateAccess(request, shopId, true);
 
     if (!authorization.ok) {
       const statusCode = authorization.status === "locked" ? 423 : authorization.status === "expired" ? 402 : 401;
@@ -516,27 +713,77 @@ export async function POST(request: Request) {
       );
     }
 
-    const { error } = await authorization.supabase.from("shop_cloud_snapshots").upsert(
-      {
-        shop_id: shopId,
-        state: body.state,
-        updated_by: authorization.userId,
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: "shop_id" }
-    );
+    if (body.mutation) {
+      if (!authorization.userId || !authorization.role) {
+        return NextResponse.json({ ok: false, message: "A signed-in shop user is required." }, { status: 401 });
+      }
+
+      const operationId = clean(body.operationId);
+
+      if (!operationId) {
+        return NextResponse.json({ ok: false, message: "Operation id is required." }, { status: 400 });
+      }
+
+      return commitCriticalMutation(
+        authorization as typeof authorization & { ok: true; role: UserRole; userId: string },
+        shopId,
+        operationId,
+        body.mutation
+      );
+    }
+
+    if (!body.state) {
+      return NextResponse.json({ ok: false, message: "Shop state is required." }, { status: 400 });
+    }
+
+    const expectedRevision = Math.max(0, Math.trunc(Number(body.expectedRevision ?? 0)));
+    const operationId = clean(body.operationId) || crypto.randomUUID();
+    const { data, error } = await authorization.supabase.rpc("commit_shop_cloud_snapshot", {
+      p_expected_revision: expectedRevision,
+      p_operation_id: operationId,
+      p_result: {},
+      p_shop_id: shopId,
+      p_state: body.state,
+      p_updated_by: authorization.userId
+    });
 
     if (error) {
-      if (isMissingSnapshotTableError(error)) {
+      if (isMissingSnapshotTableError(error) || isMissingTransactionalSnapshotError(error)) {
         await saveSnapshotToStorage(authorization.supabase, shopId, body.state);
 
-        return NextResponse.json({ ok: true, storageFallback: true });
+        return NextResponse.json({ ok: true, revision: expectedRevision + 1, storageFallback: true });
       }
 
       throw error;
     }
 
-    return NextResponse.json({ ok: true });
+    const commit = (data ?? {}) as {
+      conflict?: boolean;
+      duplicate?: boolean;
+      ok?: boolean;
+      result?: Record<string, unknown>;
+      revision?: number;
+      state?: Partial<DemoAppState>;
+    };
+
+    if (commit.conflict) {
+      return NextResponse.json(
+        {
+          conflict: true,
+          ok: false,
+          revision: Number(commit.revision ?? expectedRevision),
+          state: commit.state ?? {}
+        },
+        { status: 409 }
+      );
+    }
+
+    return NextResponse.json({
+      duplicate: Boolean(commit.duplicate),
+      ok: commit.ok !== false,
+      revision: Number(commit.revision ?? expectedRevision + 1),
+      state: commit.state ?? body.state
+    });
   } catch (error) {
     return NextResponse.json(
       { ok: false, message: error instanceof Error ? error.message : "Unable to save shop cloud state." },

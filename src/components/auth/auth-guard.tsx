@@ -45,6 +45,35 @@ export function AuthGuard({
     };
   }, [isHydrated, logout, requiredWorkspace, session?.workspace]);
 
+  useEffect(() => {
+    if (!isHydrated || requiredWorkspace !== "shop" || session?.workspace !== "shop") return;
+
+    const hostname = window.location.hostname;
+    const isLocal =
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      /^10\./.test(hostname) ||
+      /^192\.168\./.test(hostname) ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
+
+    if (isLocal) return;
+
+    let active = true;
+
+    void fetch("/api/auth/shop-login", { cache: "no-store" })
+      .then((response) => {
+        if (active && !response.ok) logout();
+      })
+      .catch(() => {
+        if (active) logout();
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isHydrated, logout, requiredWorkspace, session?.workspace]);
+
   if (!isHydrated) {
     return <BrandedLoadingScreen />;
   }

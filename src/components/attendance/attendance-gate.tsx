@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Camera, CheckCircle2, Clock3, LocateFixed, QrCode, ShieldCheck } from "lucide-react";
-import { buildAttendanceScanUrl } from "@/lib/attendance";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
 import { cn, formatBusinessDate, formatDateTime } from "@/lib/utils";
 import { usePosApp } from "@/components/providers/app-provider";
@@ -32,6 +31,7 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
   } = usePosApp();
   const selfieInputRef = useRef<HTMLInputElement | null>(null);
   const [location, setLocation] = useState<AttendanceLocation | null>(null);
+  const [selfieFile, setSelfieFile] = useState<File | null>(null);
   const [selfieUrl, setSelfieUrl] = useState("");
   const [feedback, setFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [scanUrl, setScanUrl] = useState("");
@@ -55,14 +55,31 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    setScanUrl(
-      buildAttendanceScanUrl({
-        businessDate: currentBusinessDay.businessDate,
-        origin: window.location.origin,
-        shopId: currentShopId,
-        userId: session.id
+    let active = true;
+
+    void fetch("/api/attendance/session", {
+      body: JSON.stringify({ businessDate: currentBusinessDay.businessDate }),
+      headers: { "content-type": "application/json" },
+      method: "POST"
+    })
+      .then(async (response) => {
+        const payload = (await response.json()) as { message?: string; ok?: boolean; scanUrl?: string };
+
+        if (!response.ok || !payload.ok || !payload.scanUrl) {
+          throw new Error(payload.message ?? "Unable to create attendance QR.");
+        }
+
+        if (active) setScanUrl(payload.scanUrl);
       })
-    );
+      .catch((error) => {
+        if (active) {
+          setFeedback({ tone: "error", message: error instanceof Error ? error.message : "Unable to create attendance QR." });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
   }, [currentBusinessDay, currentShopId, session]);
 
   if (!session || session.workspace !== "shop" || !currentBusinessDay || openAttendance) {
@@ -106,6 +123,7 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
 
     try {
       const dataUrl = await fileToDataUrl(file);
+      setSelfieFile(file);
       setSelfieUrl(dataUrl);
       setFeedback({ tone: "success", message: "Selfie captured." });
     } catch {
@@ -113,17 +131,36 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const submitClockIn = () => {
-    const result = clockIn({
-      location: location ?? undefined,
-      selfieUrl: selfieUrl || undefined,
-      source: "qr"
-    });
+  const submitClockIn = async () => {
+    if (!location || !selfieFile || !scanUrl) {
+      setFeedback({ tone: "error", message: "Capture location and selfie before clocking in." });
+      return;
+    }
 
-    setFeedback({
-      tone: result.ok ? "success" : "error",
-      message: result.message ?? (result.ok ? "Clock-in saved." : "Clock-in failed.")
-    });
+    try {
+      const scan = new URL(scanUrl);
+      const body = new FormData();
+      body.set("accuracy", String(location.accuracy ?? 0));
+      body.set("businessDate", scan.searchParams.get("businessDate") ?? "");
+      body.set("latitude", String(location.latitude));
+      body.set("longitude", String(location.longitude));
+      body.set("selfie", selfieFile);
+      body.set("shopId", scan.searchParams.get("shopId") ?? "");
+      body.set("token", scan.searchParams.get("token") ?? "");
+      body.set("userId", scan.searchParams.get("userId") ?? "");
+      const response = await fetch("/api/attendance/scan", { body, method: "POST" });
+      const result = (await response.json()) as { message?: string; ok?: boolean };
+
+      if (!response.ok || !result.ok) {
+        setFeedback({ tone: "error", message: result.message ?? "Clock-in failed." });
+        return;
+      }
+
+      setFeedback({ tone: "success", message: result.message ?? "Clock-in saved securely." });
+      window.setTimeout(() => window.location.reload(), 700);
+    } catch {
+      setFeedback({ tone: "error", message: "Unable to reach the POS. Check the connection and try again." });
+    }
   };
 
   const bypassClockIn = () => {
@@ -256,7 +293,7 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
             ) : null}
 
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-              <Button className="h-14 flex-1 rounded-[22px] text-base" disabled={!location || !selfieUrl} onClick={submitClockIn}>
+              <Button className="h-14 flex-1 rounded-[22px] text-base" disabled={!scanUrl || !location || !selfieFile} onClick={() => void submitClockIn()}>
                 Clock in and enter POS
               </Button>
               {isAdmin ? (

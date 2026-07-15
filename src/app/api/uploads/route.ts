@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
-import { hashProductKey, stableUuid } from "@/lib/cloud-sync";
+import { stableUuid } from "@/lib/cloud-sync";
 import { deletePrivatePosAsset, getPrivatePosAssetPathFromUrl, uploadPrivatePosAsset } from "@/lib/supabase/storage-assets";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getAuthorizedOwnerSession } from "@/lib/supabase/owner-session";
+import { readShopUserSession } from "@/lib/supabase/shop-session";
+import { optimizePosImage } from "@/lib/server/optimize-pos-image";
 
 type UploadScope = "category" | "owner-ad" | "owner-login-hero" | "owner-logo" | "product" | "shop-logo";
 
@@ -15,6 +17,14 @@ const uploadLimitsByScope: Record<UploadScope, number> = {
   "owner-logo": 220 * 1024,
   product: 350 * 1024,
   "shop-logo": 220 * 1024
+};
+const imageProfilesByScope: Record<UploadScope, { width: number; height: number }> = {
+  category: { width: 1_000, height: 1_000 },
+  "owner-ad": { width: 1_600, height: 1_000 },
+  "owner-login-hero": { width: 1_600, height: 1_000 },
+  "owner-logo": { width: 800, height: 800 },
+  product: { width: 1_000, height: 1_000 },
+  "shop-logo": { width: 800, height: 800 }
 };
 
 function clean(value: FormDataEntryValue | string | null | undefined) {
@@ -37,24 +47,19 @@ function folderForScope(scope: UploadScope, shopId?: string) {
 async function authorizeShopUpload(request: Request, requestedShopId: string) {
   const supabase = createSupabaseAdminClient();
   const candidateShopIds = getCandidateShopIds(requestedShopId);
-  const userId = request.headers.get("x-user-id")?.trim();
-  const userEmail = request.headers.get("x-user-email")?.trim().toLowerCase();
-  const productKey = request.headers.get("x-product-key")?.trim();
+  const session = readShopUserSession(request);
 
-  if (userId) {
-    let query = supabase
+  if (session && candidateShopIds.includes(session.shopId)) {
+    const { data: profile, error } = await supabase
       .from("profiles")
       .select("id, shop_id, email, role, is_active")
-      .in("shop_id", candidateShopIds)
-      .eq("id", userId)
+      .eq("shop_id", session.shopId)
+      .eq("id", session.userId)
+      .eq("email", session.email)
+      .eq("role", session.role)
       .eq("is_active", true)
-      .neq("role", "super_admin");
-
-    if (userEmail) {
-      query = query.eq("email", userEmail);
-    }
-
-    const { data: profile, error } = await query.maybeSingle();
+      .neq("role", "super_admin")
+      .maybeSingle();
 
     if (error) {
       throw error;
@@ -65,28 +70,18 @@ async function authorizeShopUpload(request: Request, requestedShopId: string) {
     }
   }
 
-  if (productKey && productKey.length >= 30) {
-    const { data: keyRow, error } = await supabase
-      .from("product_keys")
-      .select("id, shop_id, status")
-      .eq("key_hash", hashProductKey(productKey))
-      .in("shop_id", candidateShopIds)
-      .maybeSingle();
-
-    if (error) {
-      throw error;
-    }
-
-    if (keyRow && !["expired", "locked", "revoked"].includes(keyRow.status)) {
-      return { ok: true, shopId: keyRow.shop_id, supabase };
-    }
-  }
-
   return { ok: false, shopId: requestedShopId, supabase };
 }
 
 export async function POST(request: Request) {
-  const formData = await request.formData();
+  let formData: FormData;
+
+  try {
+    formData = await request.formData();
+  } catch {
+    return NextResponse.json({ ok: false, message: "A multipart image upload is required." }, { status: 400 });
+  }
+
   const file = formData.get("file");
   const scope = clean(formData.get("scope")) as UploadScope;
   const requestedShopId = clean(formData.get("shopId") ?? request.headers.get("x-shop-id"));
@@ -100,8 +95,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "Image file is required." }, { status: 400 });
   }
 
-  if (!file.type.startsWith("image/")) {
-    return NextResponse.json({ ok: false, message: "Only image uploads are allowed." }, { status: 400 });
+  if (!new Set(["image/jpeg", "image/png", "image/webp"]).has(file.type.toLowerCase())) {
+    return NextResponse.json({ ok: false, message: "Use a valid JPG, PNG, or WebP image." }, { status: 400 });
   }
 
   const maxUploadBytes = uploadLimitsByScope[scope];
@@ -143,10 +138,14 @@ export async function POST(request: Request) {
       folder = folderForScope(scope, authorization.shopId);
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
+    const optimized = await optimizePosImage(
+      Buffer.from(await file.arrayBuffer()),
+      imageProfilesByScope[scope],
+      maxUploadBytes
+    );
     const uploaded = await uploadPrivatePosAsset(supabase, {
-      buffer,
-      contentType: file.type,
+      buffer: optimized.buffer,
+      contentType: optimized.contentType,
       fileName,
       folder
     });
@@ -196,6 +195,10 @@ export async function DELETE(request: Request) {
 
     return NextResponse.json({ ok: true, ...deleted });
   } catch (error) {
+    if (error instanceof SyntaxError) {
+      return NextResponse.json({ ok: false, message: "A valid image delete payload is required." }, { status: 400 });
+    }
+
     return NextResponse.json(
       { ok: false, message: error instanceof Error ? error.message : "Unable to delete image." },
       { status: 500 }

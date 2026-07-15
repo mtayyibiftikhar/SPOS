@@ -204,8 +204,6 @@ async function clearShopRowsForScope(
       ["customer_account_payments", "shop_id"],
       ["day_closes", "shop_id"],
       ["cash_movements", "shop_id"],
-      ["attendance_records", "shop_id"],
-      ["attendance_qr_sessions", "shop_id"],
       ["refunds", "shop_id"],
       ["bills", "shop_id"],
       ["shifts", "shop_id"],
@@ -247,12 +245,16 @@ async function clearShopRowsForScope(
       ["support_sessions", "shop_id"],
       ["support_tickets", "shop_id"],
       ["payroll_rates", "shop_id"],
+      ["attendance_records", "shop_id"],
+      ["attendance_qr_sessions", "shop_id"],
       ["customers", "shop_id"]
     ];
 
     for (const [table, column] of allOnlyTables) {
       await deleteFromTable(supabase, table, column, shopId);
     }
+
+    await removeStoragePrefix(supabase, POS_ASSETS_BUCKET, `shops/${shopId}/attendance`);
   }
 }
 

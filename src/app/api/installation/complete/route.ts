@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 import { hashProductKey } from "@/lib/cloud-sync";
+import { consumeRateLimit } from "@/lib/server/rate-limit";
 import { uploadDataUrlPosAsset } from "@/lib/supabase/storage-assets";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  createShopUserSessionToken,
+  SHOP_USER_SESSION_COOKIE,
+  SHOP_USER_SESSION_MAX_AGE_SECONDS,
+  shopSessionCookieOptions
+} from "@/lib/supabase/shop-session";
 
 type CompleteInstallationRequest = {
   adminEmail?: string;
@@ -94,6 +101,21 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { ok: false, message: `Admin password must be at least ${MIN_PASSWORD_LENGTH} characters.` },
       { status: 400 }
+    );
+  }
+
+  const rateLimit = await consumeRateLimit(request, {
+    blockSeconds: 1_800,
+    identifier: `${hashProductKey(productKey)}:${adminEmail}`,
+    limit: 6,
+    scope: "shop_installation",
+    windowSeconds: 1_800
+  });
+
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { ok: false, message: "Too many installation attempts. Please wait and try again." },
+      { headers: { "Retry-After": String(rateLimit.retryAfterSeconds) }, status: 429 }
     );
   }
 
@@ -337,11 +359,24 @@ export async function POST(request: Request) {
       throw auditError;
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       ok: true,
       adminUser: mapProfile(profileRow),
       shopId: shop.id
     });
+    response.cookies.set(
+      SHOP_USER_SESSION_COOKIE,
+      createShopUserSessionToken({
+        kind: "user",
+        shopId: shop.id,
+        userId: authUserId,
+        email: adminEmail,
+        role: "shop_admin"
+      }),
+      shopSessionCookieOptions(SHOP_USER_SESSION_MAX_AGE_SECONDS)
+    );
+
+    return response;
   } catch (error) {
     return NextResponse.json(
       { ok: false, message: error instanceof Error ? error.message : "Unable to complete shop installation." },

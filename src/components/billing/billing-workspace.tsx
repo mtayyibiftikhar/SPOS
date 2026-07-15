@@ -872,11 +872,11 @@ export function BillingWorkspace() {
     }
   };
 
-  const handleStartDay = () => {
+  const handleStartDay = async () => {
     setSetupFeedback(null);
     setError(null);
 
-    const result = startBusinessDay({});
+    const result = await startBusinessDay({});
 
     if (!result.ok) {
       setSetupFeedback(translateSetupMessage(result.message));
@@ -886,7 +886,7 @@ export function BillingWorkspace() {
     setSetupFeedback(t("cashControl.dayStarted"));
   };
 
-  const handleStartShift = () => {
+  const handleStartShift = async () => {
     setSetupFeedback(null);
     setError(null);
 
@@ -897,7 +897,7 @@ export function BillingWorkspace() {
       return;
     }
 
-    const result = startShift({ openingCash: normalizedOpeningCash });
+    const result = await startShift({ openingCash: normalizedOpeningCash });
 
     if (!result.ok) {
       setSetupFeedback(translateSetupMessage(result.message));
@@ -1031,7 +1031,7 @@ export function BillingWorkspace() {
     setWorkflowStep("payment");
   };
 
-  const submitBill = () => {
+  const submitBill = async () => {
     setError(null);
 
     if (cartProducts.length === 0) {
@@ -1079,7 +1079,7 @@ export function BillingWorkspace() {
       paymentMethod
     } as const;
 
-    const result = createBill(payload);
+    const result = await createBill(payload);
 
     if (!result.ok || !result.billId) {
       setError(translateCreateBillError(result.message));

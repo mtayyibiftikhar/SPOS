@@ -1,6 +1,14 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { consumeRateLimit } from "@/lib/server/rate-limit";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  createShopUserSessionToken,
+  readShopUserSession,
+  SHOP_USER_SESSION_COOKIE,
+  SHOP_USER_SESSION_MAX_AGE_SECONDS,
+  shopSessionCookieOptions
+} from "@/lib/supabase/shop-session";
 
 type ShopLoginRequest = {
   email?: string;
@@ -65,6 +73,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "Email, password, and shop are required." }, { status: 400 });
   }
 
+  const rateLimit = await consumeRateLimit(request, {
+    blockSeconds: 900,
+    identifier: `${shopId}:${email}`,
+    limit: 12,
+    scope: "shop_user_login",
+    windowSeconds: 900
+  });
+
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { ok: false, message: "Too many sign-in attempts. Please wait and try again." },
+      { headers: { "Retry-After": String(rateLimit.retryAfterSeconds) }, status: 429 }
+    );
+  }
+
   try {
     const authClient = createSupabaseAuthClient();
     const { data: authData, error: authError } = await authClient.auth.signInWithPassword({
@@ -98,17 +121,62 @@ export async function POST(request: Request) {
     const lastLoginAt = new Date().toISOString();
     await supabase.from("profiles").update({ last_login_at: lastLoginAt }).eq("id", profile.id);
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       ok: true,
       user: mapProfile({
         ...profile,
         last_login_at: lastLoginAt
       })
     });
+    response.cookies.set(
+      SHOP_USER_SESSION_COOKIE,
+      createShopUserSessionToken({
+        kind: "user",
+        shopId: profile.shop_id,
+        userId: profile.id,
+        email: profile.email,
+        role: profile.role
+      }),
+      shopSessionCookieOptions(SHOP_USER_SESSION_MAX_AGE_SECONDS)
+    );
+
+    return response;
   } catch (error) {
     return NextResponse.json(
       { ok: false, message: error instanceof Error ? error.message : "Unable to sign in." },
       { status: 500 }
     );
   }
+}
+
+export async function GET(request: Request) {
+  const session = readShopUserSession(request);
+
+  if (!session) {
+    return NextResponse.json({ ok: false, message: "Shop user session is not authorized." }, { status: 401 });
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const { data: profile, error } = await supabase
+    .from("profiles")
+    .select("id, shop_id, email, role, is_active")
+    .eq("id", session.userId)
+    .eq("shop_id", session.shopId)
+    .eq("email", session.email)
+    .eq("role", session.role)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error || !profile) {
+    return NextResponse.json({ ok: false, message: "Shop user session is not authorized." }, { status: 401 });
+  }
+
+  return NextResponse.json({ ok: true, session });
+}
+
+export async function DELETE() {
+  const response = NextResponse.json({ ok: true });
+
+  response.cookies.set(SHOP_USER_SESSION_COOKIE, "", shopSessionCookieOptions(0));
+  return response;
 }

@@ -11,6 +11,10 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
+    "test:logic": "tsx --test tests/logic/**/*.test.ts",
+    "check:launch": "npm run typecheck && npm run test:logic && npm run build",
+    "audit:cloud-schema": "node scripts/audit-cloud-schema.cjs",
+    "smoke:production": "node scripts/smoke-production.cjs",
     "db:reset-stores": "node scripts/reset-all-store-data.cjs",
     "desktop:dev": "electron apps/desktop/main.cjs",
     "desktop:build": "electron-builder --config apps/desktop/electron-builder.yml --win nsis",
@@ -27,6 +31,7 @@
     "next": "^16.2.10",
     "react": "19.0.0",
     "react-dom": "19.0.0",
+    "sharp": "^0.35.3",
     "tailwind-merge": "^2.5.5"
   },
   "devDependencies": {
@@ -41,8 +46,8 @@
     "electron-builder": "^26.15.3",
     "png-to-ico": "^3.0.2",
     "postcss": "^8.5.16",
-    "sharp": "^0.35.3",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.23.1",
     "typescript": "^5.7.2"
   },
   "overrides": {
@@ -50,6 +55,6 @@
   },
   "allowScripts": {
     "electron-winstaller@5.4.0": true,
-    "sharp@0.34.5": true
+    "sharp@0.35.3": true
   }
 }

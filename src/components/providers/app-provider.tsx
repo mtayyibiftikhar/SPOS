@@ -68,7 +68,6 @@ import {
 import { calculateBillRefundState } from "@/lib/refunds";
 import { clearShopDataScope, ownerClearShopDataScopeLabels, type OwnerClearShopDataScope } from "@/lib/shop-data-reset";
 import { createPublicReceiptToken } from "@/lib/public-receipts";
-import { createAttendanceToken } from "@/lib/attendance";
 import { createId, getDirection, hashSecret } from "@/lib/utils";
 
 const STORAGE_KEY = "simple-pos-state-v3";
@@ -77,6 +76,7 @@ const SHOP_CLOUD_STATE_ENDPOINT = "/api/shop-state";
 const SHARED_STATE_REFRESH_INTERVAL_MS = 2_500;
 const SHOP_CLOUD_POLL_INTERVAL_MS = 8_000;
 const MIN_PASSWORD_LENGTH = 8;
+const PENDING_CRITICAL_MUTATION_PREFIX = "simple-pos-pending-critical-mutation";
 
 function shouldUseSharedStateEndpoint() {
   if (typeof window === "undefined") {
@@ -93,6 +93,40 @@ function shouldUseSharedStateEndpoint() {
     /^192\.168\./.test(hostname) ||
     /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
   );
+}
+
+type PendingCriticalMutation = {
+  fingerprint: string;
+  operationId: string;
+};
+
+function getPendingCriticalMutation(shopId: string, userId: string, mutation: CriticalShopMutation) {
+  const storageKey = `${PENDING_CRITICAL_MUTATION_PREFIX}:${shopId}:${userId}:${mutation.type}`;
+  const fingerprint = JSON.stringify(mutation);
+
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? "null") as PendingCriticalMutation | null;
+
+    if (stored?.fingerprint === fingerprint && stored.operationId) {
+      return { ...stored, storageKey };
+    }
+
+    const pending = { fingerprint, operationId: crypto.randomUUID() };
+    window.localStorage.setItem(storageKey, JSON.stringify(pending));
+    return { ...pending, storageKey };
+  } catch {
+    return { fingerprint, operationId: crypto.randomUUID(), storageKey };
+  }
+}
+
+function clearPendingCriticalMutation(storageKey: string, operationId: string) {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? "null") as PendingCriticalMutation | null;
+
+    if (stored?.operationId === operationId) window.localStorage.removeItem(storageKey);
+  } catch {
+    window.localStorage.removeItem(storageKey);
+  }
 }
 
 function isDemoSeedProductKey(productKey: DemoAppState["productKeys"][number] | undefined) {
@@ -253,11 +287,50 @@ type ShopCloudStatePatch = Partial<
 >;
 
 type ShopCloudAccessPayload = {
+  conflict?: boolean;
+  duplicate?: boolean;
   licenseStatus?: "expired" | "locked";
   ok: boolean;
   message?: string;
+  result?: CriticalShopMutationResult;
+  revision?: number;
   state?: ShopCloudStatePatch | null;
   updatedAt?: string | null;
+};
+
+type CriticalShopMutation =
+  | { type: "create_bill"; payload: CheckoutBillInput }
+  | { type: "create_refund"; payload: CreateRefundInput }
+  | { type: "start_business_day"; payload: { businessDate?: string; openingNote?: string } }
+  | { type: "close_business_day"; payload: { countedCash: number; note?: string } }
+  | {
+      type: "start_shift";
+      payload: {
+        deviceActivationId?: string;
+        deviceBrowserInfo?: string;
+        openingCash: number;
+      };
+    }
+  | { type: "end_shift"; payload: { countedCash: number; note?: string } }
+  | {
+      type: "settle_customer_account";
+      payload: {
+        amount: number;
+        billIds?: string[];
+        customerId: string;
+        method: "cash" | "card";
+        note?: string;
+      };
+    };
+
+type CriticalShopMutationResult = {
+  appliedAmount?: number;
+  billId?: string;
+  message?: string;
+  number?: string;
+  ok: boolean;
+  paymentId?: string;
+  refundId?: string;
 };
 
 type SharedStatePayload = {
@@ -637,7 +710,7 @@ interface AppContextValue {
     method: Extract<CustomerAccountPayment["method"], "cash" | "card">;
     note?: string;
     billIds?: string[];
-  }) => { ok: boolean; message?: string; appliedAmount?: number; paymentId?: string; number?: string };
+  }) => Promise<{ ok: boolean; message?: string; appliedAmount?: number; paymentId?: string; number?: string }>;
   addCategory: (payload: Pick<ProductCategory, "name" | "description" | "imageUrl">) => { ok: boolean; message?: string; categoryId?: string };
   updateCategory: (categoryId: string, payload: Partial<ProductCategory>) => { ok: boolean; message?: string };
   deleteCategory: (categoryId: string) => { ok: boolean; message?: string };
@@ -700,7 +773,7 @@ interface AppContextValue {
     password?: string;
   }) => { ok: boolean; message?: string; userId?: string };
   setUserActive: (userId: string, isActive: boolean) => { ok: boolean; message?: string };
-  createBill: (payload: CheckoutBillInput) => { ok: boolean; billId?: string; message?: string };
+  createBill: (payload: CheckoutBillInput) => Promise<{ ok: boolean; billId?: string; message?: string }>;
   updateBillCustomerContact: (payload: {
     billId: string;
     customerName?: string;
@@ -708,9 +781,9 @@ interface AppContextValue {
     customerEmail?: string;
     customerWhatsapp?: string;
   }) => { ok: boolean; message?: string };
-  createRefund: (payload: CreateRefundInput) => { ok: boolean; refundId?: string; message?: string };
-  startBusinessDay: (payload: { businessDate?: string; openingNote?: string }) => { ok: boolean; message?: string };
-  closeBusinessDay: (payload: { countedCash: number; note?: string }) => { ok: boolean; message?: string };
+  createRefund: (payload: CreateRefundInput) => Promise<{ ok: boolean; refundId?: string; message?: string }>;
+  startBusinessDay: (payload: { businessDate?: string; openingNote?: string }) => Promise<{ ok: boolean; message?: string }>;
+  closeBusinessDay: (payload: { countedCash: number; note?: string }) => Promise<{ ok: boolean; message?: string }>;
   autoCloseAndStartNextBusinessDay: (payload?: { note?: string; startShift?: boolean }) => { ok: boolean; message?: string };
   clockIn: (payload?: {
     location?: AttendanceLocation;
@@ -724,14 +797,6 @@ interface AppContextValue {
     note?: string;
     selfieUrl?: string;
     userId?: string;
-  }) => { ok: boolean; message?: string };
-  submitAttendanceScan: (payload: {
-    businessDate: string;
-    location: AttendanceLocation;
-    selfieUrl: string;
-    shopId: string;
-    token: string;
-    userId: string;
   }) => { ok: boolean; message?: string };
   saveAttendanceRecord: (payload: {
     businessDate?: string;
@@ -749,13 +814,13 @@ interface AppContextValue {
     hourlyRate: number;
     userId: string;
   }) => { ok: boolean; message?: string };
-  startShift: (payload: { openingCash: number }) => { ok: boolean; message?: string };
+  startShift: (payload: { openingCash: number }) => Promise<{ ok: boolean; message?: string }>;
   forceCloseShiftAndStart: (payload: {
     adminPassword: string;
     openingCash: number;
     shiftId: string;
   }) => { ok: boolean; message?: string };
-  endShift: (payload: { countedCash: number; note?: string }) => { ok: boolean; message?: string };
+  endShift: (payload: { countedCash: number; note?: string }) => Promise<{ ok: boolean; message?: string }>;
   addCashMovement: (payload: { type: "cash_in" | "cash_out"; amount: number; reason: string }) => { ok: boolean; message?: string };
   createExpense: (payload: {
     amount: number;
@@ -1594,19 +1659,202 @@ function buildShopCloudHeaders(state: DemoAppState, shopId: string, session: Ses
   return headers;
 }
 
-function syncShopStateToCloud(state: DemoAppState, shopId: string, session: SessionUser | null) {
+function jsonEqual(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function mergeConcurrentRows<TRow extends { id: string }>(
+  baseRows: TRow[] | undefined,
+  localRows: TRow[] | undefined,
+  remoteRows: TRow[] | undefined,
+  mergeConflict?: (base: TRow | undefined, local: TRow, remote: TRow) => TRow
+) {
+  if (!localRows) return remoteRows;
+  if (!remoteRows) return localRows;
+
+  const base = new Map((baseRows ?? []).map((row) => [row.id, row]));
+  const local = new Map(localRows.map((row) => [row.id, row]));
+  const remote = new Map(remoteRows.map((row) => [row.id, row]));
+  const ids = new Set([...base.keys(), ...local.keys(), ...remote.keys()]);
+  const merged: TRow[] = [];
+
+  ids.forEach((id) => {
+    const baseRow = base.get(id);
+    const localRow = local.get(id);
+    const remoteRow = remote.get(id);
+
+    if (!localRow) {
+      if (remoteRow && (!baseRow || !jsonEqual(remoteRow, baseRow))) merged.push(remoteRow);
+      return;
+    }
+
+    if (!remoteRow) {
+      if (!baseRow || !jsonEqual(localRow, baseRow)) merged.push(localRow);
+      return;
+    }
+
+    const localChanged = !baseRow || !jsonEqual(localRow, baseRow);
+    const remoteChanged = !baseRow || !jsonEqual(remoteRow, baseRow);
+
+    if (!localChanged) merged.push(remoteRow);
+    else if (!remoteChanged) merged.push(localRow);
+    else merged.push(mergeConflict ? mergeConflict(baseRow, localRow, remoteRow) : { ...remoteRow, ...localRow });
+  });
+
+  return merged;
+}
+
+function mergeConcurrentShopCloudState(
+  base: ShopCloudStatePatch,
+  local: ShopCloudStatePatch,
+  remote: ShopCloudStatePatch,
+  shopId: string
+) {
+  const mergeProducts = (baseRow: Product | undefined, localRow: Product, remoteRow: Product) => {
+    const baseStock = baseRow?.stockQuantity ?? 0;
+    const localDelta = localRow.stockQuantity - baseStock;
+    const remoteDelta = remoteRow.stockQuantity - baseStock;
+
+    return {
+      ...remoteRow,
+      ...localRow,
+      stockQuantity: Math.max(0, Math.round((baseStock + localDelta + remoteDelta) * 100) / 100),
+      updatedAt: [localRow.updatedAt, remoteRow.updatedAt].sort().at(-1) ?? localRow.updatedAt
+    };
+  };
+  const mergeBills = (
+    baseRow: DemoAppState["bills"][number] | undefined,
+    localRow: DemoAppState["bills"][number],
+    remoteRow: DemoAppState["bills"][number]
+  ) => {
+    const basePaid = baseRow?.paidAmount ?? 0;
+    const paidAmount = Math.min(
+      Math.max(localRow.total, remoteRow.total),
+      Math.max(0, basePaid + (localRow.paidAmount - basePaid) + (remoteRow.paidAmount - basePaid))
+    );
+    const total = Math.max(localRow.total, remoteRow.total);
+    const status: DemoAppState["bills"][number]["status"] = localRow.status === "refunded" || remoteRow.status === "refunded"
+      ? "refunded"
+      : paidAmount >= total
+        ? "paid"
+        : "due";
+
+    return {
+      ...remoteRow,
+      ...localRow,
+      dueAmount: Math.max(0, Math.round((total - paidAmount) * 100) / 100),
+      paidAmount: Math.round(paidAmount * 100) / 100,
+      status
+    };
+  };
+
+  const merged = {
+    ...remote,
+    ...local,
+    shops: remote.shops ?? local.shops,
+    licenses: remote.licenses ?? local.licenses,
+    productKeys: remote.productKeys ?? local.productKeys,
+    deviceActivations: remote.deviceActivations ?? local.deviceActivations,
+    users: remote.users ?? local.users,
+    categories: mergeConcurrentRows(base.categories, local.categories, remote.categories),
+    products: mergeConcurrentRows(base.products, local.products, remote.products, mergeProducts),
+    inventoryAdjustments: mergeConcurrentRows(
+      base.inventoryAdjustments,
+      local.inventoryAdjustments,
+      remote.inventoryAdjustments
+    ),
+    inventoryBatches: mergeConcurrentRows(base.inventoryBatches, local.inventoryBatches, remote.inventoryBatches),
+    suppliers: mergeConcurrentRows(base.suppliers, local.suppliers, remote.suppliers),
+    purchaseOrders: mergeConcurrentRows(base.purchaseOrders, local.purchaseOrders, remote.purchaseOrders),
+    purchaseOrderItems: mergeConcurrentRows(
+      base.purchaseOrderItems,
+      local.purchaseOrderItems,
+      remote.purchaseOrderItems
+    ),
+    deletedProducts: mergeConcurrentRows(base.deletedProducts, local.deletedProducts, remote.deletedProducts),
+    customers: mergeConcurrentRows(base.customers, local.customers, remote.customers),
+    customerAccountPayments: mergeConcurrentRows(
+      base.customerAccountPayments,
+      local.customerAccountPayments,
+      remote.customerAccountPayments
+    ),
+    bills: mergeConcurrentRows(base.bills, local.bills, remote.bills, mergeBills),
+    billItems: mergeConcurrentRows(base.billItems, local.billItems, remote.billItems),
+    refunds: mergeConcurrentRows(base.refunds, local.refunds, remote.refunds),
+    refundItems: mergeConcurrentRows(base.refundItems, local.refundItems, remote.refundItems),
+    payments: mergeConcurrentRows(base.payments, local.payments, remote.payments),
+    ledgerEntries: mergeConcurrentRows(base.ledgerEntries, local.ledgerEntries, remote.ledgerEntries),
+    businessDays: mergeConcurrentRows(base.businessDays, local.businessDays, remote.businessDays),
+    shifts: mergeConcurrentRows(base.shifts, local.shifts, remote.shifts),
+    attendanceRecords: mergeConcurrentRows(
+      base.attendanceRecords,
+      local.attendanceRecords,
+      remote.attendanceRecords
+    ),
+    attendanceQrSessions: mergeConcurrentRows(
+      base.attendanceQrSessions,
+      local.attendanceQrSessions,
+      remote.attendanceQrSessions
+    ),
+    payrollRates: mergeConcurrentRows(base.payrollRates, local.payrollRates, remote.payrollRates),
+    dayCloses: mergeConcurrentRows(base.dayCloses, local.dayCloses, remote.dayCloses),
+    cashMovements: mergeConcurrentRows(base.cashMovements, local.cashMovements, remote.cashMovements),
+    expenseCategories: mergeConcurrentRows(
+      base.expenseCategories,
+      local.expenseCategories,
+      remote.expenseCategories
+    ),
+    expenses: mergeConcurrentRows(base.expenses, local.expenses, remote.expenses),
+    supportSessions: mergeConcurrentRows(base.supportSessions, local.supportSessions, remote.supportSessions),
+    supportTickets: mergeConcurrentRows(base.supportTickets, local.supportTickets, remote.supportTickets),
+    auditLogs: mergeConcurrentRows(base.auditLogs, local.auditLogs, remote.auditLogs),
+    receiptSequencesByShop: {
+      ...(remote.receiptSequencesByShop ?? {}),
+      [shopId]: Math.max(
+        base.receiptSequencesByShop?.[shopId] ?? 1,
+        local.receiptSequencesByShop?.[shopId] ?? 1,
+        remote.receiptSequencesByShop?.[shopId] ?? 1
+      )
+    },
+    accountPaymentSequencesByShop: {
+      ...(remote.accountPaymentSequencesByShop ?? {}),
+      [shopId]: Math.max(
+        base.accountPaymentSequencesByShop?.[shopId] ?? 1,
+        local.accountPaymentSequencesByShop?.[shopId] ?? 1,
+        remote.accountPaymentSequencesByShop?.[shopId] ?? 1
+      )
+    }
+  } satisfies ShopCloudStatePatch;
+
+  return merged;
+}
+
+async function syncShopStateToCloud(
+  state: DemoAppState,
+  shopId: string,
+  session: SessionUser | null,
+  expectedRevision: number
+) {
   if (typeof window === "undefined") {
-    return;
+    return null;
   }
 
-  void fetch(SHOP_CLOUD_STATE_ENDPOINT, {
+  const response = await fetch(SHOP_CLOUD_STATE_ENDPOINT, {
     method: "POST",
     headers: buildShopCloudHeaders(state, shopId, session),
     body: JSON.stringify({
+      expectedRevision,
+      operationId: crypto.randomUUID(),
       shopId,
       state: buildShopCloudSyncState(state, shopId)
     })
-  }).catch(() => undefined);
+  });
+  const rawPayload = await response.text();
+
+  return parseJsonPayload<ShopCloudAccessPayload>(rawPayload, {
+    ok: response.ok,
+    message: response.statusText
+  });
 }
 
 export function AppProvider({
@@ -1626,6 +1874,10 @@ export function AppProvider({
   const lastSharedStateRaw = useRef<string | null>(null);
   const lastLocalStateRaw = useRef<string | null>(null);
   const lastSharedStateWriteAt = useRef(0);
+  const cloudRevisionByShop = useRef<Record<string, number>>({});
+  const cloudBaseStateByShop = useRef<Record<string, ShopCloudStatePatch>>({});
+  const cloudSyncInFlightByShop = useRef<Record<string, boolean>>({});
+  const cloudSyncPendingByShop = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
     let active = true;
@@ -1982,7 +2234,7 @@ export function AppProvider({
             return;
           }
 
-          if (!shouldUseSharedStateEndpoint() && [401, 403, 404].includes(response.status)) {
+          if (!shouldUseSharedStateEndpoint() && response.status === 404) {
             setState((current) => removeShopFromLocalState(current, cloudSyncShopId));
           }
 
@@ -1990,6 +2242,8 @@ export function AppProvider({
         }
 
         if (payload.state) {
+          cloudRevisionByShop.current[cloudSyncShopId] = Math.max(0, Number(payload.revision ?? 0));
+          cloudBaseStateByShop.current[cloudSyncShopId] = payload.state;
           setState((current) => ({
             ...carryForwardAuthoritativeShopDataResets(
               current,
@@ -2059,7 +2313,7 @@ export function AppProvider({
             return;
           }
 
-          if ([401, 403, 404].includes(response.status)) {
+          if (response.status === 404) {
             setState((current) => removeShopFromLocalState(current, cloudSyncShopId));
           }
 
@@ -2067,13 +2321,23 @@ export function AppProvider({
         }
 
         if (payload.state) {
-          setState((current) => ({
-            ...carryForwardAuthoritativeShopDataResets(
-              current,
-              mergeShopCloudStatePatch(current, payload.state ?? {}, cloudSyncShopId)
-            ),
-            session: current.session
-          }));
+          setState((current) => {
+            const remoteState = payload.state ?? {};
+            const baseState = cloudBaseStateByShop.current[cloudSyncShopId] ?? remoteState;
+            const localState = buildShopCloudSyncState(current, cloudSyncShopId);
+            const mergedState = mergeConcurrentShopCloudState(baseState, localState, remoteState, cloudSyncShopId);
+
+            cloudRevisionByShop.current[cloudSyncShopId] = Math.max(0, Number(payload.revision ?? 0));
+            cloudBaseStateByShop.current[cloudSyncShopId] = remoteState;
+
+            return {
+              ...carryForwardAuthoritativeShopDataResets(
+                current,
+                mergeShopCloudStatePatch(current, mergedState, cloudSyncShopId)
+              ),
+              session: current.session
+            };
+          });
         }
       } catch {
         // Offline/network issues should not wipe a store; only explicit cloud denial should.
@@ -2106,7 +2370,63 @@ export function AppProvider({
       return;
     }
 
-    const timer = window.setTimeout(() => syncShopStateToCloud(state, cloudSyncShopId, session), 900);
+    const timer = window.setTimeout(() => {
+      if (cloudSyncInFlightByShop.current[cloudSyncShopId]) {
+        cloudSyncPendingByShop.current[cloudSyncShopId] = true;
+        return;
+      }
+
+      cloudSyncInFlightByShop.current[cloudSyncShopId] = true;
+      const localState = buildShopCloudSyncState(state, cloudSyncShopId);
+      const expectedRevision = cloudRevisionByShop.current[cloudSyncShopId] ?? 0;
+
+      if (jsonEqual(localState, cloudBaseStateByShop.current[cloudSyncShopId])) {
+        cloudSyncInFlightByShop.current[cloudSyncShopId] = false;
+        return;
+      }
+
+      void syncShopStateToCloud(state, cloudSyncShopId, session, expectedRevision)
+        .then((payload) => {
+          if (!payload) return;
+
+          if (payload.conflict && payload.state) {
+            const remoteState = payload.state;
+            const baseState = cloudBaseStateByShop.current[cloudSyncShopId] ?? remoteState;
+            const mergedState = mergeConcurrentShopCloudState(baseState, localState, remoteState, cloudSyncShopId);
+
+            cloudRevisionByShop.current[cloudSyncShopId] = Math.max(0, Number(payload.revision ?? expectedRevision));
+            cloudBaseStateByShop.current[cloudSyncShopId] = remoteState;
+            cloudSyncPendingByShop.current[cloudSyncShopId] = true;
+            setState((current) => ({
+              ...carryForwardAuthoritativeShopDataResets(
+                current,
+                mergeShopCloudStatePatch(current, mergedState, cloudSyncShopId)
+              ),
+              session: current.session
+            }));
+            return;
+          }
+
+          if (payload.ok) {
+            cloudRevisionByShop.current[cloudSyncShopId] = Math.max(
+              expectedRevision + 1,
+              Number(payload.revision ?? expectedRevision + 1)
+            );
+            cloudBaseStateByShop.current[cloudSyncShopId] = payload.state ?? localState;
+          }
+        })
+        .catch(() => {
+          cloudSyncPendingByShop.current[cloudSyncShopId] = true;
+        })
+        .finally(() => {
+          cloudSyncInFlightByShop.current[cloudSyncShopId] = false;
+
+          if (cloudSyncPendingByShop.current[cloudSyncShopId]) {
+            cloudSyncPendingByShop.current[cloudSyncShopId] = false;
+            setState((current) => ({ ...current }));
+          }
+        });
+    }, 900);
 
     return () => window.clearTimeout(timer);
   }, [cloudLoadedShopIds, cloudSyncShopId, isHydrated, session, state]);
@@ -2388,6 +2708,87 @@ export function AppProvider({
     return () => window.clearTimeout(timer);
   }, [session?.supportSessionId, state.supportSessions]);
 
+  const commitCriticalShopMutationToCloud = async (
+    mutation: CriticalShopMutation
+  ): Promise<CriticalShopMutationResult> => {
+    if (!currentShopId || !session || session.workspace !== "shop") {
+      return { ok: false, message: "Session unavailable." };
+    }
+
+    const shopId = currentShopId;
+    const pending = getPendingCriticalMutation(shopId, session.id, mutation);
+
+    try {
+      for (let wait = 0; cloudSyncInFlightByShop.current[shopId] && wait < 40; wait += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 50));
+      }
+
+      if (cloudSyncInFlightByShop.current[shopId]) {
+        return { ok: false, message: "The shop is still synchronizing. Please try again." };
+      }
+
+      cloudSyncInFlightByShop.current[shopId] = true;
+      const response = await fetch(SHOP_CLOUD_STATE_ENDPOINT, {
+        body: JSON.stringify({
+          mutation,
+          operationId: pending.operationId,
+          shopId
+        }),
+        headers: buildShopCloudHeaders(state, shopId, session),
+        method: "POST",
+        signal: AbortSignal.timeout(20_000)
+      });
+      const rawPayload = await response.text();
+      const payload = parseJsonPayload<ShopCloudAccessPayload>(rawPayload, {
+        ok: false,
+        message: response.statusText || "Unable to save this transaction."
+      });
+
+      if (!response.ok || !payload.ok) {
+        if (payload.licenseStatus === "locked" || payload.licenseStatus === "expired") {
+          setState((current) => ({
+            ...markShopLicenseBlocked(current, shopId, payload.licenseStatus!, payload.message),
+            session: current.session
+          }));
+        }
+
+        if (response.status < 500 && response.status !== 409) {
+          clearPendingCriticalMutation(pending.storageKey, pending.operationId);
+        }
+
+        return payload.result ?? { ok: false, message: payload.message || "Unable to save this transaction." };
+      }
+
+      if (payload.state) {
+        const remoteState = payload.state;
+        const baseState = cloudBaseStateByShop.current[shopId] ?? remoteState;
+        const localState = buildShopCloudSyncState(state, shopId);
+        const mergedState = mergeConcurrentShopCloudState(baseState, localState, remoteState, shopId);
+
+        cloudRevisionByShop.current[shopId] = Math.max(0, Number(payload.revision ?? 0));
+        cloudBaseStateByShop.current[shopId] = remoteState;
+        setState((current) => ({
+          ...carryForwardAuthoritativeShopDataResets(
+            current,
+            mergeShopCloudStatePatch(current, mergedState, shopId)
+          ),
+          session: current.session
+        }));
+      }
+
+      clearPendingCriticalMutation(pending.storageKey, pending.operationId);
+
+      return payload.result ?? { ok: true };
+    } catch {
+      return {
+        ok: false,
+        message: "The transaction could not reach the cloud. Check the connection and try again."
+      };
+    } finally {
+      cloudSyncInFlightByShop.current[shopId] = false;
+    }
+  };
+
   const dictionaryOverrides = state.dictionaryEntries.reduce<Partial<Record<TranslationKey, string>>>(
     (accumulator, entry) => {
       if (entry.locale === state.ui.locale && entry.value.trim()) {
@@ -2547,6 +2948,10 @@ export function AppProvider({
         return { ok: true, workspace };
       },
       logout: () => {
+        if (typeof window !== "undefined") {
+          void fetch("/api/auth/shop-login", { method: "DELETE" }).catch(() => undefined);
+        }
+
         setState((current) => ({
           ...current,
           session: null
@@ -2560,75 +2965,70 @@ export function AppProvider({
           return { ok: false, message: "Admin password is required to log out this store from this device." };
         }
 
-        let result: { ok: boolean; message?: string } = {
-          ok: false,
-          message: "Unable to log out this store from this device."
-        };
+        const shop = state.shops.find((entry) => entry.id === shopId);
 
-        setState((current) => {
-          const shop = current.shops.find((entry) => entry.id === shopId);
+        if (!shop) {
+          return { ok: false, message: "Store not found." };
+        }
 
-          if (!shop) {
-            result = { ok: false, message: "Store not found." };
-            return current;
-          }
+        const admin = state.users.find(
+          (user) =>
+            user.shopId === shopId &&
+            user.role === "shop_admin" &&
+            user.isActive &&
+            user.passwordHash === hashSecret(normalizedPassword)
+        );
 
-          const admin = current.users.find(
-            (user) =>
-              user.shopId === shopId &&
-              user.role === "shop_admin" &&
-              user.isActive &&
-              user.passwordHash === hashSecret(normalizedPassword)
-          );
+        if (!admin) {
+          return { ok: false, message: "Admin password is incorrect." };
+        }
 
-          if (!admin) {
-            result = { ok: false, message: "Admin password is incorrect." };
-            return current;
-          }
+        const productKeyIds = new Set(
+          state.productKeys.filter((productKey) => productKey.shopId === shopId).map((productKey) => productKey.id)
+        );
+        const removedActivations = state.deviceActivations.filter(
+          (activation) =>
+            activation.shopId === shopId &&
+            activation.browserInfo === normalizedBrowserInfo &&
+            productKeyIds.has(activation.productKeyId)
+        );
 
-          const productKeyIds = new Set(current.productKeys.filter((productKey) => productKey.shopId === shopId).map((productKey) => productKey.id));
-          const removedActivations = current.deviceActivations.filter(
+        if (removedActivations.length === 0) {
+          return { ok: false, message: "This device is not currently activated for that store." };
+        }
+
+        const createdAt = new Date().toISOString();
+
+        setState((current) => ({
+          ...current,
+          session: current.session?.shopId === shopId ? null : current.session,
+          deviceActivations: current.deviceActivations.filter(
             (activation) =>
-              activation.shopId === shopId &&
-              activation.browserInfo === normalizedBrowserInfo &&
-              productKeyIds.has(activation.productKeyId)
-          );
+              !(
+                activation.shopId === shopId &&
+                activation.browserInfo === normalizedBrowserInfo &&
+                productKeyIds.has(activation.productKeyId)
+              )
+          ),
+          auditLogs: [
+            {
+              id: createId("audit"),
+              shopId,
+              actorId: admin.id,
+              action: "shop.device.logout",
+              targetId: removedActivations[0]?.id,
+              detail: `Store ${shop.name} was logged out from this browser after admin confirmation.`,
+              createdAt
+            },
+            ...current.auditLogs
+          ]
+        }));
 
-          if (removedActivations.length === 0) {
-            result = { ok: false, message: "This device is not currently activated for that store." };
-            return current;
-          }
+        if (typeof window !== "undefined") {
+          void fetch("/api/activation", { method: "DELETE" }).catch(() => undefined);
+        }
 
-          const createdAt = new Date().toISOString();
-          result = { ok: true, message: "Store logged out from this device. Activation is required before the next sign-in." };
-
-          return {
-            ...current,
-            session: current.session?.shopId === shopId ? null : current.session,
-            deviceActivations: current.deviceActivations.filter(
-              (activation) =>
-                !(
-                  activation.shopId === shopId &&
-                  activation.browserInfo === normalizedBrowserInfo &&
-                  productKeyIds.has(activation.productKeyId)
-                )
-            ),
-            auditLogs: [
-              {
-                id: createId("audit"),
-                shopId,
-                actorId: admin.id,
-                action: "shop.device.logout",
-                targetId: removedActivations[0]?.id,
-                detail: `Store ${shop.name} was logged out from this browser after admin confirmation.`,
-                createdAt
-              },
-              ...current.auditLogs
-            ]
-          };
-        });
-
-        return result;
+        return { ok: true, message: "Store logged out from this device. Activation is required before the next sign-in." };
       },
       setBrandProfile: (payload) => {
         setState((current) => {
@@ -4767,12 +5167,19 @@ export function AppProvider({
 
         return result;
       },
-      settleCustomerAccount: ({ customerId, amount, method, note, billIds }) => {
+      settleCustomerAccount: async ({ customerId, amount, method, note, billIds }) => {
         if (!currentShopId || !session) {
           return {
             ok: false,
             message: "Session unavailable."
           };
+        }
+
+        if (!shouldUseSharedStateEndpoint()) {
+          return commitCriticalShopMutationToCloud({
+            type: "settle_customer_account",
+            payload: { amount, billIds, customerId, method, note }
+          });
         }
 
         let result: { ok: boolean; message?: string; appliedAmount?: number; paymentId?: string; number?: string } = {
@@ -6151,13 +6558,20 @@ export function AppProvider({
 
         return result;
       },
-      startBusinessDay: ({ businessDate, openingNote }) => {
+      startBusinessDay: async ({ businessDate, openingNote }) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
         }
 
         if (session.role !== "shop_admin") {
           return { ok: false, message: "Only the shop admin can start the business day." };
+        }
+
+        if (!shouldUseSharedStateEndpoint()) {
+          return commitCriticalShopMutationToCloud({
+            type: "start_business_day",
+            payload: { businessDate, openingNote }
+          });
         }
 
         let result: { ok: boolean; message?: string } = { ok: false, message: "Unable to start the business day." };
@@ -6194,13 +6608,20 @@ export function AppProvider({
 
         return result;
       },
-      closeBusinessDay: ({ countedCash, note }) => {
+      closeBusinessDay: async ({ countedCash, note }) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
         }
 
         if (session.role !== "shop_admin") {
           return { ok: false, message: "Only the shop admin can close the business day." };
+        }
+
+        if (!shouldUseSharedStateEndpoint()) {
+          return commitCriticalShopMutationToCloud({
+            type: "close_business_day",
+            payload: { countedCash, note }
+          });
         }
 
         let result: { ok: boolean; message?: string } = { ok: false, message: "Unable to close the business day." };
@@ -6614,92 +7035,6 @@ export function AppProvider({
 
         return result;
       },
-      submitAttendanceScan: ({ businessDate, location, selfieUrl, shopId, token, userId }) => {
-        if (!shopId || !userId || !businessDate || !token) {
-          return { ok: false, message: "Attendance QR is missing required details." };
-        }
-
-        if (token !== createAttendanceToken(shopId, userId, businessDate)) {
-          return { ok: false, message: "This attendance QR is not valid." };
-        }
-
-        if (!location || !selfieUrl) {
-          return { ok: false, message: "Location and selfie are required for QR clock-in." };
-        }
-
-        let result: { ok: boolean; message?: string } = { ok: false, message: "Unable to save clock-in." };
-
-        setState((current) => {
-          const openDay = getActiveBusinessDay(current.businessDays, shopId);
-
-          if (!openDay || openDay.businessDate !== businessDate) {
-            result = { ok: false, message: "This QR is not for the current open business day." };
-            return current;
-          }
-
-          const employee = current.users.find((user) => user.id === userId && user.shopId === shopId && user.isActive);
-
-          if (!employee) {
-            result = { ok: false, message: "Employee not found or inactive." };
-            return current;
-          }
-
-          const existingOpen = current.attendanceRecords.find(
-            (record) =>
-              record.shopId === shopId &&
-              record.userId === userId &&
-              record.businessDate === businessDate &&
-              !record.clockOutAt
-          );
-
-          if (existingOpen) {
-            result = { ok: true, message: "You are already clocked in." };
-            return current;
-          }
-
-          const shop = current.shops.find((entry) => entry.id === shopId);
-          const rate = getPayrollRateForUser(current, shopId, userId, shop?.currency ?? "SAR");
-          const now = new Date().toISOString();
-          const attendanceId = createId("att");
-
-          result = { ok: true, message: "Clock-in saved. You can return to the POS." };
-
-          return {
-            ...current,
-            attendanceRecords: [
-              {
-                id: attendanceId,
-                shopId,
-                userId,
-                businessDate,
-                status: "open",
-                source: "qr",
-                clockInAt: now,
-                clockInLocation: location,
-                clockInSelfieUrl: selfieUrl,
-                scheduledHours: rate.defaultDailyHours,
-                hourlyRate: rate.hourlyRate,
-                createdAt: now
-              },
-              ...current.attendanceRecords
-            ],
-            auditLogs: [
-              {
-                id: createId("audit"),
-                shopId,
-                actorId: userId,
-                action: "attendance.clock_in.qr_scan",
-                targetId: attendanceId,
-                detail: `QR clock-in captured for ${employee.name}.`,
-                createdAt: now
-              },
-              ...current.auditLogs
-            ]
-          };
-        });
-
-        return result;
-      },
       saveAttendanceRecord: (payload) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
@@ -6822,13 +7157,24 @@ export function AppProvider({
 
         return result;
       },
-      startShift: ({ openingCash }) => {
+      startShift: async ({ openingCash }) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
         }
 
         if (!["shop_admin", "cashier"].includes(session.role)) {
           return { ok: false, message: "Only shop users can start shifts." };
+        }
+
+        if (!shouldUseSharedStateEndpoint()) {
+          return commitCriticalShopMutationToCloud({
+            type: "start_shift",
+            payload: {
+              deviceActivationId: currentDeviceActivation?.id,
+              deviceBrowserInfo: currentDeviceActivation?.browserInfo ?? getCurrentBrowserInfo(),
+              openingCash
+            }
+          });
         }
 
         let result: { ok: boolean; message?: string } = { ok: false, message: "Unable to start the shift." };
@@ -7011,9 +7357,16 @@ export function AppProvider({
 
         return result;
       },
-      endShift: ({ countedCash, note }) => {
+      endShift: async ({ countedCash, note }) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
+        }
+
+        if (!shouldUseSharedStateEndpoint()) {
+          return commitCriticalShopMutationToCloud({
+            type: "end_shift",
+            payload: { countedCash, note }
+          });
         }
 
         let result: { ok: boolean; message?: string } = { ok: false, message: "Unable to close the shift." };
@@ -7243,12 +7596,16 @@ export function AppProvider({
 
         return result;
       },
-      createBill: (payload) => {
+      createBill: async (payload) => {
         if (!currentShopId || !session) {
           return {
             ok: false,
             message: "Session unavailable."
           };
+        }
+
+        if (!shouldUseSharedStateEndpoint()) {
+          return commitCriticalShopMutationToCloud({ type: "create_bill", payload });
         }
 
         let result: { ok: boolean; billId?: string; message?: string } = {
@@ -7699,12 +8056,16 @@ export function AppProvider({
 
         return result;
       },
-      createRefund: (payload) => {
+      createRefund: async (payload) => {
         if (!currentShopId || !session) {
           return {
             ok: false,
             message: "Session unavailable."
           };
+        }
+
+        if (!shouldUseSharedStateEndpoint()) {
+          return commitCriticalShopMutationToCloud({ type: "create_refund", payload });
         }
 
         if (session.role !== "shop_admin") {

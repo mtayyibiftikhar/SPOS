@@ -1,7 +1,16 @@
 import { NextResponse } from "next/server";
 import { hashProductKey } from "@/lib/cloud-sync";
+import { consumeRateLimit } from "@/lib/server/rate-limit";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { loadBrandProfileSnapshot } from "@/lib/supabase/brand-assets";
+import {
+  createShopDeviceSessionToken,
+  readShopDeviceSession,
+  SHOP_DEVICE_SESSION_COOKIE,
+  SHOP_DEVICE_SESSION_MAX_AGE_SECONDS,
+  SHOP_USER_SESSION_COOKIE,
+  shopSessionCookieOptions
+} from "@/lib/supabase/shop-session";
 
 type ActivationRequest = {
   browserInfo?: string;
@@ -55,6 +64,21 @@ export async function POST(request: Request) {
 
   if (productKey.length < 30) {
     return NextResponse.json({ ok: false, message: "Product key must be at least 30 characters." }, { status: 400 });
+  }
+
+  const rateLimit = await consumeRateLimit(request, {
+    blockSeconds: 900,
+    identifier: hashProductKey(productKey),
+    limit: 12,
+    scope: "product_key_activation",
+    windowSeconds: 900
+  });
+
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { ok: false, message: "Too many activation attempts. Please wait and try again." },
+      { headers: { "Retry-After": String(rateLimit.retryAfterSeconds) }, status: 429 }
+    );
   }
 
   try {
@@ -128,63 +152,40 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: existingActivation, error: existingActivationError } = await supabase
-      .from("device_activations")
-      .select("id")
-      .eq("product_key_id", productKeyRow.id)
-      .eq("device_fingerprint", deviceFingerprint)
-      .maybeSingle();
-
-    if (existingActivationError) {
-      throw existingActivationError;
-    }
-
-    if (!existingActivation) {
-      const { count, error: countError } = await supabase
-        .from("device_activations")
-        .select("id", { count: "exact", head: true })
-        .eq("product_key_id", productKeyRow.id);
-
-      if (countError) {
-        throw countError;
-      }
-
-      if ((count ?? 0) >= productKeyRow.allowed_devices) {
-        return NextResponse.json(
-          { ok: false, message: "This product key has reached its device limit." },
-          { status: 403 }
-        );
-      }
-    }
-
     const browserInfo =
       body.browserInfo?.trim() || request.headers.get("user-agent") || "Unknown browser";
     const now = new Date().toISOString();
-    const activationPayload: Record<string, string> = {
-      browser_info: browserInfo,
-      device_fingerprint: deviceFingerprint,
-      last_seen_at: now,
-      product_key_id: productKeyRow.id,
-      shop_id: productKeyRow.shop_id
-    };
+    const { data: activationResultData, error: activationError } = await supabase.rpc(
+      "activate_product_key_device",
+      {
+        p_browser_info: browserInfo,
+        p_device_fingerprint: deviceFingerprint,
+        p_product_key_id: productKeyRow.id,
+        p_shop_id: productKeyRow.shop_id
+      }
+    );
 
-    if (!existingActivation) {
-      activationPayload.activated_at = now;
+    if (activationError) throw activationError;
+
+    const activationResult = (activationResultData ?? {}) as { ok?: boolean; reason?: string };
+
+    if (!activationResult.ok) {
+      const messages: Record<string, string> = {
+        device_limit: "This product key has reached its device limit.",
+        expired: "This product key has expired.",
+        invalid_device: "This device could not be identified. Refresh and try again.",
+        license_expired: "Your POS license has expired. Please contact support.",
+        license_locked: "Your POS is temporarily locked. Please contact support.",
+        no_license: "No license is attached to this shop.",
+        locked: "This product key is locked.",
+        revoked: "This product key is revoked."
+      };
+
+      return NextResponse.json(
+        { ok: false, message: messages[activationResult.reason ?? ""] ?? "Unable to activate this device." },
+        { status: activationResult.reason === "key_not_found" ? 404 : 403 }
+      );
     }
-
-    await supabase.from("device_activations").upsert(activationPayload, {
-      onConflict: "product_key_id,device_fingerprint"
-    });
-
-    const productKeyUpdate: Record<string, string> = {
-      status: "active"
-    };
-
-    if (productKeyRow.status === "unused") {
-      productKeyUpdate.activated_at = now;
-    }
-
-    await supabase.from("product_keys").update(productKeyUpdate).eq("id", productKeyRow.id);
 
     await supabase.from("audit_logs").insert({
       action: "product_key.activate",
@@ -234,7 +235,7 @@ export async function POST(request: Request) {
       loadBrandProfileSnapshot(supabase).catch(() => null)
     ]);
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       ok: true,
       cloudState: shop
         ? {
@@ -355,9 +356,40 @@ export async function POST(request: Request) {
       licenseStatus,
       shopId: productKeyRow.shop_id
     });
+    response.cookies.set(
+      SHOP_DEVICE_SESSION_COOKIE,
+      createShopDeviceSessionToken({
+        kind: "device",
+        shopId: productKeyRow.shop_id,
+        productKeyId: productKeyRow.id,
+        deviceFingerprint
+      }),
+      shopSessionCookieOptions(SHOP_DEVICE_SESSION_MAX_AGE_SECONDS)
+    );
+
+    return response;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Activation failed.";
 
     return NextResponse.json({ ok: false, message }, { status: 500 });
   }
+}
+
+export async function DELETE(request: Request) {
+  const response = NextResponse.json({ ok: true });
+  const session = readShopDeviceSession(request);
+
+  if (session) {
+    const supabase = createSupabaseAdminClient();
+    await supabase
+      .from("device_activations")
+      .delete()
+      .eq("shop_id", session.shopId)
+      .eq("product_key_id", session.productKeyId)
+      .eq("device_fingerprint", session.deviceFingerprint);
+  }
+
+  response.cookies.set(SHOP_DEVICE_SESSION_COOKIE, "", shopSessionCookieOptions(0));
+  response.cookies.set(SHOP_USER_SESSION_COOKIE, "", shopSessionCookieOptions(0));
+  return response;
 }

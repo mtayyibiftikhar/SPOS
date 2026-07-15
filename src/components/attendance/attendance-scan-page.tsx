@@ -1,9 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Camera, CheckCircle2, LocateFixed } from "lucide-react";
-import { usePosApp } from "@/components/providers/app-provider";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cn, formatBusinessDate } from "@/lib/utils";
@@ -20,18 +19,43 @@ function fileToDataUrl(file: File) {
 
 export function AttendanceScanPage() {
   const params = useSearchParams();
-  const { locale, state, submitAttendanceScan } = usePosApp();
   const selfieInputRef = useRef<HTMLInputElement | null>(null);
   const [location, setLocation] = useState<AttendanceLocation | null>(null);
+  const [selfieFile, setSelfieFile] = useState<File | null>(null);
   const [selfieUrl, setSelfieUrl] = useState("");
   const [feedback, setFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
+  const [identity, setIdentity] = useState<{ employeeName: string; shopName: string } | null>(null);
+  const [isPending, setIsPending] = useState(false);
 
   const shopId = params.get("shopId") ?? "";
   const userId = params.get("userId") ?? "";
   const businessDate = params.get("businessDate") ?? "";
   const token = params.get("token") ?? "";
-  const employee = state.users.find((user) => user.id === userId && user.shopId === shopId);
-  const shop = state.shops.find((entry) => entry.id === shopId);
+
+  useEffect(() => {
+    if (!shopId || !userId || !businessDate || !token) return;
+
+    const query = new URLSearchParams({ businessDate, shopId, token, userId });
+
+    void fetch(`/api/attendance/scan?${query.toString()}`, { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          employeeName?: string;
+          message?: string;
+          ok?: boolean;
+          shopName?: string;
+        };
+
+        if (!response.ok || !payload.ok || !payload.employeeName || !payload.shopName) {
+          throw new Error(payload.message ?? "This attendance link is not available.");
+        }
+
+        setIdentity({ employeeName: payload.employeeName, shopName: payload.shopName });
+      })
+      .catch((error) => {
+        setFeedback({ tone: "error", message: error instanceof Error ? error.message : "Invalid attendance link." });
+      });
+  }, [businessDate, shopId, token, userId]);
 
   const captureLocation = () => {
     setFeedback(null);
@@ -64,6 +88,7 @@ export function AttendanceScanPage() {
     }
 
     try {
+      setSelfieFile(file);
       setSelfieUrl(await fileToDataUrl(file));
       setFeedback({ tone: "success", message: "Selfie captured." });
     } catch {
@@ -71,25 +96,37 @@ export function AttendanceScanPage() {
     }
   };
 
-  const submit = () => {
-    if (!location || !selfieUrl) {
+  const submit = async () => {
+    if (!location || !selfieFile) {
       setFeedback({ tone: "error", message: "Capture location and selfie first." });
       return;
     }
 
-    const result = submitAttendanceScan({
-      businessDate,
-      location,
-      selfieUrl,
-      shopId,
-      token,
-      userId
-    });
+    setIsPending(true);
+    setFeedback(null);
 
-    setFeedback({
-      tone: result.ok ? "success" : "error",
-      message: result.message ?? (result.ok ? "Clock-in saved." : "Clock-in failed.")
-    });
+    try {
+      const body = new FormData();
+      body.set("accuracy", String(location.accuracy ?? 0));
+      body.set("businessDate", businessDate);
+      body.set("latitude", String(location.latitude));
+      body.set("longitude", String(location.longitude));
+      body.set("selfie", selfieFile);
+      body.set("shopId", shopId);
+      body.set("token", token);
+      body.set("userId", userId);
+      const response = await fetch("/api/attendance/scan", { body, method: "POST" });
+      const result = (await response.json()) as { message?: string; ok?: boolean };
+
+      setFeedback({
+        tone: response.ok && result.ok ? "success" : "error",
+        message: result.message ?? (response.ok ? "Clock-in saved." : "Clock-in failed.")
+      });
+    } catch {
+      setFeedback({ tone: "error", message: "Unable to reach the POS. Check the connection and try again." });
+    } finally {
+      setIsPending(false);
+    }
   };
 
   return (
@@ -100,8 +137,8 @@ export function AttendanceScanPage() {
             <p className="text-xs font-bold uppercase tracking-[0.28em] text-emerald-200/75">POS attendance</p>
             <h1 className="mt-3 font-display text-3xl font-semibold">Clock in</h1>
             <p className="mt-3 text-sm leading-6 text-white/70">
-              {employee?.name ?? "Employee"} at {shop?.name ?? "this shop"} for{" "}
-              {businessDate ? formatBusinessDate(businessDate, locale) : "today"}.
+              {identity?.employeeName ?? "Employee"} at {identity?.shopName ?? "this shop"} for{" "}
+              {businessDate ? formatBusinessDate(businessDate, "en") : "today"}.
             </p>
           </div>
 
@@ -168,8 +205,8 @@ export function AttendanceScanPage() {
               </div>
             ) : null}
 
-            <Button className="h-14 w-full rounded-[22px]" disabled={!location || !selfieUrl} onClick={submit}>
-              Save clock-in
+            <Button className="h-14 w-full rounded-[22px]" disabled={!identity || !location || !selfieFile || isPending} onClick={() => void submit()}>
+              {isPending ? "Saving securely..." : "Save clock-in"}
             </Button>
           </div>
         </Card>

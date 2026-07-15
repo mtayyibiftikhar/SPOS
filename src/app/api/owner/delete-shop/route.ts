@@ -201,14 +201,28 @@ export async function POST(request: Request) {
 
     await deleteShopRows(supabase, cloudShopId);
 
+    let deletedAuthUsers = 0;
+    const failedAuthUserIds: string[] = [];
+
     for (const profile of profiles ?? []) {
-      await supabase.auth.admin.deleteUser(profile.id).catch(() => undefined);
+      try {
+        const { error } = await supabase.auth.admin.deleteUser(profile.id);
+
+        if (error) {
+          failedAuthUserIds.push(profile.id);
+        } else {
+          deletedAuthUsers += 1;
+        }
+      } catch {
+        failedAuthUserIds.push(profile.id);
+      }
     }
 
     return NextResponse.json({
       ok: true,
       cloudShopId,
-      deletedAuthUsers: profiles?.length ?? 0,
+      deletedAuthUsers,
+      failedAuthUserIds,
       removedStorageObjects
     });
   } catch (error) {

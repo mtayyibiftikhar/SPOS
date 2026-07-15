@@ -426,8 +426,8 @@ export function CashControlPanel() {
     safeMovementLogPage * LOG_PAGE_SIZE
   );
 
-  const handleStartDay = () => {
-    const result = startBusinessDay({
+  const handleStartDay = async () => {
+    const result = await startBusinessDay({
       businessDate,
       openingNote
     });
@@ -444,7 +444,7 @@ export function CashControlPanel() {
     }
   };
 
-  const handleCloseDay = () => {
+  const handleCloseDay = async () => {
     const countedCash = Number(dayCountedCash || 0);
 
     if (Number.isNaN(countedCash) || countedCash < 0) {
@@ -455,7 +455,7 @@ export function CashControlPanel() {
       return;
     }
 
-    const result = closeBusinessDay({
+    const result = await closeBusinessDay({
       countedCash,
       note: dayCloseNote
     });
@@ -489,7 +489,7 @@ export function CashControlPanel() {
     }
   };
 
-  const handleStartShift = () => {
+  const handleStartShift = async () => {
     const cash = Number(openingCash || 0);
 
     if (Number.isNaN(cash) || cash < 0) {
@@ -500,7 +500,7 @@ export function CashControlPanel() {
       return;
     }
 
-    const result = startShift({ openingCash: cash });
+    const result = await startShift({ openingCash: cash });
 
     setShiftFeedback({
       kind: result.ok ? "success" : "error",
@@ -549,7 +549,7 @@ export function CashControlPanel() {
     }
   };
 
-  const handleEndShift = () => {
+  const handleEndShift = async () => {
     const cash = Number(shiftCountedCash || 0);
 
     if (Number.isNaN(cash) || cash < 0) {
@@ -560,7 +560,7 @@ export function CashControlPanel() {
       return;
     }
 
-    const result = endShift({
+    const result = await endShift({
       countedCash: cash,
       note: shiftNote
     });

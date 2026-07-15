@@ -81,8 +81,6 @@ export function clearShopDataScope<TState extends ResettableState>(
     next.ledgerEntries = clearBillingLedgerRows(state.ledgerEntries, shopId, scope === "all");
     next.businessDays = rowsWithoutShop(state.businessDays, shopId);
     next.shifts = rowsWithoutShop(state.shifts, shopId);
-    next.attendanceRecords = rowsWithoutShop(state.attendanceRecords, shopId);
-    next.attendanceQrSessions = rowsWithoutShop(state.attendanceQrSessions, shopId);
     next.cashMovements = rowsWithoutShop(state.cashMovements, shopId);
     next.dayCloses = rowsWithoutShop(state.dayCloses, shopId);
     next.receiptSequencesByShop = {

@@ -641,7 +641,7 @@ export function CustomerWorkspace() {
     setCustomerForm(createEmptyCustomerForm());
   };
 
-  const handleSettlement = () => {
+  const handleSettlement = async () => {
     if (!selectedCustomer || !selectedMetrics) {
       return;
     }
@@ -654,7 +654,7 @@ export function CustomerWorkspace() {
       return;
     }
 
-    const result = settleCustomerAccount({
+    const result = await settleCustomerAccount({
       amount: Number(settlementAmount || 0),
       billIds: selectedSettlementBillIds,
       customerId: selectedCustomer.id,

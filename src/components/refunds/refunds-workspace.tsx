@@ -567,7 +567,7 @@ export function RefundsWorkspace() {
     setRefundQuantities({});
   };
 
-  const handleCreateRefund = () => {
+  const handleCreateRefund = async () => {
     if (!selectedBill) {
       return;
     }
@@ -583,7 +583,7 @@ export function RefundsWorkspace() {
     setIsRefunding(true);
     setFeedback(null);
 
-    const result = createRefund({
+    const result = await createRefund({
       billId: selectedBill.id,
       payoutMethod,
       reason: refundReason.trim(),

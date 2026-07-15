@@ -1,5 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { optimizePosImage } from "@/lib/server/optimize-pos-image";
 
 export const POS_ASSETS_BUCKET = "pos-assets";
 export const SIGNED_IMAGE_URL_TTL_SECONDS = 60 * 60 * 24 * 365 * 5;
@@ -153,10 +154,12 @@ export async function uploadDataUrlPosAsset(
     return dataUrl;
   }
 
+  const optimized = await optimizePosImage(parsed.buffer, { width: 800, height: 800 }, 220 * 1024);
+
   const uploaded = await uploadPrivatePosAsset(supabase, {
     ...input,
-    buffer: parsed.buffer,
-    contentType: parsed.contentType
+    buffer: optimized.buffer,
+    contentType: optimized.contentType
   });
 
   return uploaded.url;
