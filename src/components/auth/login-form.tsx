@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, LockKeyhole, LogOut, Quote, ShieldCheck, Store } from "lucide-react";
+import { Globe2, KeyRound, LockKeyhole, LogOut, Mail, Phone, Quote, ShieldCheck, Store } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
 import { LocaleSwitcher } from "@/components/shared/locale-switcher";
 import { Button } from "@/components/ui/button";
@@ -209,6 +209,12 @@ export function LoginForm() {
     .join("")
     .slice(0, 2)
     .toUpperCase();
+  const brandWebsite = state.brand.website?.trim()
+    ? /^https?:\/\//i.test(state.brand.website)
+      ? state.brand.website
+      : `https://${state.brand.website}`
+    : null;
+  const brandPhone = state.brand.supportPhone?.trim() || state.brand.supportWhatsapp?.trim();
   const registeredShopUsers = useMemo(
     () =>
       activatedShop
@@ -461,7 +467,7 @@ export function LoginForm() {
     <div className="w-full">
       <Card className="overflow-hidden rounded-[34px] border-0 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
         <div className="grid min-h-[560px] lg:grid-cols-[0.95fr_1.05fr]">
-          <section className="order-2 flex flex-col justify-between gap-6 border-t border-slate-100 bg-[#fbfcfd] p-7 sm:p-10 lg:order-1 lg:border-r lg:border-t-0">
+          <section className="order-2 flex min-w-0 flex-col justify-between gap-6 border-t border-slate-100 bg-[linear-gradient(155deg,#f3efff_0%,#faf8ff_54%,#f4f7fb_100%)] p-7 sm:p-10 lg:order-1 lg:border-r lg:border-t-0">
             <div>
               <div className="flex min-w-0 items-center gap-4">
                 {state.brand.logoUrl ? (
@@ -475,42 +481,43 @@ export function LoginForm() {
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">
                     {isOwnerMode ? "Owner portal" : requiresActivation ? "POS activation" : state.brand.companyName}
                   </p>
-                  <h1 className="mt-2 max-w-[420px] font-display text-4xl font-medium leading-tight text-slate-950 sm:text-5xl">
-                    {requiresActivation ? "Activate this store" : state.brand.posName}
-                  </h1>
+                  {!requiresActivation ? (
+                    <h1 className="mt-2 max-w-[420px] font-display text-4xl font-medium leading-tight text-slate-950 sm:text-5xl">
+                      {state.brand.posName}
+                    </h1>
+                  ) : null}
                 </div>
               </div>
 
-              <div className="mt-7 flex items-start gap-3 rounded-[24px] border border-emerald-100/80 bg-gradient-to-r from-emerald-50 via-white to-amber-50 px-5 py-4 shadow-[0_14px_36px_rgba(15,23,42,0.05)]">
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-white text-emerald-700 shadow-sm ring-1 ring-emerald-100">
-                  <Quote className="h-4 w-4" />
-                </span>
-                <p className="pt-1 font-display text-xl font-medium leading-snug text-slate-900 sm:text-2xl">
+              <div className="mt-7 flex items-start gap-3 px-2">
+                <Quote className="mt-1 h-6 w-6 shrink-0 text-emerald-600" />
+                <p className="font-display text-xl font-medium leading-snug text-slate-900 sm:text-2xl">
                   {visibleQuote}
                 </p>
               </div>
 
-              <div className="mt-4 rounded-[36px] bg-gradient-to-br from-white via-emerald-50 to-amber-50 p-2 shadow-[0_26px_70px_rgba(15,23,42,0.14)] ring-1 ring-slate-200/70">
-                <div className="overflow-hidden rounded-[29px] bg-slate-100">
-                  {heroImage ? (
-                    <img
-                      alt={state.brand.posName}
-                      className="h-[280px] w-full object-cover sm:h-[330px] lg:h-[360px]"
-                      src={heroImage}
-                    />
-                  ) : (
-                    <div className="h-[280px] w-full bg-[radial-gradient(circle_at_20%_20%,_rgba(245,158,11,0.24),_transparent_30%),radial-gradient(circle_at_80%_10%,_rgba(16,185,129,0.22),_transparent_28%),linear-gradient(135deg,#e2f7ef_0%,#f8fafc_48%,#fff7df_100%)] sm:h-[330px] lg:h-[360px]" />
-                  )}
-                </div>
+              <div className="relative -mx-2 mt-1 overflow-hidden rounded-[42px] bg-[#f7f4ff]">
+                {heroImage ? (
+                  <img
+                    alt={state.brand.posName}
+                    className="h-[310px] w-full max-w-full scale-[1.02] rounded-[42px] object-cover sm:h-[360px] lg:h-[390px]"
+                    src={heroImage}
+                  />
+                ) : (
+                  <div className="h-[310px] w-full rounded-[42px] bg-[radial-gradient(circle_at_20%_20%,_rgba(245,158,11,0.24),_transparent_30%),radial-gradient(circle_at_80%_10%,_rgba(16,185,129,0.22),_transparent_28%),linear-gradient(135deg,#e2f7ef_0%,#f8fafc_48%,#fff7df_100%)] sm:h-[360px] lg:h-[390px]" />
+                )}
+                <div
+                  className="pointer-events-none absolute inset-0 rounded-[42px]"
+                  style={{
+                    background:
+                      "linear-gradient(to right, #f7f4ff 0%, transparent 9%, transparent 91%, #f7f4ff 100%), linear-gradient(to bottom, #f7f4ff 0%, transparent 10%, transparent 90%, #f7f4ff 100%)",
+                  }}
+                />
               </div>
             </div>
-
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-              {state.brand.companyName} {state.brand.supportPhone ? `| ${state.brand.supportPhone}` : ""}
-            </p>
           </section>
 
-          <section className="order-1 flex flex-col justify-between p-7 sm:p-10 lg:order-2">
+          <section className="order-1 flex min-w-0 flex-col justify-between p-7 sm:p-10 lg:order-2">
             <div className="flex justify-end">
               <LocaleSwitcher className="min-w-[170px]" showLabel={false} />
             </div>
@@ -539,9 +546,6 @@ export function LoginForm() {
               <KeyRound className="h-5 w-5" />
             </span>
             <h2 className="mt-5 font-display text-4xl font-medium text-slate-950">Activate store POS</h2>
-            <p className="mt-3 text-sm leading-6 text-slate-600">
-              This is shown only until the store is activated on this browser/device.
-            </p>
             <div className="mt-7 space-y-4">
               <label className="block space-y-2">
                 <span className="text-sm font-semibold text-slate-950">Activation key</span>
@@ -698,10 +702,26 @@ export function LoginForm() {
           </div>
         )}
             </div>
-            <div className="flex flex-wrap justify-end gap-5 text-sm text-slate-500">
-              <span>Help</span>
-              <span>Privacy</span>
-              <span>Terms</span>
+            <div className="flex flex-wrap items-center justify-end gap-x-5 gap-y-2 border-t border-slate-100 pt-5 text-xs font-semibold text-slate-500">
+              <span className="uppercase tracking-[0.18em] text-slate-400">{state.brand.companyName}</span>
+              {brandWebsite ? (
+                <a className="inline-flex items-center gap-1.5 transition hover:text-emerald-700" href={brandWebsite} rel="noreferrer" target="_blank">
+                  <Globe2 className="h-3.5 w-3.5" />
+                  {state.brand.website?.replace(/^https?:\/\//i, "")}
+                </a>
+              ) : null}
+              {state.brand.supportEmail ? (
+                <a className="inline-flex items-center gap-1.5 transition hover:text-sky-700" href={`mailto:${state.brand.supportEmail}`}>
+                  <Mail className="h-3.5 w-3.5" />
+                  {state.brand.supportEmail}
+                </a>
+              ) : null}
+              {brandPhone ? (
+                <a className="inline-flex items-center gap-1.5 transition hover:text-amber-700" href={`tel:${brandPhone.replace(/[^+\d]/g, "")}`}>
+                  <Phone className="h-3.5 w-3.5" />
+                  {brandPhone}
+                </a>
+              ) : null}
             </div>
           </section>
         </div>
