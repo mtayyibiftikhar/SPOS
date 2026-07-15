@@ -467,7 +467,7 @@ export function LoginForm() {
     <div className="w-full">
       <Card className="overflow-hidden rounded-[34px] border-0 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
         <div className="grid min-h-[560px] lg:grid-cols-[0.95fr_1.05fr]">
-          <section className="order-2 flex min-w-0 flex-col justify-between gap-6 border-t border-slate-100 bg-[linear-gradient(155deg,#f3efff_0%,#faf8ff_54%,#f4f7fb_100%)] p-7 sm:p-10 lg:order-1 lg:border-r lg:border-t-0">
+          <section className="order-2 flex min-w-0 flex-col justify-between gap-6 border-t border-slate-100 bg-[#f5f1ff] p-7 sm:p-10 lg:order-1 lg:border-r lg:border-t-0">
             <div>
               <div className="flex min-w-0 items-center gap-4">
                 {state.brand.logoUrl ? (
@@ -479,7 +479,7 @@ export function LoginForm() {
                 )}
                 <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">
-                    {isOwnerMode ? "Owner portal" : requiresActivation ? "POS activation" : state.brand.companyName}
+                    {isOwnerMode ? "Owner portal" : requiresActivation ? state.brand.posName : state.brand.companyName}
                   </p>
                   {!requiresActivation ? (
                     <h1 className="mt-2 max-w-[420px] font-display text-4xl font-medium leading-tight text-slate-950 sm:text-5xl">
@@ -496,7 +496,7 @@ export function LoginForm() {
                 </p>
               </div>
 
-              <div className="relative -mx-2 mt-1 overflow-hidden rounded-[42px] bg-[#f7f4ff]">
+              <div className="relative -mx-2 mt-5 overflow-hidden rounded-[42px] bg-[#f5f1ff]">
                 {heroImage ? (
                   <img
                     alt={state.brand.posName}
@@ -510,7 +510,7 @@ export function LoginForm() {
                   className="pointer-events-none absolute inset-0 rounded-[42px]"
                   style={{
                     background:
-                      "linear-gradient(to right, #f7f4ff 0%, transparent 9%, transparent 91%, #f7f4ff 100%), linear-gradient(to bottom, #f7f4ff 0%, transparent 10%, transparent 90%, #f7f4ff 100%)",
+                      "linear-gradient(to right, #f5f1ff 0%, transparent 9%, transparent 91%, #f5f1ff 100%), linear-gradient(to bottom, #f5f1ff 0%, transparent 10%, transparent 90%, #f5f1ff 100%)",
                   }}
                 />
               </div>
