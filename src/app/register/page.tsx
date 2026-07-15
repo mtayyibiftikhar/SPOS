@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Building2, CheckCircle2, KeyRound, ReceiptText, ShieldCheck, UserRoundPlus } from "lucide-react";
+import { Building2, CheckCircle2, Globe2, KeyRound, Mail, MapPin, Phone, ReceiptText, ShieldCheck, UserRoundPlus } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { usePosApp } from "@/components/providers/app-provider";
 import { Button } from "@/components/ui/button";
@@ -122,7 +122,7 @@ function findActivationDetails(snapshot: Partial<DemoAppState> | null, productKe
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { registerInstalledShop, state } = usePosApp();
+  const { mergeCloudActivationState, registerInstalledShop, state } = usePosApp();
   const [activeStep, setActiveStep] = useState<StepId>("setup");
   const [error, setError] = useState<string | null>(null);
   const [logoFeedback, setLogoFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
@@ -152,6 +152,41 @@ export default function RegisterPage() {
 
   const activeIndex = steps.findIndex((step) => step.id === activeStep);
   const isFinalStep = activeStep === "key";
+  const brandInitials = state.brand.posName
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const brandWebsite = state.brand.website
+    ? /^https?:\/\//i.test(state.brand.website)
+      ? state.brand.website
+      : `https://${state.brand.website}`
+    : null;
+  const brandPhone = state.brand.supportPhone || state.brand.supportWhatsapp;
+
+  useEffect(() => {
+    let active = true;
+
+    const loadPublicBrand = async () => {
+      try {
+        const response = await fetch("/api/brand", { cache: "no-store" });
+        const payload = (await response.json()) as { brand?: DemoAppState["brand"] | null; ok: boolean };
+
+        if (active && payload.ok && payload.brand) {
+          mergeCloudActivationState({ brand: payload.brand });
+        }
+      } catch {
+        // Store registration remains available if public branding cannot load.
+      }
+    };
+
+    void loadPublicBrand();
+
+    return () => {
+      active = false;
+    };
+  }, [mergeCloudActivationState]);
 
   useEffect(() => {
     const queryProductKey = new URLSearchParams(window.location.search).get("key")?.trim();
@@ -319,14 +354,13 @@ export default function RegisterPage() {
         <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             {state.brand.logoUrl ? (
-              <img alt={state.brand.companyName} className="h-12 w-12 rounded-2xl border border-white/70 object-cover shadow-sm" src={state.brand.logoUrl} />
+              <img alt={state.brand.companyName} className="h-12 w-12 object-contain" src={state.brand.logoUrl} />
             ) : (
-              <span className="rounded-2xl bg-slate-950 p-3 text-white">
-                <ShieldCheck className="h-5 w-5" />
+              <span className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-emerald-100 to-sky-100 font-display text-sm font-semibold text-slate-800 ring-1 ring-slate-200/70">
+                {brandInitials || "POS"}
               </span>
             )}
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">POS installation</p>
               <h1 className="font-display text-3xl font-semibold text-slate-950">{state.brand.posName}</h1>
             </div>
           </div>
@@ -337,15 +371,7 @@ export default function RegisterPage() {
 
         <form className="grid gap-5 xl:grid-cols-[340px_1fr]" onSubmit={submit}>
           <Card className="p-4">
-            <div className="rounded-[28px] bg-[linear-gradient(150deg,#07111f_0%,#0f2d2c_100%)] p-6 text-white">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-200">First run setup</p>
-              <h2 className="mt-4 font-display text-3xl font-semibold">Create first admin</h2>
-              <p className="mt-4 text-sm leading-7 text-white/75">
-                The shop details come from the activation key. Create the first admin login once, then the POS will open the normal staff sign-in screen.
-              </p>
-            </div>
-
-            <div className="mt-4 grid gap-2">
+            <div className="grid gap-2">
               {steps.map((step, index) => {
                 const Icon = step.icon;
                 const active = step.id === activeStep;
@@ -538,6 +564,51 @@ export default function RegisterPage() {
             </div>
           </Card>
         </form>
+
+        <footer className="mt-5 overflow-hidden rounded-[30px] border border-white/80 bg-white/85 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur sm:p-6">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 items-center gap-4">
+              {state.brand.logoUrl ? (
+                <img alt={state.brand.companyName} className="h-12 w-12 shrink-0 object-contain" src={state.brand.logoUrl} />
+              ) : (
+                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-emerald-100 to-sky-100 font-display text-sm font-semibold text-slate-800 ring-1 ring-slate-200/70">
+                  {brandInitials || "POS"}
+                </span>
+              )}
+              <div className="min-w-0">
+                <p className="truncate font-display text-xl font-semibold text-slate-950">{state.brand.posName}</p>
+                <p className="mt-1 truncate text-sm text-slate-500">{state.brand.companyName}</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {brandWebsite ? (
+                <a className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800" href={brandWebsite} rel="noreferrer" target="_blank">
+                  <Globe2 className="h-4 w-4" />
+                  Website
+                </a>
+              ) : null}
+              {state.brand.supportEmail ? (
+                <a className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-800" href={`mailto:${state.brand.supportEmail}`}>
+                  <Mail className="h-4 w-4" />
+                  {state.brand.supportEmail}
+                </a>
+              ) : null}
+              {brandPhone ? (
+                <a className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-900" href={`tel:${brandPhone.replace(/[^+\d]/g, "")}`}>
+                  <Phone className="h-4 w-4" />
+                  {brandPhone}
+                </a>
+              ) : null}
+              {state.brand.address ? (
+                <a className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-800" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(state.brand.address)}`} rel="noreferrer" target="_blank">
+                  <MapPin className="h-4 w-4" />
+                  {state.brand.address}
+                </a>
+              ) : null}
+            </div>
+          </div>
+        </footer>
       </div>
     </main>
   );

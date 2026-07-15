@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, LockKeyhole, LogOut, ShieldCheck, Store, UserRound } from "lucide-react";
+import { KeyRound, LockKeyhole, LogOut, Quote, ShieldCheck, Store } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
 import { LocaleSwitcher } from "@/components/shared/locale-switcher";
 import { Button } from "@/components/ui/button";
@@ -196,8 +196,19 @@ export function LoginForm() {
   const visibleHeroImages = (state.brand.loginHeroImages ?? []).filter((imageUrl) => imageUrl.trim());
   const heroImage =
     visibleHeroImages[heroImageIndex % Math.max(visibleHeroImages.length, 1)] ??
-    state.brand.logoUrl ??
-    shopLogo;
+    state.brand.logoUrl;
+  const brandInitials = state.brand.posName
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const shopInitials = (activatedShop?.name ?? "Store")
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
   const registeredShopUsers = useMemo(
     () =>
       activatedShop
@@ -453,36 +464,44 @@ export function LoginForm() {
           <section className="order-2 flex flex-col justify-between gap-6 border-t border-slate-100 bg-[#fbfcfd] p-7 sm:p-10 lg:order-1 lg:border-r lg:border-t-0">
             <div>
               <div className="flex min-w-0 items-center gap-4">
-              {shopLogo ? (
-                <img alt={activatedShop?.name ?? state.brand.posName} className="h-14 w-14 rounded-[18px] border border-slate-100 object-cover shadow-[0_14px_34px_rgba(15,23,42,0.12)]" src={shopLogo} />
-              ) : state.brand.logoUrl ? (
-                <img alt={state.brand.companyName} className="h-14 w-14 rounded-[18px] border border-slate-100 object-cover shadow-[0_14px_34px_rgba(15,23,42,0.12)]" src={state.brand.logoUrl} />
-              ) : (
-                <span className="grid h-14 w-14 place-items-center rounded-[18px] bg-slate-950 text-white shadow-[0_14px_34px_rgba(15,23,42,0.12)]">
-                  <Store className="h-7 w-7" />
+                {state.brand.logoUrl ? (
+                  <img alt={state.brand.companyName} className="h-14 w-14 object-contain" src={state.brand.logoUrl} />
+                ) : (
+                  <span className="grid h-14 w-14 place-items-center rounded-[18px] bg-gradient-to-br from-emerald-100 to-sky-100 font-display text-lg font-semibold text-slate-800 ring-1 ring-slate-200/70">
+                    {brandInitials || "POS"}
+                  </span>
+                )}
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">
+                    {isOwnerMode ? "Owner portal" : requiresActivation ? "POS activation" : state.brand.companyName}
+                  </p>
+                  <h1 className="mt-2 max-w-[420px] font-display text-4xl font-medium leading-tight text-slate-950 sm:text-5xl">
+                    {requiresActivation ? "Activate this store" : state.brand.posName}
+                  </h1>
+                </div>
+              </div>
+
+              <div className="mt-7 flex items-start gap-3 rounded-[24px] border border-emerald-100/80 bg-gradient-to-r from-emerald-50 via-white to-amber-50 px-5 py-4 shadow-[0_14px_36px_rgba(15,23,42,0.05)]">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-white text-emerald-700 shadow-sm ring-1 ring-emerald-100">
+                  <Quote className="h-4 w-4" />
                 </span>
-              )}
-              <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">
-                  {isOwnerMode ? "Owner portal" : activatedShop ? "Store POS" : "POS activation"}
+                <p className="pt-1 font-display text-xl font-medium leading-snug text-slate-900 sm:text-2xl">
+                  {visibleQuote}
                 </p>
-                <h1 className="mt-2 max-w-[420px] font-display text-4xl font-medium leading-tight text-slate-950 sm:text-5xl">
-                  {isOwnerMode ? state.brand.posName : activatedShop?.name ?? "Activate this store"}
-                </h1>
-              </div>
-            </div>
-
-              <div className="mt-8 overflow-hidden rounded-[28px] border border-slate-100 bg-slate-950 shadow-[0_22px_60px_rgba(15,23,42,0.14)]">
-              {heroImage ? (
-                  <img alt={state.brand.posName} className="aspect-[16/9] w-full object-cover" src={heroImage} />
-              ) : (
-                  <div className="aspect-[16/9] w-full bg-[radial-gradient(circle_at_20%_20%,_rgba(245,158,11,0.24),_transparent_30%),radial-gradient(circle_at_80%_10%,_rgba(16,185,129,0.22),_transparent_28%),linear-gradient(135deg,#020617_0%,#111827_100%)]" />
-              )}
               </div>
 
-              <div className="mt-5 rounded-[28px] border border-slate-100 bg-white p-5 shadow-[0_16px_42px_rgba(15,23,42,0.05)]">
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Counter quote</p>
-                <p className="mt-3 font-display text-2xl font-medium leading-tight text-slate-950">"{visibleQuote}"</p>
+              <div className="mt-4 rounded-[36px] bg-gradient-to-br from-white via-emerald-50 to-amber-50 p-2 shadow-[0_26px_70px_rgba(15,23,42,0.14)] ring-1 ring-slate-200/70">
+                <div className="overflow-hidden rounded-[29px] bg-slate-100">
+                  {heroImage ? (
+                    <img
+                      alt={state.brand.posName}
+                      className="h-[280px] w-full object-cover sm:h-[330px] lg:h-[360px]"
+                      src={heroImage}
+                    />
+                  ) : (
+                    <div className="h-[280px] w-full bg-[radial-gradient(circle_at_20%_20%,_rgba(245,158,11,0.24),_transparent_30%),radial-gradient(circle_at_80%_10%,_rgba(16,185,129,0.22),_transparent_28%),linear-gradient(135deg,#e2f7ef_0%,#f8fafc_48%,#fff7df_100%)] sm:h-[330px] lg:h-[360px]" />
+                  )}
+                </div>
               </div>
             </div>
 
@@ -545,20 +564,34 @@ export function LoginForm() {
           </div>
         ) : (
           <div>
-            <span className="inline-flex rounded-2xl bg-slate-950 p-3 text-white">
-              {isOwnerMode ? <ShieldCheck className="h-5 w-5" /> : <UserRound className="h-5 w-5" />}
-            </span>
-            <p className="mt-5 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">
-              {isOwnerMode ? "Owner sign in" : "User sign in"}
-            </p>
-            <h2 className="mt-2 font-display text-4xl font-medium text-slate-950">
-              {isOwnerMode ? "Open owner portal" : "Open the POS"}
-            </h2>
-            <p className="mt-3 text-sm leading-6 text-slate-600">
-              {isOwnerMode
-                ? "Owner login is separate from store users."
-                : `Choose the registered staff user for ${activatedShop?.name ?? "this store"}.`}
-            </p>
+            {isOwnerMode ? (
+              <div>
+                <span className="inline-flex rounded-2xl bg-slate-950 p-3 text-white">
+                  <ShieldCheck className="h-5 w-5" />
+                </span>
+                <p className="mt-5 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Owner sign in</p>
+                <h2 className="mt-2 font-display text-4xl font-medium text-slate-950">Open owner portal</h2>
+              </div>
+            ) : (
+              <div className="flex items-center gap-4 rounded-[28px] border border-slate-200 bg-slate-50/80 p-4 sm:p-5">
+                {shopLogo ? (
+                  <img alt={activatedShop?.name ?? "Shop"} className="h-16 w-16 shrink-0 object-contain" src={shopLogo} />
+                ) : (
+                  <span className="grid h-16 w-16 shrink-0 place-items-center rounded-[20px] bg-gradient-to-br from-emerald-100 to-sky-100 font-display text-lg font-semibold text-slate-800 ring-1 ring-slate-200/70">
+                    {shopInitials}
+                  </span>
+                )}
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-700">Staff sign in</p>
+                  <h2 className="mt-1 truncate font-display text-3xl font-medium text-slate-950">{activatedShop?.name}</h2>
+                  {activatedShop?.address || activatedShop?.phone ? (
+                    <p className="mt-1 line-clamp-2 text-sm leading-5 text-slate-500">
+                      {[activatedShop.address, activatedShop.phone].filter(Boolean).join(" | ")}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            )}
 
             <form className="mt-7 space-y-5" onSubmit={submit}>
               {isOwnerMode ? (
