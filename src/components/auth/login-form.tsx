@@ -496,7 +496,7 @@ export function LoginForm() {
                 </p>
               </div>
 
-              <div className="relative -mx-2 mt-5 overflow-hidden rounded-[42px] bg-[#f5f1ff]">
+              <div className="relative -mx-2 mt-8 overflow-hidden rounded-[42px] bg-[#f5f1ff]">
                 {heroImage ? (
                   <img
                     alt={state.brand.posName}
