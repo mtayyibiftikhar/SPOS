@@ -1430,13 +1430,12 @@ export function BillingWorkspace() {
       <Card className="rounded-[28px] border-white/70 bg-white/92 px-4 py-3 shadow-[0_18px_44px_rgba(15,23,42,0.06)]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-            <button
+            <Link
               aria-label={t("nav.dashboard")}
               className="group inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] border border-slate-200 bg-white text-slate-700 shadow-[0_10px_24px_rgba(15,23,42,0.07)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
               data-testid="billing-dashboard-back"
-              onClick={() => router.replace("/dashboard")}
+              href="/dashboard"
               title={t("nav.dashboard")}
-              type="button"
             >
               <ArrowLeft
                 className={cn(
@@ -1444,7 +1443,7 @@ export function BillingWorkspace() {
                   locale !== "en" && "rotate-180 group-hover:translate-x-0.5"
                 )}
               />
-            </button>
+            </Link>
             <h1 className="font-display text-[1.9rem] font-semibold tracking-[-0.05em] text-slate-950">
               {t("nav.billing")}
             </h1>
