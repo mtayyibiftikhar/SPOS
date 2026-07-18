@@ -573,7 +573,7 @@ const englishTranslations = {
   "customers.formTitle": "Customer profile",
   "customers.formNewTitle": "Create customer",
   "customers.formDesc": "Saved customers can be reused directly during billing and for account follow-up later.",
-  "customers.saveCustomer": "Save customer",
+  "customers.saveCustomer": "Update customer",
   "customers.createCustomer": "Create customer",
   "customers.deleteCustomer": "Remove customer",
   "customers.accountTitle": "Account overview",

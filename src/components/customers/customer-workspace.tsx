@@ -600,6 +600,8 @@ export function CustomerWorkspace() {
   };
 
   const handleSaveCustomer = () => {
+    const wasCreating = isCreating;
+
     setCustomerError(null);
     setCustomerFeedback(null);
 
@@ -617,8 +619,16 @@ export function CustomerWorkspace() {
     }
 
     setIsCreating(false);
+    setCustomerFeedback(t(wasCreating ? "customers.createSuccess" : "customers.saveSuccess"));
+
+    if (wasCreating) {
+      setSelectedCustomerId(null);
+      setCustomerForm(createEmptyCustomerForm());
+      setCustomerPage(1);
+      return;
+    }
+
     setSelectedCustomerId(result.customerId);
-    setCustomerFeedback(t(isCreating ? "customers.createSuccess" : "customers.saveSuccess"));
   };
 
   const handleDeleteCustomer = () => {
@@ -990,6 +1000,7 @@ export function CustomerWorkspace() {
             onChange={(event) => setSearch(event.target.value)}
           />
         </div>
+        {customerFeedback ? <p className="mt-3 text-sm font-medium text-emerald-700">{customerFeedback}</p> : null}
       </div>
 
       <div className="grid flex-1 gap-3 overflow-y-auto p-4 md:grid-cols-2 2xl:grid-cols-3">

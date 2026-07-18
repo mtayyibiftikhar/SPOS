@@ -3267,12 +3267,12 @@ export function AppProvider({
               if (!normalizedSetupEmail || !normalizedSetupPassword) {
                 result = {
                   ok: false,
-                  message: "Store setup email and password are required."
+                  message: "Store email and password are required."
                 };
                 return current;
               }
 
-              const setupPasswordError = validatePasswordLength(normalizedSetupPassword, "Store setup password");
+              const setupPasswordError = validatePasswordLength(normalizedSetupPassword, "Store password");
 
               if (setupPasswordError) {
                 result = {
@@ -3288,7 +3288,7 @@ export function AppProvider({
               ) {
                 result = {
                   ok: false,
-                  message: "Store setup email or password does not match the owner-created shop."
+                  message: "Store email or password does not match the owner-created shop."
                 };
                 return current;
               }
@@ -3617,10 +3617,10 @@ export function AppProvider({
         const normalizedSetupPassword = setupPassword.trim();
 
         if (!normalizedShopName || !normalizedSetupEmail || !normalizedSetupPassword) {
-          return { ok: false, message: "Shop name, setup email, and setup password are required." };
+          return { ok: false, message: "Shop name, store email, and store password are required." };
         }
 
-        const setupPasswordError = validatePasswordLength(normalizedSetupPassword, "Setup password");
+        const setupPasswordError = validatePasswordLength(normalizedSetupPassword, "Store password");
         const phoneError = validateInternationalPhone(phone);
 
         if (setupPasswordError) {
@@ -3646,7 +3646,7 @@ export function AppProvider({
               (shop) => shop.setupEmail?.trim().toLowerCase() === normalizedSetupEmail || shop.email?.trim().toLowerCase() === normalizedSetupEmail
             )
           ) {
-            result = { ok: false, message: "Another shop already uses this setup email." };
+            result = { ok: false, message: "Another shop already uses this store login email." };
             return current;
           }
 
@@ -3843,7 +3843,7 @@ export function AppProvider({
         }
 
         if (normalizedSetupPassword) {
-          const passwordError = validatePasswordLength(normalizedSetupPassword, "Setup password");
+          const passwordError = validatePasswordLength(normalizedSetupPassword, "Store password");
 
           if (passwordError) {
             return { ok: false, message: passwordError };
@@ -3867,7 +3867,7 @@ export function AppProvider({
             normalizedSetupEmail &&
             current.shops.some((entry) => entry.id !== shopId && entry.setupEmail?.trim().toLowerCase() === normalizedSetupEmail)
           ) {
-            result = { ok: false, message: "Another store already uses this setup email." };
+            result = { ok: false, message: "Another store already uses this store login email." };
             return current;
           }
 
@@ -3882,8 +3882,8 @@ export function AppProvider({
           result = {
             ok: true,
             message: shouldLogoutDevices
-              ? "Store profile saved. Connected devices were logged out because the setup password changed."
-              : "Store profile and setup access saved."
+              ? "Store profile saved. Connected devices were logged out because the store password changed."
+              : "Store profile and login access saved."
           };
 
           const nextState = {
@@ -3926,8 +3926,8 @@ export function AppProvider({
                 action: "owner.shop_profile.update",
                 targetId: shopId,
                 detail: shouldLogoutDevices
-                  ? `Updated store profile and setup password for ${normalizedShopName}; connected devices must activate again.`
-                  : `Updated store profile and setup access for ${normalizedShopName}.`,
+                  ? `Updated store profile and store password for ${normalizedShopName}; connected devices must activate again.`
+                  : `Updated store profile and login access for ${normalizedShopName}.`,
                 createdAt: updatedAt
               },
               ...current.auditLogs

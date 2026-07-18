@@ -430,17 +430,17 @@ export default function RegisterPage() {
             {activeStep === "setup" ? (
               <section>
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Step 1</p>
-                <h2 className="mt-2 font-display text-3xl font-semibold text-slate-950">Store setup login</h2>
+                <h2 className="mt-2 font-display text-3xl font-semibold text-slate-950">Store login</h2>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Enter the setup email and password only for local/demo owner-created shops. Cloud activation keys can continue without this step.
+                  Enter the store email and password provided when this shop was created.
                 </p>
                 <div className="mt-6 grid gap-4 md:grid-cols-2">
                   <label className="space-y-2">
-                    <span className="text-sm font-semibold text-slate-950">Setup email</span>
+                    <span className="text-sm font-semibold text-slate-950">Store email</span>
                     <Input type="email" value={form.setupEmail} onChange={(event) => updateForm("setupEmail", event.target.value)} />
                   </label>
                   <label className="space-y-2">
-                    <span className="text-sm font-semibold text-slate-950">Setup password</span>
+                    <span className="text-sm font-semibold text-slate-950">Store password</span>
                     <Input minLength={8} type="password" value={form.setupPassword} onChange={(event) => updateForm("setupPassword", event.target.value)} />
                   </label>
                 </div>

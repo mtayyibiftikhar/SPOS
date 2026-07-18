@@ -1668,10 +1668,10 @@ export default function OwnerPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Shop setup</p>
           <h2 className="mt-2 font-display text-3xl font-semibold text-slate-950">Create shop and activation key</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-            Owner side prepares the shop setup login, license, device limit, and activation key. The store creates its own admin user during installation.
+            Owner side prepares the store login, license, device limit, and activation key. The store creates its own admin user during installation.
           </p>
         </div>
-        <Badge variant="success">Local setup credentials</Badge>
+        <Badge variant="success">Store login credentials</Badge>
       </div>
 
       <form className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3" onSubmit={createShop}>
@@ -1684,11 +1684,11 @@ export default function OwnerPage() {
           <Input type="email" value={createShopForm.email} onChange={(event) => setCreateShopForm((current) => ({ ...current, email: event.target.value }))} />
         </label>
         <label className="space-y-2">
-          <span className="text-sm font-semibold text-slate-950">Setup login email</span>
+          <span className="text-sm font-semibold text-slate-950">Store login email</span>
           <Input type="email" value={createShopForm.setupEmail} onChange={(event) => setCreateShopForm((current) => ({ ...current, setupEmail: event.target.value }))} />
         </label>
         <label className="space-y-2">
-          <span className="text-sm font-semibold text-slate-950">Setup login password</span>
+          <span className="text-sm font-semibold text-slate-950">Store password</span>
           <Input minLength={8} type="password" value={createShopForm.setupPassword} onChange={(event) => setCreateShopForm((current) => ({ ...current, setupPassword: event.target.value }))} />
         </label>
         <label className="space-y-2">
@@ -1935,7 +1935,7 @@ export default function OwnerPage() {
                     {selectedShop?.address || "No address saved."}
                   </p>
                   {selectedShop?.setupEmail ? (
-                    <p className="mt-2 text-sm font-semibold text-slate-700">Setup login: {selectedShop.setupEmail}</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-700">Store login: {selectedShop.setupEmail}</p>
                   ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -2001,9 +2001,9 @@ export default function OwnerPage() {
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Store profile</p>
-                    <h3 className="mt-2 font-display text-2xl font-semibold text-slate-950">Edit store details and setup login</h3>
+                    <h3 className="mt-2 font-display text-2xl font-semibold text-slate-950">Edit store details and login</h3>
                     <p className="mt-2 text-sm leading-6 text-slate-600">
-                      These details control the shop setup screen and the saved shop profile. Leave password blank to keep the existing password.
+                      These details control the store login and saved shop profile. Leave the password blank to keep the current store password.
                     </p>
                   </div>
                   <Badge variant="neutral">Owner editable</Badge>
@@ -2018,11 +2018,11 @@ export default function OwnerPage() {
                     <Input type="email" value={profileDraft.email} onChange={(event) => updateShopProfileDraft(selectedShop, { email: event.target.value })} />
                   </label>
                   <label className="space-y-2">
-                    <span className="text-sm font-semibold text-slate-950">Setup login email</span>
+                    <span className="text-sm font-semibold text-slate-950">Store login email</span>
                     <Input type="email" value={profileDraft.setupEmail} onChange={(event) => updateShopProfileDraft(selectedShop, { setupEmail: event.target.value })} />
                   </label>
                   <label className="space-y-2">
-                    <span className="text-sm font-semibold text-slate-950">New setup password</span>
+                    <span className="text-sm font-semibold text-slate-950">New store password</span>
                     <Input minLength={8} placeholder="Leave blank to keep current" type="password" value={profileDraft.setupPassword} onChange={(event) => updateShopProfileDraft(selectedShop, { setupPassword: event.target.value })} />
                   </label>
                   <label className="space-y-2">
