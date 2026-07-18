@@ -3,7 +3,6 @@
 import type { ReactNode } from "react";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
@@ -248,7 +247,6 @@ function SectionEyebrow({ children }: { children: ReactNode }) {
 }
 
 export function BillingWorkspace() {
-  const router = useRouter();
   const {
     createBill,
     currentBusinessDay,
@@ -1095,7 +1093,11 @@ export function BillingWorkspace() {
     setPaymentMethod("cash");
     setWorkflowStep("build");
     setIsSubmitting(false);
-    router.push(`/bills/${result.billId}?fresh=1`);
+    // A completed cloud sale must always leave the checkout workspace. Using a
+    // document navigation also guarantees the receipt loads from the committed
+    // cloud snapshot before its print/share countdown begins.
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    window.location.assign(`/bills/${encodeURIComponent(result.billId)}?fresh=1`);
   };
 
   const renderCartRows = () => {
@@ -1430,12 +1432,13 @@ export function BillingWorkspace() {
       <Card className="rounded-[28px] border-white/70 bg-white/92 px-4 py-3 shadow-[0_18px_44px_rgba(15,23,42,0.06)]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-            <Link
+            <button
               aria-label={t("nav.dashboard")}
               className="group inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] border border-slate-200 bg-white text-slate-700 shadow-[0_10px_24px_rgba(15,23,42,0.07)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
               data-testid="billing-dashboard-back"
-              href="/dashboard"
+              onClick={() => window.location.assign("/dashboard")}
               title={t("nav.dashboard")}
+              type="button"
             >
               <ArrowLeft
                 className={cn(
@@ -1443,7 +1446,7 @@ export function BillingWorkspace() {
                   locale !== "en" && "rotate-180 group-hover:translate-x-0.5"
                 )}
               />
-            </Link>
+            </button>
             <h1 className="font-display text-[1.9rem] font-semibold tracking-[-0.05em] text-slate-950">
               {t("nav.billing")}
             </h1>
