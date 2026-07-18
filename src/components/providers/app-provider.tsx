@@ -2814,13 +2814,18 @@ export function AppProvider({
 
         cloudRevisionByShop.current[shopId] = Math.max(0, Number(payload.revision ?? 0));
         cloudBaseStateByShop.current[shopId] = remoteState;
-        setState((current) => ({
-          ...carryForwardAuthoritativeShopDataResets(
-            current,
-            mergeShopCloudStatePatch(current, mergedState, shopId)
-          ),
-          session: current.session
-        }));
+        // Checkout navigates to the new receipt as soon as this promise resolves.
+        // Commit the authoritative snapshot first so the receipt route can always
+        // resolve the new bill and start its print/share countdown immediately.
+        flushSync(() => {
+          setState((current) => ({
+            ...carryForwardAuthoritativeShopDataResets(
+              current,
+              mergeShopCloudStatePatch(current, mergedState, shopId)
+            ),
+            session: current.session
+          }));
+        });
       }
 
       clearPendingCriticalMutation(pending.storageKey, pending.operationId);
