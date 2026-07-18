@@ -164,6 +164,10 @@ export default function RegisterPage() {
       : `https://${state.brand.website}`
     : null;
   const brandPhone = state.brand.supportPhone || state.brand.supportWhatsapp;
+  const [failedBrandImages, setFailedBrandImages] = useState<string[]>([]);
+  const registrationHeroImage = (state.brand.loginHeroImages ?? []).find(
+    (imageUrl) => imageUrl.trim() && !failedBrandImages.includes(imageUrl)
+  );
 
   useEffect(() => {
     let active = true;
@@ -398,6 +402,27 @@ export default function RegisterPage() {
                   </button>
                 );
               })}
+            </div>
+            <div className="relative mt-4 overflow-hidden rounded-[26px] bg-[#f5f1ff]">
+              {registrationHeroImage ? (
+                <img
+                  alt={`${state.brand.posName} workspace`}
+                  className="h-52 w-full object-cover"
+                  onError={() =>
+                    setFailedBrandImages((current) => [...new Set([...current, registrationHeroImage])])
+                  }
+                  src={registrationHeroImage}
+                />
+              ) : (
+                <div className="h-52 bg-[radial-gradient(circle_at_20%_20%,_rgba(16,185,129,0.20),_transparent_32%),radial-gradient(circle_at_80%_10%,_rgba(99,102,241,0.22),_transparent_30%),linear-gradient(135deg,#eefbf6_0%,#f5f1ff_52%,#fff8e7_100%)]" />
+              )}
+              <div
+                className="pointer-events-none absolute inset-0"
+                style={{
+                  background:
+                    "linear-gradient(to right, #f5f1ff 0%, transparent 10%, transparent 90%, #f5f1ff 100%), linear-gradient(to bottom, #f5f1ff 0%, transparent 12%, transparent 88%, #f5f1ff 100%)"
+                }}
+              />
             </div>
           </Card>
 

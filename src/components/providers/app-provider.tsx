@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type {
   AttendanceLocation,
   AttendanceRecord,
@@ -620,7 +621,7 @@ interface AppContextValue {
     shopId: string;
     browserInfo: string;
     adminPassword: string;
-  }) => { ok: boolean; message?: string };
+  }) => Promise<{ ok: boolean; message?: string }>;
   setBrandProfile: (payload: Partial<DemoAppState["brand"]>) => void;
   registerInstalledShop: (payload: RegisterInstalledShopInput) => {
     ok: boolean;
@@ -784,20 +785,21 @@ interface AppContextValue {
   createRefund: (payload: CreateRefundInput) => Promise<{ ok: boolean; refundId?: string; message?: string }>;
   startBusinessDay: (payload: { businessDate?: string; openingNote?: string }) => Promise<{ ok: boolean; message?: string }>;
   closeBusinessDay: (payload: { countedCash: number; note?: string }) => Promise<{ ok: boolean; message?: string }>;
-  autoCloseAndStartNextBusinessDay: (payload?: { note?: string; startShift?: boolean }) => { ok: boolean; message?: string };
+  autoCloseAndStartNextBusinessDay: (payload?: { note?: string; startShift?: boolean }) => Promise<{ ok: boolean; message?: string }>;
   clockIn: (payload?: {
     location?: AttendanceLocation;
     note?: string;
     selfieUrl?: string;
     source?: AttendanceSource;
     userId?: string;
-  }) => { ok: boolean; message?: string; attendanceId?: string };
+  }) => Promise<{ ok: boolean; message?: string; attendanceId?: string }>;
   clockOut: (payload?: {
     location?: AttendanceLocation;
     note?: string;
+    password?: string;
     selfieUrl?: string;
     userId?: string;
-  }) => { ok: boolean; message?: string };
+  }) => Promise<{ ok: boolean; message?: string }>;
   saveAttendanceRecord: (payload: {
     businessDate?: string;
     clockInAt: string;
@@ -808,12 +810,12 @@ interface AppContextValue {
     paidHours?: number;
     scheduledHours?: number;
     userId: string;
-  }) => { ok: boolean; message?: string };
+  }) => Promise<{ ok: boolean; message?: string }>;
   savePayrollRate: (payload: {
     defaultDailyHours: number;
     hourlyRate: number;
     userId: string;
-  }) => { ok: boolean; message?: string };
+  }) => Promise<{ ok: boolean; message?: string }>;
   startShift: (payload: { openingCash: number }) => Promise<{ ok: boolean; message?: string }>;
   forceCloseShiftAndStart: (payload: {
     adminPassword: string;
@@ -854,6 +856,16 @@ function mergeSettingsByShop(storedSettings: DemoAppState["settingsByShop"] | un
         ...(storedBundle?.pos ?? {}),
         autoDayRolloverEnabled:
           storedBundle?.pos?.autoDayRolloverEnabled ?? defaultBundle?.pos?.autoDayRolloverEnabled ?? false,
+        attendanceEnabled:
+          storedBundle?.pos?.attendanceEnabled ?? defaultBundle?.pos?.attendanceEnabled ?? true,
+        attendanceAllowQrLink:
+          storedBundle?.pos?.attendanceAllowQrLink ?? defaultBundle?.pos?.attendanceAllowQrLink ?? true,
+        attendanceRequireLocation:
+          storedBundle?.pos?.attendanceRequireLocation ??
+          defaultBundle?.pos?.attendanceRequireLocation ??
+          true,
+        attendanceRequireSelfie:
+          storedBundle?.pos?.attendanceRequireSelfie ?? defaultBundle?.pos?.attendanceRequireSelfie ?? false,
         rolePermissions:
           storedBundle?.pos?.rolePermissions ?? defaultBundle?.pos?.rolePermissions ?? {
             shop_admin: ["billing", "customers", "products", "inventory", "bills", "refunds", "reports", "settings", "backup"],
@@ -1938,6 +1950,41 @@ export function AppProvider({
       return;
     }
 
+    let active = true;
+
+    const hydratePublicBrand = async () => {
+      try {
+        const response = await fetch("/api/brand", { cache: "no-store" });
+        const payload = (await response.json()) as { brand?: DemoAppState["brand"] | null; ok?: boolean };
+
+        if (!active || !response.ok || !payload.brand) {
+          return;
+        }
+
+        setState((current) => ({
+          ...current,
+          brand: {
+            ...current.brand,
+            ...payload.brand
+          }
+        }));
+      } catch {
+        // Public branding must never block login when the network is temporarily unavailable.
+      }
+    };
+
+    void hydratePublicBrand();
+
+    return () => {
+      active = false;
+    };
+  }, [isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated || typeof window === "undefined") {
+      return;
+    }
+
     const localStateRaw = JSON.stringify(state);
     lastLocalStateRaw.current = localStateRaw;
     window.localStorage.setItem(STORAGE_KEY, localStateRaw);
@@ -2949,15 +2996,22 @@ export function AppProvider({
       },
       logout: () => {
         if (typeof window !== "undefined") {
-          void fetch("/api/auth/shop-login", { method: "DELETE" }).catch(() => undefined);
+          void fetch("/api/auth/shop-login", { keepalive: true, method: "DELETE" }).catch(() => undefined);
         }
 
-        setState((current) => ({
-          ...current,
+        const loggedOutState = {
+          ...state,
           session: null
-        }));
+        };
+
+        setState(loggedOutState);
+
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(loggedOutState));
+          window.location.replace("/login");
+        }
       },
-      logoutStoreDevice: ({ shopId, browserInfo, adminPassword }) => {
+      logoutStoreDevice: async ({ shopId, browserInfo, adminPassword }) => {
         const normalizedPassword = adminPassword.trim();
         const normalizedBrowserInfo = browserInfo.trim() || getCurrentBrowserInfo();
 
@@ -2971,7 +3025,7 @@ export function AppProvider({
           return { ok: false, message: "Store not found." };
         }
 
-        const admin = state.users.find(
+        const localAdmin = state.users.find(
           (user) =>
             user.shopId === shopId &&
             user.role === "shop_admin" &&
@@ -2979,8 +3033,36 @@ export function AppProvider({
             user.passwordHash === hashSecret(normalizedPassword)
         );
 
-        if (!admin) {
+        let verifiedAdminId = localAdmin?.id;
+        let cloudMessage: string | undefined;
+
+        if (!shouldUseSharedStateEndpoint()) {
+          try {
+            const response = await fetch("/api/activation", {
+              body: JSON.stringify({ adminPassword: normalizedPassword }),
+              headers: { "Content-Type": "application/json" },
+              method: "DELETE"
+            });
+            const payload = await parseJsonPayload<{ adminUserId?: string; message?: string; ok?: boolean }>(
+              await response.text(),
+              { ok: response.ok }
+            );
+
+            if (!response.ok || !payload.ok) {
+              return { ok: false, message: payload.message ?? "Could not log out this store." };
+            }
+
+            verifiedAdminId = payload.adminUserId ?? verifiedAdminId;
+            cloudMessage = payload.message;
+          } catch {
+            return { ok: false, message: "Could not reach the secure store logout service. Please try again." };
+          }
+        } else if (!localAdmin) {
           return { ok: false, message: "Admin password is incorrect." };
+        }
+
+        if (!verifiedAdminId) {
+          return { ok: false, message: "Unable to verify an active store admin." };
         }
 
         const productKeyIds = new Set(
@@ -3014,7 +3096,7 @@ export function AppProvider({
             {
               id: createId("audit"),
               shopId,
-              actorId: admin.id,
+              actorId: verifiedAdminId,
               action: "shop.device.logout",
               targetId: removedActivations[0]?.id,
               detail: `Store ${shop.name} was logged out from this browser after admin confirmation.`,
@@ -3025,10 +3107,19 @@ export function AppProvider({
         }));
 
         if (typeof window !== "undefined") {
-          void fetch("/api/activation", { method: "DELETE" }).catch(() => undefined);
+          if (shouldUseSharedStateEndpoint()) {
+            void fetch("/api/activation", {
+              body: JSON.stringify({ adminPassword: normalizedPassword }),
+              headers: { "Content-Type": "application/json" },
+              method: "DELETE"
+            }).catch(() => undefined);
+          }
         }
 
-        return { ok: true, message: "Store logged out from this device. Activation is required before the next sign-in." };
+        return {
+          ok: true,
+          message: cloudMessage ?? "Store logged out from this device. Activation is required before the next sign-in."
+        };
       },
       setBrandProfile: (payload) => {
         setState((current) => {
@@ -4989,7 +5080,7 @@ export function AppProvider({
           message: "Unable to save customer."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const normalizedName = name.trim();
           const normalizedPhone = phone?.trim() || undefined;
           const normalizedEmail = email?.trim() || undefined;
@@ -5076,7 +5167,7 @@ export function AppProvider({
               ...current.customers
             ]
           };
-        });
+        }));
 
         return result;
       },
@@ -6706,13 +6797,42 @@ export function AppProvider({
 
         return result;
       },
-      autoCloseAndStartNextBusinessDay: (payload) => {
+      autoCloseAndStartNextBusinessDay: async (payload) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
         }
 
         if (session.role !== "shop_admin") {
           return { ok: false, message: "Only the shop admin can auto close and roll over the business day." };
+        }
+
+        const attendanceBusinessDate = getActiveBusinessDay(state.businessDays, currentShopId)?.businessDate;
+
+        if (!attendanceBusinessDate) {
+          return { ok: false, message: "Start the business day before using auto rollover." };
+        }
+
+        if (!shouldUseSharedStateEndpoint()) {
+          try {
+            const response = await fetch("/api/attendance/records", {
+              body: JSON.stringify({ action: "close_day", businessDate: attendanceBusinessDate }),
+              headers: { "content-type": "application/json" },
+              method: "POST"
+            });
+            const payload = (await response.json()) as { message?: string; ok?: boolean };
+
+            if (!response.ok || !payload.ok) {
+              return {
+                ok: false,
+                message: payload.message ?? "Unable to close employee attendance before day rollover."
+              };
+            }
+          } catch {
+            return {
+              ok: false,
+              message: "Attendance could not reach the cloud. The business day was not rolled over."
+            };
+          }
         }
 
         let result: { ok: boolean; message?: string } = {
@@ -6859,7 +6979,7 @@ export function AppProvider({
 
         return result;
       },
-      clockIn: (payload = {}) => {
+      clockIn: async (payload = {}) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
         }
@@ -6875,8 +6995,55 @@ export function AppProvider({
           return { ok: false, message: "Only the shop admin can bypass clock-in verification." };
         }
 
-        if (source !== "admin_bypass" && (!payload.location || !payload.selfieUrl)) {
-          return { ok: false, message: "Capture location and selfie before clocking in." };
+        const requireLocation = currentSettings?.pos.attendanceRequireLocation ?? true;
+        const requireSelfie = currentSettings?.pos.attendanceRequireSelfie ?? false;
+
+        if (source !== "admin_bypass" && requireLocation && !payload.location) {
+          return { ok: false, message: "Capture location before clocking in." };
+        }
+
+        if (source !== "admin_bypass" && requireSelfie && !payload.selfieUrl) {
+          return { ok: false, message: "Capture a selfie before clocking in." };
+        }
+
+        if (!shouldUseSharedStateEndpoint() && source === "admin_bypass") {
+          try {
+            const response = await fetch("/api/attendance/records", {
+              body: JSON.stringify({
+                action: "clock_in",
+                note: payload.note,
+                source,
+                userId: targetUserId
+              }),
+              headers: { "content-type": "application/json" },
+              method: "POST"
+            });
+            const cloudResult = (await response.json()) as {
+              message?: string;
+              ok?: boolean;
+              record?: AttendanceRecord;
+            };
+
+            if (!response.ok || !cloudResult.ok || !cloudResult.record) {
+              return { ok: false, message: cloudResult.message ?? "Unable to clock in." };
+            }
+
+            setState((current) => ({
+              ...current,
+              attendanceRecords: [
+                cloudResult.record!,
+                ...current.attendanceRecords.filter((record) => record.id !== cloudResult.record!.id)
+              ]
+            }));
+
+            return {
+              ok: true,
+              attendanceId: cloudResult.record.id,
+              message: cloudResult.message
+            };
+          } catch {
+            return { ok: false, message: "Unable to reach attendance service." };
+          }
         }
 
         let result: { ok: boolean; message?: string; attendanceId?: string } = {
@@ -6884,7 +7051,7 @@ export function AppProvider({
           message: "Unable to clock in."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const openDay = getActiveBusinessDay(current.businessDays, currentShopId);
 
           if (!openDay) {
@@ -6959,11 +7126,11 @@ export function AppProvider({
                   ]
                 : current.auditLogs
           };
-        });
+        }));
 
         return result;
       },
-      clockOut: (payload = {}) => {
+      clockOut: async (payload = {}) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
         }
@@ -6974,9 +7141,64 @@ export function AppProvider({
           return { ok: false, message: "Only the shop admin can clock out another employee." };
         }
 
+        if (targetUserId === session.id && !payload.password?.trim()) {
+          return { ok: false, message: "Enter your password to confirm clock-out." };
+        }
+
+        if (!shouldUseSharedStateEndpoint()) {
+          try {
+            const response = await fetch("/api/attendance/records", {
+              body: JSON.stringify({
+                action: "clock_out",
+                note: payload.note,
+                password: payload.password,
+                userId: targetUserId
+              }),
+              headers: { "content-type": "application/json" },
+              method: "POST"
+            });
+            const cloudResult = (await response.json()) as {
+              message?: string;
+              ok?: boolean;
+              record?: AttendanceRecord;
+            };
+
+            if (!response.ok || !cloudResult.ok || !cloudResult.record) {
+              return { ok: false, message: cloudResult.message ?? "Unable to clock out." };
+            }
+
+            setState((current) => ({
+              ...current,
+              attendanceRecords: current.attendanceRecords.some((record) => record.id === cloudResult.record!.id)
+                ? current.attendanceRecords.map((record) =>
+                    record.id === cloudResult.record!.id ? cloudResult.record! : record
+                  )
+                : [cloudResult.record!, ...current.attendanceRecords]
+            }));
+
+            return { ok: true, message: cloudResult.message };
+          } catch {
+            return { ok: false, message: "Unable to reach attendance service." };
+          }
+        }
+
         let result: { ok: boolean; message?: string } = { ok: false, message: "Unable to clock out." };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
+          const employee = current.users.find(
+            (user) => user.id === targetUserId && user.shopId === currentShopId && user.isActive
+          );
+
+          if (!employee) {
+            result = { ok: false, message: "Employee not found or inactive." };
+            return current;
+          }
+
+          if (targetUserId === session.id && employee.passwordHash !== hashSecret(payload.password?.trim() ?? "")) {
+            result = { ok: false, message: "Password is incorrect." };
+            return current;
+          }
+
           const openDay = getActiveBusinessDay(current.businessDays, currentShopId);
           const activeAttendance = current.attendanceRecords.find(
             (record) =>
@@ -7031,11 +7253,11 @@ export function AppProvider({
                   ]
                 : current.auditLogs
           };
-        });
+        }));
 
         return result;
       },
-      saveAttendanceRecord: (payload) => {
+      saveAttendanceRecord: async (payload) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
         }
@@ -7044,9 +7266,45 @@ export function AppProvider({
           return { ok: false, message: "Only the shop admin can adjust attendance." };
         }
 
+        if (!payload.note?.trim()) {
+          return { ok: false, message: "Enter a reason for this attendance adjustment." };
+        }
+
+        if (!shouldUseSharedStateEndpoint()) {
+          try {
+            const response = await fetch("/api/attendance/records", {
+              body: JSON.stringify({ action: "save_adjustment", ...payload }),
+              headers: { "content-type": "application/json" },
+              method: "POST"
+            });
+            const cloudResult = (await response.json()) as {
+              message?: string;
+              ok?: boolean;
+              record?: AttendanceRecord;
+            };
+
+            if (!response.ok || !cloudResult.ok || !cloudResult.record) {
+              return { ok: false, message: cloudResult.message ?? "Unable to save attendance." };
+            }
+
+            setState((current) => ({
+              ...current,
+              attendanceRecords: current.attendanceRecords.some((record) => record.id === cloudResult.record!.id)
+                ? current.attendanceRecords.map((record) =>
+                    record.id === cloudResult.record!.id ? cloudResult.record! : record
+                  )
+                : [cloudResult.record!, ...current.attendanceRecords]
+            }));
+
+            return { ok: true, message: cloudResult.message ?? "Attendance adjustment saved." };
+          } catch {
+            return { ok: false, message: "Unable to reach attendance service." };
+          }
+        }
+
         let result: { ok: boolean; message?: string } = { ok: false, message: "Unable to save attendance." };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const employee = current.users.find(
             (user) => user.id === payload.userId && user.shopId === currentShopId && user.isActive
           );
@@ -7105,11 +7363,11 @@ export function AppProvider({
               ...current.auditLogs
             ]
           };
-        });
+        }));
 
         return result;
       },
-      savePayrollRate: ({ userId, hourlyRate, defaultDailyHours }) => {
+      savePayrollRate: async ({ userId, hourlyRate, defaultDailyHours }) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
         }
@@ -7122,9 +7380,41 @@ export function AppProvider({
           return { ok: false, message: "Enter valid salary and default hours." };
         }
 
+        if (!shouldUseSharedStateEndpoint()) {
+          try {
+            const response = await fetch("/api/attendance/records", {
+              body: JSON.stringify({ action: "save_payroll_rate", defaultDailyHours, hourlyRate, userId }),
+              headers: { "content-type": "application/json" },
+              method: "POST"
+            });
+            const cloudResult = (await response.json()) as {
+              message?: string;
+              ok?: boolean;
+              rate?: DemoAppState["payrollRates"][number];
+            };
+
+            if (!response.ok || !cloudResult.ok || !cloudResult.rate) {
+              return { ok: false, message: cloudResult.message ?? "Unable to save payroll rate." };
+            }
+
+            setState((current) => ({
+              ...current,
+              payrollRates: current.payrollRates.some((rate) => rate.id === cloudResult.rate!.id)
+                ? current.payrollRates.map((rate) => (rate.id === cloudResult.rate!.id ? cloudResult.rate! : rate))
+                : [cloudResult.rate!, ...current.payrollRates.filter((rate) =>
+                    !(rate.shopId === cloudResult.rate!.shopId && rate.userId === cloudResult.rate!.userId)
+                  )]
+            }));
+
+            return { ok: true, message: cloudResult.message ?? "Payroll rate saved." };
+          } catch {
+            return { ok: false, message: "Unable to reach payroll service." };
+          }
+        }
+
         let result: { ok: boolean; message?: string } = { ok: false, message: "Unable to save payroll rate." };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const employee = current.users.find((user) => user.id === userId && user.shopId === currentShopId);
 
           if (!employee) {
@@ -7153,7 +7443,7 @@ export function AppProvider({
               ? current.payrollRates.map((rate) => (rate.id === existing.id ? nextRate : rate))
               : [nextRate, ...current.payrollRates]
           };
-        });
+        }));
 
         return result;
       },
@@ -7613,7 +7903,7 @@ export function AppProvider({
           message: "Unable to create bill."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const accessBlock = getShopAccessBlock(current, currentShopId);
 
           if (accessBlock) {
@@ -7940,7 +8230,7 @@ export function AppProvider({
               };
             })
           };
-        });
+        }));
 
         return result;
       },
@@ -8080,7 +8370,7 @@ export function AppProvider({
           message: "Unable to create the refund."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const accessBlock = getShopAccessBlock(current, currentShopId);
 
           if (accessBlock) {
@@ -8340,7 +8630,7 @@ export function AppProvider({
                 : entry
             )
           };
-        });
+        }));
 
         return result;
       },

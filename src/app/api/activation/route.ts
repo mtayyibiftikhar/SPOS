@@ -1,3 +1,4 @@
+import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { hashProductKey } from "@/lib/cloud-sync";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
@@ -17,6 +18,26 @@ type ActivationRequest = {
   deviceFingerprint?: string;
   productKey?: string;
 };
+
+type StoreLogoutRequest = {
+  adminPassword?: string;
+};
+
+function createSupabaseAuthClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !anonKey) {
+    throw new Error("Supabase auth environment variables are not configured.");
+  }
+
+  return createClient(url, anonKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  });
+}
 
 function resolveEffectiveLicenseStatus(license: {
   auto_lock_days_after_expiry?: number | null;
@@ -376,20 +397,109 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const response = NextResponse.json({ ok: true });
   const session = readShopDeviceSession(request);
 
-  if (session) {
+  if (!session) {
+    return NextResponse.json(
+      { ok: false, message: "This browser does not have an active store device session." },
+      { status: 401 }
+    );
+  }
+
+  let body: StoreLogoutRequest;
+
+  try {
+    body = (await request.json()) as StoreLogoutRequest;
+  } catch {
+    return NextResponse.json({ ok: false, message: "Admin password is required." }, { status: 400 });
+  }
+
+  const adminPassword = body.adminPassword?.trim();
+
+  if (!adminPassword) {
+    return NextResponse.json({ ok: false, message: "Admin password is required." }, { status: 400 });
+  }
+
+  const rateLimit = await consumeRateLimit(request, {
+    blockSeconds: 900,
+    identifier: session.shopId,
+    limit: 10,
+    scope: "store_device_logout",
+    windowSeconds: 900
+  });
+
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { ok: false, message: "Too many logout attempts. Please wait and try again." },
+      { headers: { "Retry-After": String(rateLimit.retryAfterSeconds) }, status: 429 }
+    );
+  }
+
+  try {
     const supabase = createSupabaseAdminClient();
-    await supabase
+    const { data: admins, error: adminError } = await supabase
+      .from("profiles")
+      .select("id, email")
+      .eq("shop_id", session.shopId)
+      .eq("role", "shop_admin")
+      .eq("is_active", true);
+
+    if (adminError) {
+      throw adminError;
+    }
+
+    let verifiedAdmin: { email: string; id: string } | null = null;
+
+    for (const admin of admins ?? []) {
+      const authClient = createSupabaseAuthClient();
+      const { data, error } = await authClient.auth.signInWithPassword({
+        email: admin.email,
+        password: adminPassword
+      });
+
+      if (!error && data.user?.id === admin.id) {
+        verifiedAdmin = admin;
+        break;
+      }
+    }
+
+    if (!verifiedAdmin) {
+      return NextResponse.json({ ok: false, message: "Admin password is incorrect." }, { status: 401 });
+    }
+
+    const { data: removedActivation, error: deleteError } = await supabase
       .from("device_activations")
       .delete()
       .eq("shop_id", session.shopId)
       .eq("product_key_id", session.productKeyId)
-      .eq("device_fingerprint", session.deviceFingerprint);
-  }
+      .eq("device_fingerprint", session.deviceFingerprint)
+      .select("id")
+      .maybeSingle();
 
-  response.cookies.set(SHOP_DEVICE_SESSION_COOKIE, "", shopSessionCookieOptions(0));
-  response.cookies.set(SHOP_USER_SESSION_COOKIE, "", shopSessionCookieOptions(0));
-  return response;
+    if (deleteError) {
+      throw deleteError;
+    }
+
+    await supabase.from("audit_logs").insert({
+      action: "shop.device.logout",
+      actor_id: verifiedAdmin.id,
+      detail: "Store activation was removed from this browser after admin confirmation.",
+      shop_id: session.shopId,
+      target_id: removedActivation?.id ?? session.productKeyId
+    });
+
+    const response = NextResponse.json({
+      ok: true,
+      adminUserId: verifiedAdmin.id,
+      message: "Store logged out from this device. Activation is required before the next sign-in."
+    });
+    response.cookies.set(SHOP_DEVICE_SESSION_COOKIE, "", shopSessionCookieOptions(0));
+    response.cookies.set(SHOP_USER_SESSION_COOKIE, "", shopSessionCookieOptions(0));
+    return response;
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, message: error instanceof Error ? error.message : "Unable to log out this store." },
+      { status: 500 }
+    );
+  }
 }

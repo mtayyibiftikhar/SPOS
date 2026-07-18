@@ -1290,12 +1290,24 @@ export function BillingWorkspace() {
     return (
       <div
         key={product.id}
+        aria-disabled={stockBlocked}
         className={cn(
-          "group grid w-full grid-cols-[64px_minmax(0,1fr)] gap-3 rounded-[22px] border border-slate-200 bg-white p-3 text-left shadow-[0_12px_26px_rgba(15,23,42,0.05)] transition sm:grid-cols-[72px_minmax(0,1fr)_auto] sm:items-center",
+          "group grid w-full grid-cols-[64px_minmax(0,1fr)] gap-3 rounded-[22px] border border-slate-200 bg-white p-3 text-left shadow-[0_12px_26px_rgba(15,23,42,0.05)] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 sm:grid-cols-[72px_minmax(0,1fr)]",
           stockBlocked
             ? "opacity-70"
-            : "hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_16px_34px_rgba(15,23,42,0.08)]"
+            : "cursor-pointer hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-[0_16px_34px_rgba(15,23,42,0.08)]"
         )}
+        onClick={() => {
+          if (!stockBlocked) addProductToCart(product);
+        }}
+        onKeyDown={(event) => {
+          if (!stockBlocked && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
+            addProductToCart(product);
+          }
+        }}
+        role="button"
+        tabIndex={stockBlocked ? -1 : 0}
       >
         <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-[18px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.18),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)] sm:h-[72px] sm:w-[72px]">
           {product.imageUrl ? (
@@ -1326,12 +1338,16 @@ export function BillingWorkspace() {
           </p>
         </div>
 
-        <div className="col-span-2 flex justify-end sm:col-span-1">
+        <div className="col-span-2 flex items-center justify-between border-t border-slate-100 pt-2">
+          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-700">
+            {quantityInCart > 0 ? `${quantityInCart} ×` : t("common.add")}
+          </p>
           {quantityInCart > 0 ? (
             <div className="inline-flex h-10 min-w-[128px] items-center justify-between rounded-full border border-emerald-200 bg-emerald-50 px-1.5 shadow-inner shadow-emerald-100/60">
               <button
                 className="inline-flex h-8 w-8 items-center justify-center rounded-full text-emerald-700 transition hover:bg-white"
-                onClick={() => {
+                onClick={(event) => {
+                  event.stopPropagation();
                   updateLineQuantity(product.id, quantityInCart - 1);
                 }}
                 type="button"
@@ -1344,7 +1360,10 @@ export function BillingWorkspace() {
               <button
                 className="inline-flex h-8 w-8 items-center justify-center rounded-full text-emerald-700 transition hover:bg-white disabled:opacity-40"
                 disabled={stockBlocked}
-                onClick={() => addProductToCart(product)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  addProductToCart(product);
+                }}
                 type="button"
               >
                 <Plus className="h-4 w-4" />
@@ -1354,7 +1373,10 @@ export function BillingWorkspace() {
             <Button
               className="h-10 min-w-[108px] rounded-full bg-emerald-600 px-4 text-sm font-semibold text-white shadow-[0_10px_20px_rgba(5,150,105,0.2)] hover:bg-emerald-700"
               disabled={stockBlocked}
-              onClick={() => addProductToCart(product)}
+              onClick={(event) => {
+                event.stopPropagation();
+                addProductToCart(product);
+              }}
             >
               <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                 <Plus className="h-4 w-4" />
@@ -1408,11 +1430,13 @@ export function BillingWorkspace() {
       <Card className="rounded-[28px] border-white/70 bg-white/92 px-4 py-3 shadow-[0_18px_44px_rgba(15,23,42,0.06)]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-            <Link
+            <button
               aria-label={t("nav.dashboard")}
               className="group inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] border border-slate-200 bg-white text-slate-700 shadow-[0_10px_24px_rgba(15,23,42,0.07)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
-              href="/dashboard"
+              data-testid="billing-dashboard-back"
+              onClick={() => router.replace("/dashboard")}
               title={t("nav.dashboard")}
+              type="button"
             >
               <ArrowLeft
                 className={cn(
@@ -1420,7 +1444,7 @@ export function BillingWorkspace() {
                   locale !== "en" && "rotate-180 group-hover:translate-x-0.5"
                 )}
               />
-            </Link>
+            </button>
             <h1 className="font-display text-[1.9rem] font-semibold tracking-[-0.05em] text-slate-950">
               {t("nav.billing")}
             </h1>
@@ -1733,7 +1757,7 @@ export function BillingWorkspace() {
           <div className="min-h-0 overflow-y-auto px-4 py-4">
             {showQuickSearchProducts ? (
               quickSearchProducts.length > 0 ? (
-                <div className="space-y-2.5">{quickSearchProducts.map((product) => renderQuickProductCard(product))}</div>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">{quickSearchProducts.map((product) => renderQuickProductCard(product))}</div>
               ) : (
                 <EmptyState label={t("billing.quickNoResults")} />
               )
@@ -1779,7 +1803,7 @@ export function BillingWorkspace() {
               )
             ) : quickCategories.length > 0 && selectedQuickCategory ? (
               selectedQuickProducts.length > 0 ? (
-                <div className="space-y-2.5">{selectedQuickProducts.map((product) => renderQuickProductCard(product))}</div>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">{selectedQuickProducts.map((product) => renderQuickProductCard(product))}</div>
               ) : (
                 <EmptyState label={t("billing.quickCategoryEmpty")} />
               )

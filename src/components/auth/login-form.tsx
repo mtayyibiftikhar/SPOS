@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Globe2, KeyRound, LockKeyhole, LogOut, Mail, Phone, Quote, ShieldCheck, Store } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
@@ -112,7 +112,8 @@ export function LoginForm() {
   const [storeLogoutOpen, setStoreLogoutOpen] = useState(false);
   const [storeLogoutPassword, setStoreLogoutPassword] = useState("");
   const [storeLogoutMessage, setStoreLogoutMessage] = useState<string | null>(null);
-  const hasLoadedPublicBrand = useRef(false);
+  const [isStoreLogoutPending, setIsStoreLogoutPending] = useState(false);
+  const [failedHeroImages, setFailedHeroImages] = useState<string[]>([]);
 
   useEffect(() => {
     setMode(getPortalMode());
@@ -120,34 +121,6 @@ export function LoginForm() {
     setQuoteIndex(Math.floor(Math.random() * Math.max(1, state.brand.loginQuotes.length)));
     setHeroImageIndex(Math.floor(Math.random() * Math.max(1, state.brand.loginHeroImages?.length ?? 0)));
   }, [state.brand.loginHeroImages?.length, state.brand.loginQuotes.length]);
-
-  useEffect(() => {
-    if (hasLoadedPublicBrand.current) {
-      return;
-    }
-
-    hasLoadedPublicBrand.current = true;
-    let active = true;
-
-    const loadPublicBrand = async () => {
-      try {
-        const response = await fetch("/api/brand", { cache: "no-store" });
-        const payload = (await response.json()) as { brand?: DemoAppState["brand"] | null; ok: boolean };
-
-        if (active && payload.ok && payload.brand) {
-          mergeCloudActivationState({ brand: payload.brand });
-        }
-      } catch {
-        // Branding is cosmetic; the login must keep working even if this fetch is offline.
-      }
-    };
-
-    void loadPublicBrand();
-
-    return () => {
-      active = false;
-    };
-  }, [mergeCloudActivationState]);
 
   const activatedProductKey = useMemo(() => {
     const activatedDevice = state.deviceActivations
@@ -193,10 +166,12 @@ export function LoginForm() {
   const shopLogo = activatedSettings?.pos.logoUrl;
   const visibleQuotes = state.brand.loginQuotes.filter((quote) => quote.trim());
   const visibleQuote = visibleQuotes[quoteIndex % Math.max(visibleQuotes.length, 1)] ?? "Fast billing. Clean records. Confident closing.";
-  const visibleHeroImages = (state.brand.loginHeroImages ?? []).filter((imageUrl) => imageUrl.trim());
+  const visibleHeroImages = (state.brand.loginHeroImages ?? []).filter(
+    (imageUrl) => imageUrl.trim() && !failedHeroImages.includes(imageUrl)
+  );
   const heroImage =
     visibleHeroImages[heroImageIndex % Math.max(visibleHeroImages.length, 1)] ??
-    state.brand.logoUrl;
+    (state.brand.logoUrl && !failedHeroImages.includes(state.brand.logoUrl) ? state.brand.logoUrl : undefined);
   const brandInitials = state.brand.posName
     .split(/\s+/)
     .map((part) => part[0])
@@ -435,7 +410,7 @@ export function LoginForm() {
     setIsPending(false);
   };
 
-  const handleStoreLogout = (event: FormEvent<HTMLFormElement>) => {
+  const handleStoreLogout = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setStoreLogoutMessage(null);
 
@@ -444,11 +419,13 @@ export function LoginForm() {
       return;
     }
 
-    const result = logoutStoreDevice({
+    setIsStoreLogoutPending(true);
+    const result = await logoutStoreDevice({
       shopId: activatedShop.id,
       browserInfo: browserInfo || getBrowserInfo(),
       adminPassword: storeLogoutPassword
     });
+    setIsStoreLogoutPending(false);
 
     if (!result.ok) {
       setStoreLogoutMessage(result.message ?? "Could not log out this store.");
@@ -501,6 +478,7 @@ export function LoginForm() {
                   <img
                     alt={state.brand.posName}
                     className="h-[310px] w-full max-w-full scale-[1.02] rounded-[42px] object-cover sm:h-[360px] lg:h-[390px]"
+                    onError={() => setFailedHeroImages((current) => [...new Set([...current, heroImage])])}
                     src={heroImage}
                   />
                 ) : (
@@ -679,8 +657,8 @@ export function LoginForm() {
                         value={storeLogoutPassword}
                         onChange={(event) => setStoreLogoutPassword(event.target.value)}
                       />
-                      <Button type="submit" variant="danger">
-                        Confirm
+                      <Button disabled={isStoreLogoutPending} type="submit" variant="danger">
+                        {isStoreLogoutPending ? "Checking..." : "Confirm"}
                       </Button>
                       <Button
                         onClick={() => {

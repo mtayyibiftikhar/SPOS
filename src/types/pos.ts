@@ -517,6 +517,10 @@ export interface POSSettings {
   vatNumber?: string;
   receiptQrUrl?: string;
   autoDayRolloverEnabled?: boolean;
+  attendanceEnabled?: boolean;
+  attendanceAllowQrLink?: boolean;
+  attendanceRequireLocation?: boolean;
+  attendanceRequireSelfie?: boolean;
   rolePermissions?: Partial<Record<Exclude<UserRole, "super_admin">, RolePermissionKey[]>>;
 }
 

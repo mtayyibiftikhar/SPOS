@@ -471,8 +471,8 @@ export function CashControlPanel() {
     }
   };
 
-  const handleAutoRollover = () => {
-    const result = autoCloseAndStartNextBusinessDay({
+  const handleAutoRollover = async () => {
+    const result = await autoCloseAndStartNextBusinessDay({
       note: dayCloseNote || "Auto rollover from cash control.",
       startShift: true
     });

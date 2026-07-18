@@ -3,24 +3,42 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Camera, CheckCircle2, Clock3, LocateFixed, QrCode, ShieldCheck } from "lucide-react";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
+import { resizeImageFileToDataUrl } from "@/lib/image-upload";
 import { cn, formatBusinessDate, formatDateTime } from "@/lib/utils";
 import { usePosApp } from "@/components/providers/app-provider";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type { AttendanceLocation } from "@/types/pos";
 
-function fileToDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(new Error("Unable to read selfie."));
-    reader.readAsDataURL(file);
+async function readJsonResponse(response: Response) {
+  const text = await response.text();
+
+  try {
+    return JSON.parse(text) as { message?: string; ok?: boolean; scanUrl?: string };
+  } catch {
+    return { ok: false, message: text.trim() || `Attendance service returned HTTP ${response.status}.` };
+  }
+}
+
+async function optimizeSelfie(file: File) {
+  const optimized = await resizeImageFileToDataUrl(file, {
+    maxBytes: 360 * 1024,
+    maxHeight: 720,
+    maxWidth: 720,
+    minQuality: 0.52,
+    outputType: "image/jpeg",
+    quality: 0.78
   });
+  const blob = await fetch(optimized.dataUrl).then((response) => response.blob());
+
+  return {
+    file: new File([blob], `attendance-selfie-${Date.now()}.jpg`, { type: "image/jpeg" }),
+    preview: optimized.dataUrl
+  };
 }
 
 export function AttendanceGate({ children }: { children: React.ReactNode }) {
   const {
-    clockIn,
     currentBusinessDay,
     currentSettings,
     currentShop,
@@ -35,6 +53,16 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
   const [selfieUrl, setSelfieUrl] = useState("");
   const [feedback, setFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [scanUrl, setScanUrl] = useState("");
+  const [isPending, setIsPending] = useState(false);
+  const [bypassActive, setBypassActive] = useState(false);
+  const attendanceEnabled = currentSettings?.pos.attendanceEnabled ?? true;
+  const allowQrLink = currentSettings?.pos.attendanceAllowQrLink ?? true;
+  const requireLocation = currentSettings?.pos.attendanceRequireLocation ?? true;
+  const requireSelfie = currentSettings?.pos.attendanceRequireSelfie ?? false;
+  const bypassKey =
+    currentShopId && session?.id && currentBusinessDay?.businessDate
+      ? `pos-attendance-bypass:${currentShopId}:${session.id}:${currentBusinessDay.businessDate}`
+      : "";
 
   const openAttendance = useMemo(
     () =>
@@ -51,7 +79,18 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
-    if (!currentShopId || !session || !currentBusinessDay || typeof window === "undefined") {
+    setBypassActive(Boolean(bypassKey && window.sessionStorage.getItem(bypassKey) === "1"));
+  }, [bypassKey]);
+
+  useEffect(() => {
+    if (
+      !attendanceEnabled ||
+      openAttendance ||
+      !currentShopId ||
+      !session ||
+      !currentBusinessDay ||
+      typeof window === "undefined"
+    ) {
       return;
     }
 
@@ -63,7 +102,7 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
       method: "POST"
     })
       .then(async (response) => {
-        const payload = (await response.json()) as { message?: string; ok?: boolean; scanUrl?: string };
+        const payload = await readJsonResponse(response);
 
         if (!response.ok || !payload.ok || !payload.scanUrl) {
           throw new Error(payload.message ?? "Unable to create attendance QR.");
@@ -80,9 +119,33 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
     };
-  }, [currentBusinessDay, currentShopId, session]);
+  }, [attendanceEnabled, currentBusinessDay?.businessDate, currentShopId, openAttendance?.id, session?.id]);
 
-  if (!session || session.workspace !== "shop" || !currentBusinessDay || openAttendance) {
+  useEffect(() => {
+    if (!scanUrl || !currentBusinessDay || openAttendance || bypassActive) return;
+
+    const interval = window.setInterval(() => {
+      const query = new URLSearchParams({ businessDate: currentBusinessDay.businessDate });
+
+      void fetch(`/api/attendance/session?${query.toString()}`, { cache: "no-store" })
+        .then((response) => readJsonResponse(response))
+        .then((result) => {
+          if ((result as { clockedIn?: boolean }).clockedIn) window.location.reload();
+        })
+        .catch(() => undefined);
+    }, 2500);
+
+    return () => window.clearInterval(interval);
+  }, [bypassActive, currentBusinessDay, openAttendance, scanUrl]);
+
+  if (
+    !session ||
+    session.workspace !== "shop" ||
+    !attendanceEnabled ||
+    !currentBusinessDay ||
+    openAttendance ||
+    bypassActive
+  ) {
     return <>{children}</>;
   }
 
@@ -122,34 +185,52 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      const dataUrl = await fileToDataUrl(file);
-      setSelfieFile(file);
-      setSelfieUrl(dataUrl);
-      setFeedback({ tone: "success", message: "Selfie captured." });
-    } catch {
-      setFeedback({ tone: "error", message: "Selfie could not be read. Try again." });
+      const optimized = await optimizeSelfie(file);
+      setSelfieFile(optimized.file);
+      setSelfieUrl(optimized.preview);
+      setFeedback({ tone: "success", message: "Selfie captured and optimized." });
+    } catch (error) {
+      setFeedback({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Selfie could not be read. Try again."
+      });
     }
   };
 
   const submitClockIn = async () => {
-    if (!location || !selfieFile || !scanUrl) {
-      setFeedback({ tone: "error", message: "Capture location and selfie before clocking in." });
+    if (requireLocation && !location) {
+      setFeedback({ tone: "error", message: "Capture location before clocking in." });
       return;
     }
+
+    if (requireSelfie && !selfieFile) {
+      setFeedback({ tone: "error", message: "Capture a selfie before clocking in." });
+      return;
+    }
+
+    if (!scanUrl) {
+      setFeedback({ tone: "error", message: "Secure clock-in is still loading. Try again in a moment." });
+      return;
+    }
+
+    setIsPending(true);
+    setFeedback(null);
 
     try {
       const scan = new URL(scanUrl);
       const body = new FormData();
-      body.set("accuracy", String(location.accuracy ?? 0));
+      if (location) {
+        body.set("accuracy", String(location.accuracy ?? 0));
+        body.set("latitude", String(location.latitude));
+        body.set("longitude", String(location.longitude));
+      }
       body.set("businessDate", scan.searchParams.get("businessDate") ?? "");
-      body.set("latitude", String(location.latitude));
-      body.set("longitude", String(location.longitude));
-      body.set("selfie", selfieFile);
+      if (selfieFile) body.set("selfie", selfieFile);
       body.set("shopId", scan.searchParams.get("shopId") ?? "");
       body.set("token", scan.searchParams.get("token") ?? "");
       body.set("userId", scan.searchParams.get("userId") ?? "");
       const response = await fetch("/api/attendance/scan", { body, method: "POST" });
-      const result = (await response.json()) as { message?: string; ok?: boolean };
+      const result = await readJsonResponse(response);
 
       if (!response.ok || !result.ok) {
         setFeedback({ tone: "error", message: result.message ?? "Clock-in failed." });
@@ -158,21 +239,20 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
 
       setFeedback({ tone: "success", message: result.message ?? "Clock-in saved securely." });
       window.setTimeout(() => window.location.reload(), 700);
-    } catch {
-      setFeedback({ tone: "error", message: "Unable to reach the POS. Check the connection and try again." });
+    } catch (error) {
+      setFeedback({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Unable to reach the POS. Check the connection and try again."
+      });
+    } finally {
+      setIsPending(false);
     }
   };
 
   const bypassClockIn = () => {
-    const result = clockIn({
-      note: "Admin bypassed the attendance selfie/location gate.",
-      source: "admin_bypass"
-    });
-
-    setFeedback({
-      tone: result.ok ? "success" : "error",
-      message: result.message ?? (result.ok ? "Admin bypass saved." : "Bypass failed.")
-    });
+    if (!bypassKey) return;
+    window.sessionStorage.setItem(bypassKey, "1");
+    setBypassActive(true);
   };
 
   return (
@@ -189,11 +269,11 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
             </h1>
             <p className="mt-4 max-w-md text-sm leading-6 text-white/76">
               {currentSettings?.pos.shopName ?? currentShop?.name ?? "This store"} is open for{" "}
-              {formatBusinessDate(currentBusinessDay.businessDate, locale)}. Capture location and selfie once for today,
-              then continue billing normally.
+              {formatBusinessDate(currentBusinessDay.businessDate, locale)}. Complete the configured attendance check once,
+              then continue using the POS normally.
             </p>
 
-            <div className="mt-8 rounded-[30px] border border-white/15 bg-white/10 p-5 backdrop-blur">
+            {allowQrLink ? <div className="mt-8 rounded-[30px] border border-white/15 bg-white/10 p-5 backdrop-blur">
               <p className="text-xs font-bold uppercase tracking-[0.24em] text-white/54">Scan QR from staff phone</p>
               <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center">
                 <div className="grid h-44 w-44 shrink-0 place-items-center rounded-[26px] bg-white p-4">
@@ -204,7 +284,11 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
                   <p className="mt-2 break-all text-xs text-white/55">{scanUrl || "Preparing secure clock-in link..."}</p>
                 </div>
               </div>
-            </div>
+            </div> : (
+              <div className="mt-8 rounded-[30px] border border-white/15 bg-white/10 p-5 text-sm leading-6 text-white/75">
+                Staff-phone QR clock-in is disabled. Complete attendance on this POS device.
+              </div>
+            )}
           </div>
 
           <div className="p-7 sm:p-9">
@@ -222,8 +306,8 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
               ) : null}
             </div>
 
-            <div className="mt-8 grid gap-4 sm:grid-cols-2">
-              <button
+            <div className={cn("mt-8 grid gap-4", requireLocation && requireSelfie ? "sm:grid-cols-2" : "grid-cols-1")}>
+              {requireLocation ? <button
                 className={cn(
                   "rounded-[28px] border p-5 text-left transition hover:-translate-y-0.5",
                   location ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white hover:border-emerald-200"
@@ -240,9 +324,9 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
                     ? `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}`
                     : "Required for verified daily attendance."}
                 </p>
-              </button>
+              </button> : null}
 
-              <button
+              {requireSelfie ? <button
                 className={cn(
                   "rounded-[28px] border p-5 text-left transition hover:-translate-y-0.5",
                   selfieUrl ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white hover:border-emerald-200"
@@ -257,7 +341,17 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
                 <p className="mt-2 text-sm leading-5 text-slate-500">
                   {selfieUrl ? "Selfie captured for this clock-in." : "Use the device camera or upload a selfie."}
                 </p>
-              </button>
+              </button> : null}
+
+              {!requireLocation && !requireSelfie ? (
+                <div className="rounded-[28px] border border-emerald-200 bg-emerald-50 p-5">
+                  <span className="inline-flex h-11 w-11 items-center justify-center rounded-[18px] bg-emerald-700 text-white">
+                    <CheckCircle2 className="h-5 w-5" />
+                  </span>
+                  <p className="mt-4 font-semibold text-slate-950">Ready to clock in</p>
+                  <p className="mt-2 text-sm leading-5 text-slate-600">No location or selfie is required by this store.</p>
+                </div>
+              ) : null}
             </div>
 
             <input
@@ -293,8 +387,12 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
             ) : null}
 
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-              <Button className="h-14 flex-1 rounded-[22px] text-base" disabled={!scanUrl || !location || !selfieFile} onClick={() => void submitClockIn()}>
-                Clock in and enter POS
+              <Button
+                className="h-14 flex-1 rounded-[22px] text-base"
+                disabled={isPending}
+                onClick={() => void submitClockIn()}
+              >
+                {isPending ? "Saving clock-in..." : "Clock in and enter POS"}
               </Button>
               {isAdmin ? (
                 <Button className="h-14 rounded-[22px]" onClick={bypassClockIn} variant="secondary">

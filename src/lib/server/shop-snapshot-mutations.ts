@@ -165,6 +165,21 @@ function closeBusinessDayMutation(
       businessDays: (state.businessDays ?? []).map((day) =>
         day.id === openDay.id ? { ...day, endedAt: closedAt } : day
       ),
+      attendanceRecords: (state.attendanceRecords ?? []).map((record) =>
+        record.shopId === context.shopId &&
+        record.businessDate === openDay.businessDate &&
+        !record.clockOutAt
+          ? {
+              ...record,
+              status: "auto_closed" as const,
+              clockOutAt: closedAt,
+              paidHours: record.scheduledHours,
+              note: record.note || "Auto closed at business-day close using scheduled hours.",
+              editedBy: context.userId,
+              editedAt: closedAt
+            }
+          : record
+      ),
       dayCloses: [
         {
           id: createId("day_close"),

@@ -5,16 +5,38 @@ import { useSearchParams } from "next/navigation";
 import { Camera, CheckCircle2, LocateFixed } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { resizeImageFileToDataUrl } from "@/lib/image-upload";
 import { cn, formatBusinessDate } from "@/lib/utils";
 import type { AttendanceLocation } from "@/types/pos";
 
-function fileToDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(new Error("Unable to read selfie."));
-    reader.readAsDataURL(file);
+async function readJsonResponse(response: Response) {
+  const text = await response.text();
+
+  try {
+    return JSON.parse(text) as { message?: string; ok?: boolean };
+  } catch {
+    return {
+      ok: false,
+      message: text.trim() || `Attendance service returned HTTP ${response.status}.`
+    };
+  }
+}
+
+async function optimizeSelfie(file: File) {
+  const optimized = await resizeImageFileToDataUrl(file, {
+    maxBytes: 360 * 1024,
+    maxHeight: 720,
+    maxWidth: 720,
+    minQuality: 0.52,
+    outputType: "image/jpeg",
+    quality: 0.78
   });
+  const blob = await fetch(optimized.dataUrl).then((response) => response.blob());
+
+  return {
+    file: new File([blob], `attendance-selfie-${Date.now()}.jpg`, { type: "image/jpeg" }),
+    preview: optimized.dataUrl
+  };
 }
 
 export function AttendanceScanPage() {
@@ -24,7 +46,12 @@ export function AttendanceScanPage() {
   const [selfieFile, setSelfieFile] = useState<File | null>(null);
   const [selfieUrl, setSelfieUrl] = useState("");
   const [feedback, setFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
-  const [identity, setIdentity] = useState<{ employeeName: string; shopName: string } | null>(null);
+  const [identity, setIdentity] = useState<{
+    employeeName: string;
+    requireLocation: boolean;
+    requireSelfie: boolean;
+    shopName: string;
+  } | null>(null);
   const [isPending, setIsPending] = useState(false);
 
   const shopId = params.get("shopId") ?? "";
@@ -39,10 +66,12 @@ export function AttendanceScanPage() {
 
     void fetch(`/api/attendance/scan?${query.toString()}`, { cache: "no-store" })
       .then(async (response) => {
-        const payload = (await response.json()) as {
+        const payload = (await readJsonResponse(response)) as {
           employeeName?: string;
           message?: string;
           ok?: boolean;
+          requireLocation?: boolean;
+          requireSelfie?: boolean;
           shopName?: string;
         };
 
@@ -50,7 +79,12 @@ export function AttendanceScanPage() {
           throw new Error(payload.message ?? "This attendance link is not available.");
         }
 
-        setIdentity({ employeeName: payload.employeeName, shopName: payload.shopName });
+        setIdentity({
+          employeeName: payload.employeeName,
+          requireLocation: payload.requireLocation ?? true,
+          requireSelfie: payload.requireSelfie ?? false,
+          shopName: payload.shopName
+        });
       })
       .catch((error) => {
         setFeedback({ tone: "error", message: error instanceof Error ? error.message : "Invalid attendance link." });
@@ -88,17 +122,26 @@ export function AttendanceScanPage() {
     }
 
     try {
-      setSelfieFile(file);
-      setSelfieUrl(await fileToDataUrl(file));
-      setFeedback({ tone: "success", message: "Selfie captured." });
-    } catch {
-      setFeedback({ tone: "error", message: "Unable to read selfie. Try again." });
+      const optimized = await optimizeSelfie(file);
+      setSelfieFile(optimized.file);
+      setSelfieUrl(optimized.preview);
+      setFeedback({ tone: "success", message: "Selfie captured and optimized." });
+    } catch (error) {
+      setFeedback({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Unable to read selfie. Try again."
+      });
     }
   };
 
   const submit = async () => {
-    if (!location || !selfieFile) {
-      setFeedback({ tone: "error", message: "Capture location and selfie first." });
+    if (identity?.requireLocation && !location) {
+      setFeedback({ tone: "error", message: "Capture location first." });
+      return;
+    }
+
+    if (identity?.requireSelfie && !selfieFile) {
+      setFeedback({ tone: "error", message: "Capture a selfie first." });
       return;
     }
 
@@ -107,23 +150,30 @@ export function AttendanceScanPage() {
 
     try {
       const body = new FormData();
-      body.set("accuracy", String(location.accuracy ?? 0));
+      if (location) {
+        body.set("accuracy", String(location.accuracy ?? 0));
+        body.set("latitude", String(location.latitude));
+        body.set("longitude", String(location.longitude));
+      }
       body.set("businessDate", businessDate);
-      body.set("latitude", String(location.latitude));
-      body.set("longitude", String(location.longitude));
-      body.set("selfie", selfieFile);
+      if (selfieFile) body.set("selfie", selfieFile);
       body.set("shopId", shopId);
       body.set("token", token);
       body.set("userId", userId);
       const response = await fetch("/api/attendance/scan", { body, method: "POST" });
-      const result = (await response.json()) as { message?: string; ok?: boolean };
+      const result = await readJsonResponse(response);
 
       setFeedback({
         tone: response.ok && result.ok ? "success" : "error",
-        message: result.message ?? (response.ok ? "Clock-in saved." : "Clock-in failed.")
+        message:
+          result.message ??
+          (response.ok ? "Clock-in saved. You can return to the POS." : `Clock-in failed (HTTP ${response.status}).`)
       });
-    } catch {
-      setFeedback({ tone: "error", message: "Unable to reach the POS. Check the connection and try again." });
+    } catch (error) {
+      setFeedback({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Unable to reach the POS. Check the connection and try again."
+      });
     } finally {
       setIsPending(false);
     }
@@ -143,7 +193,7 @@ export function AttendanceScanPage() {
           </div>
 
           <div className="space-y-4 p-6">
-            <button
+            {identity?.requireLocation ? <button
               className={cn(
                 "flex w-full items-center gap-4 rounded-[24px] border p-4 text-left",
                 location ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"
@@ -160,9 +210,9 @@ export function AttendanceScanPage() {
                   {location ? `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}` : "Capture exact clock-in position"}
                 </span>
               </span>
-            </button>
+            </button> : null}
 
-            <button
+            {identity?.requireSelfie ? <button
               className={cn(
                 "flex w-full items-center gap-4 rounded-[24px] border p-4 text-left",
                 selfieUrl ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"
@@ -179,7 +229,19 @@ export function AttendanceScanPage() {
                   {selfieUrl ? "Selfie ready" : "Take a quick attendance selfie"}
                 </span>
               </span>
-            </button>
+            </button> : null}
+
+            {identity && !identity.requireLocation && !identity.requireSelfie ? (
+              <div className="flex items-center gap-4 rounded-[24px] border border-emerald-200 bg-emerald-50 p-4">
+                <span className="grid h-12 w-12 place-items-center rounded-[18px] bg-emerald-700 text-white">
+                  <CheckCircle2 className="h-5 w-5" />
+                </span>
+                <span>
+                  <span className="block font-semibold text-slate-950">Ready</span>
+                  <span className="mt-1 block text-sm text-slate-600">No location or selfie is required.</span>
+                </span>
+              </div>
+            ) : null}
 
             <input
               ref={selfieInputRef}
@@ -205,7 +267,11 @@ export function AttendanceScanPage() {
               </div>
             ) : null}
 
-            <Button className="h-14 w-full rounded-[22px]" disabled={!identity || !location || !selfieFile || isPending} onClick={() => void submit()}>
+            <Button
+              className="h-14 w-full rounded-[22px]"
+              disabled={!identity || isPending}
+              onClick={() => void submit()}
+            >
               {isPending ? "Saving securely..." : "Save clock-in"}
             </Button>
           </div>

@@ -50,11 +50,13 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <aside className="flex h-full flex-col">
-      <div
+      <Link
+        href="/billing"
         className={cn(
-          "rounded-[26px] bg-[radial-gradient(circle_at_16%_16%,rgba(16,185,129,0.16),transparent_34%),linear-gradient(145deg,#070b1a_0%,#102a2b_100%)] text-white shadow-[0_18px_34px_rgba(15,23,42,0.16)]",
+          "block rounded-[26px] bg-[radial-gradient(circle_at_16%_16%,rgba(16,185,129,0.16),transparent_34%),linear-gradient(145deg,#070b1a_0%,#102a2b_100%)] text-white shadow-[0_18px_34px_rgba(15,23,42,0.16)] transition hover:-translate-y-0.5 hover:shadow-[0_22px_42px_rgba(15,23,42,0.2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400",
           isBillingRoute ? "px-3 py-3" : "px-4 py-4"
         )}
+        onClick={onNavigate}
       >
         <div className="flex items-center gap-3">
           <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[18px] bg-white/10 ring-1 ring-white/15">
@@ -78,7 +80,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             </h2>
           </div>
         </div>
-      </div>
+      </Link>
 
       <nav className={cn("mt-5", isBillingRoute ? "space-y-2" : "space-y-2.5")}>
         {mainNavItems.map((item) => {

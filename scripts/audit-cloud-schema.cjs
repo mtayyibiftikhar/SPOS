@@ -54,7 +54,11 @@ const requiredColumnProbes = [
     "id,name,slug,email,phone,address,country,city,plan_name,billing_cycle,package_price,total_paid,last_owner_payment_at,auto_payment_enabled,cancelled_at,license_status,created_at"
   ],
   ["attendance_qr_sessions", "id,user_id,used_at"],
-  ["attendance_records", "id,user_id,clock_in_selfie_url"],
+  [
+    "attendance_records",
+    "id,shop_id,user_id,business_date,clock_in_at,clock_out_at,scheduled_hours,paid_hours,hourly_rate,source,clock_in_latitude,clock_in_longitude,clock_in_selfie_url,note"
+  ],
+  ["payroll_rates", "id,shop_id,user_id,hourly_rate,default_daily_hours,effective_from,updated_at"],
   ["shop_cloud_snapshots", "shop_id,state,revision,updated_at"],
   ["owner_packages", "id,name,billing_cycle,duration_days,price,is_active"],
   ["owner_subscription_payments", "id,shop_id,package_id,amount,status,period_start,period_end"]

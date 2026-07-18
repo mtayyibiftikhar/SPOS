@@ -3,6 +3,7 @@ import { hashAttendanceToken } from "@/lib/server/attendance-token";
 import { optimizePosImage } from "@/lib/server/optimize-pos-image";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { uploadPrivatePosAsset } from "@/lib/supabase/storage-assets";
+import type { DemoAppState } from "@/types/pos";
 
 const MAX_SELFIE_INPUT_BYTES = 5 * 1024 * 1024;
 const MAX_SELFIE_STORED_BYTES = 180 * 1024;
@@ -25,20 +26,37 @@ async function resolveSession(shopId: string, userId: string, businessDate: stri
   if (sessionError) throw sessionError;
   if (!qrSession || qrSession.used_at || new Date(qrSession.expires_at).getTime() <= Date.now()) return null;
 
-  const [{ data: shop, error: shopError }, { data: profile, error: profileError }, { data: license, error: licenseError }] =
+  const [
+    { data: shop, error: shopError },
+    { data: profile, error: profileError },
+    { data: license, error: licenseError },
+    { data: snapshot, error: snapshotError }
+  ] =
     await Promise.all([
       supabase.from("shops").select("id, name").eq("id", shopId).maybeSingle(),
       supabase.from("profiles").select("id, name, is_active").eq("id", userId).eq("shop_id", shopId).maybeSingle(),
-      supabase.from("licenses").select("status, expires_at").eq("shop_id", shopId).maybeSingle()
+      supabase.from("licenses").select("status, expires_at").eq("shop_id", shopId).maybeSingle(),
+      supabase.from("shop_cloud_snapshots").select("state").eq("shop_id", shopId).maybeSingle()
     ]);
 
   if (shopError) throw shopError;
   if (profileError) throw profileError;
   if (licenseError) throw licenseError;
+  if (snapshotError) throw snapshotError;
   if (!shop || !profile?.is_active || !license || ["locked", "expired"].includes(license.status)) return null;
   if (license.expires_at && new Date(license.expires_at).getTime() < Date.now()) return null;
 
-  return { profile, qrSession, shop, supabase };
+  const state = (snapshot?.state ?? {}) as Partial<DemoAppState>;
+  const settings = state.settingsByShop?.[shopId]?.pos;
+
+  return {
+    profile,
+    qrSession,
+    requireLocation: settings?.attendanceRequireLocation ?? true,
+    requireSelfie: settings?.attendanceRequireSelfie ?? false,
+    shop,
+    supabase
+  };
 }
 
 export async function GET(request: Request) {
@@ -56,7 +74,10 @@ export async function GET(request: Request) {
     const resolved = await resolveSession(shopId, userId, businessDate, token);
 
     if (!resolved) {
-      return NextResponse.json({ ok: false, message: "This attendance link is expired or already used." }, { status: 410 });
+      return NextResponse.json(
+        { ok: false, message: "This clock-in link is no longer active. Refresh the POS time-clock screen for a new QR." },
+        { status: 410 }
+      );
     }
 
     return NextResponse.json({
@@ -64,6 +85,8 @@ export async function GET(request: Request) {
       businessDate,
       employeeName: resolved.profile.name,
       expiresAt: resolved.qrSession.expires_at,
+      requireLocation: resolved.requireLocation,
+      requireSelfie: resolved.requireSelfie,
       shopName: resolved.shop.name
     });
   } catch (error) {
@@ -96,19 +119,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "This attendance link is invalid." }, { status: 400 });
   }
 
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) {
-    return NextResponse.json({ ok: false, message: "A valid clock-in location is required." }, { status: 400 });
-  }
-
-  if (!(selfie instanceof File) || !selfie.type.startsWith("image/") || selfie.size > MAX_SELFIE_INPUT_BYTES) {
-    return NextResponse.json({ ok: false, message: "A selfie image up to 5 MB is required." }, { status: 400 });
-  }
-
   try {
     const resolved = await resolveSession(shopId, userId, businessDate, token);
 
     if (!resolved) {
-      return NextResponse.json({ ok: false, message: "This attendance link is expired or already used." }, { status: 410 });
+      return NextResponse.json(
+        { ok: false, message: "This clock-in link is no longer active. Refresh the POS time-clock screen for a new QR." },
+        { status: 410 }
+      );
+    }
+
+    const hasValidLocation =
+      Number.isFinite(latitude) &&
+      Number.isFinite(longitude) &&
+      Math.abs(latitude) <= 90 &&
+      Math.abs(longitude) <= 180;
+    const hasValidSelfie =
+      selfie instanceof File && selfie.type.startsWith("image/") && selfie.size <= MAX_SELFIE_INPUT_BYTES;
+    const selfieFile = hasValidSelfie ? (selfie as File) : null;
+
+    if (resolved.requireLocation && !hasValidLocation) {
+      return NextResponse.json({ ok: false, message: "A valid clock-in location is required." }, { status: 400 });
+    }
+
+    if (resolved.requireSelfie && !hasValidSelfie) {
+      return NextResponse.json({ ok: false, message: "A selfie image up to 5 MB is required." }, { status: 400 });
     }
 
     const { data: existingOpen, error: existingError } = await resolved.supabase
@@ -124,17 +159,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: "This employee is already clocked in." }, { status: 409 });
     }
 
-    const optimized = await optimizePosImage(
-      Buffer.from(await selfie.arrayBuffer()),
-      { width: 640, height: 640 },
-      MAX_SELFIE_STORED_BYTES
-    );
-    const uploaded = await uploadPrivatePosAsset(resolved.supabase, {
-      buffer: optimized.buffer,
-      contentType: optimized.contentType,
-      fileName: `clock-in-${userId}.webp`,
-      folder: `shops/${shopId}/attendance/${businessDate}/${userId}`
-    });
+    const uploaded = selfieFile
+      ? await (async () => {
+          const optimized = await optimizePosImage(
+            Buffer.from(await selfieFile.arrayBuffer()),
+            { width: 640, height: 640 },
+            MAX_SELFIE_STORED_BYTES
+          );
+
+          return uploadPrivatePosAsset(resolved.supabase, {
+            buffer: optimized.buffer,
+            contentType: optimized.contentType,
+            fileName: `clock-in-${userId}.webp`,
+            folder: `shops/${shopId}/attendance/${businessDate}/${userId}`
+          });
+        })()
+      : null;
     const { data: payrollRate } = await resolved.supabase
       .from("payroll_rates")
       .select("hourly_rate, default_daily_hours")
@@ -150,11 +190,11 @@ export async function POST(request: Request) {
       .insert({
         business_date: businessDate,
         clock_in_at: now,
-        clock_in_latitude: latitude,
-        clock_in_longitude: longitude,
-        clock_in_selfie_url: uploaded.url,
+        clock_in_latitude: hasValidLocation ? latitude : null,
+        clock_in_longitude: hasValidLocation ? longitude : null,
+        clock_in_selfie_url: uploaded?.url ?? null,
         hourly_rate: Number(payrollRate?.hourly_rate ?? 0),
-        note: accuracy > 0 ? `Location accuracy: ${Math.round(accuracy)}m` : null,
+        note: hasValidLocation && accuracy > 0 ? `Location accuracy: ${Math.round(accuracy)}m` : null,
         scheduled_hours: Number(payrollRate?.default_daily_hours ?? 8),
         shop_id: shopId,
         source: "qr",

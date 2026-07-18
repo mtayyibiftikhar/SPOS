@@ -422,7 +422,21 @@ test("business day cannot close with an open shift and records totals after shif
   );
   const allShiftsClosed = {
     ...state,
-    shifts: state.shifts?.map((shift) => ({ ...shift, endedAt: "2026-07-14T16:00:00.000Z" }))
+    shifts: state.shifts?.map((shift) => ({ ...shift, endedAt: "2026-07-14T16:00:00.000Z" })),
+    attendanceRecords: [
+      {
+        id: "attendance_open",
+        shopId: SHOP_ID,
+        userId: USER_ID,
+        businessDate: BUSINESS_DATE,
+        status: "open" as const,
+        source: "qr" as const,
+        clockInAt: NOW,
+        scheduledHours: 8,
+        hourlyRate: 12,
+        createdAt: NOW
+      }
+    ]
   };
   const closed = applyCriticalShopMutation(
     allShiftsClosed,
@@ -437,6 +451,10 @@ test("business day cannot close with an open shift and records totals after shif
   assert.equal(closed.state.dayCloses?.[0].expectedCash, 80);
   assert.equal(closed.state.dayCloses?.[0].cashDifference, 0);
   assert.ok(closed.state.businessDays?.[0].endedAt);
+  assert.equal(closed.state.attendanceRecords?.[0].status, "auto_closed");
+  assert.ok(closed.state.attendanceRecords?.[0].clockOutAt);
+  assert.equal(closed.state.attendanceRecords?.[0].paidHours, 8);
+  assert.equal(closed.state.attendanceRecords?.[0].editedBy, ADMIN_ID);
 });
 
 test("refund permissions and payout limits are server enforced", () => {

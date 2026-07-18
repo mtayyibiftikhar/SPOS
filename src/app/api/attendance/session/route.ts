@@ -4,7 +4,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { readShopUserSession } from "@/lib/supabase/shop-session";
 import type { DemoAppState } from "@/types/pos";
 
-const SESSION_TTL_MS = 10 * 60 * 1000;
+const SESSION_TTL_MS = 60 * 60 * 1000;
 
 type SessionRequest = {
   businessDate?: string;
@@ -13,6 +13,44 @@ type SessionRequest = {
 function isBusinessDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
+
+export async function GET(request: Request) {
+  const session = readShopUserSession(request);
+
+  if (!session) {
+    return NextResponse.json({ ok: false, message: "Sign in before checking attendance." }, { status: 401 });
+  }
+
+  const businessDate = new URL(request.url).searchParams.get("businessDate")?.trim() ?? "";
+
+  if (!isBusinessDate(businessDate)) {
+    return NextResponse.json({ ok: false, message: "A valid business date is required." }, { status: 400 });
+  }
+
+  try {
+    const supabase = createSupabaseAdminClient();
+    const { data, error } = await supabase
+      .from("attendance_records")
+      .select("id, clock_in_at")
+      .eq("shop_id", session.shopId)
+      .eq("user_id", session.userId)
+      .eq("business_date", businessDate)
+      .is("clock_out_at", null)
+      .order("clock_in_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    return NextResponse.json({ ok: true, clockedIn: Boolean(data), attendanceId: data?.id ?? null });
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, message: error instanceof Error ? error.message : "Unable to check attendance." },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(request: Request) {
   const session = readShopUserSession(request);
 
@@ -71,7 +109,8 @@ export async function POST(request: Request) {
       .delete()
       .eq("shop_id", session.shopId)
       .eq("user_id", session.userId)
-      .is("used_at", null);
+      .is("used_at", null)
+      .lt("expires_at", now);
 
     const { error: insertError } = await supabase.from("attendance_qr_sessions").insert({
       business_date: businessDate,

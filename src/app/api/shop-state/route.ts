@@ -31,6 +31,52 @@ function isMissingTransactionalSnapshotError(error: { code?: string; message?: s
   );
 }
 
+async function closeOpenAttendanceForBusinessDay(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  shopId: string,
+  businessDate: string,
+  actorId: string
+) {
+  const { data: openRecords, error: recordsError } = await supabase
+    .from("attendance_records")
+    .select("id, scheduled_hours, note")
+    .eq("shop_id", shopId)
+    .eq("business_date", businessDate)
+    .is("clock_out_at", null);
+
+  if (recordsError) throw recordsError;
+  if (!openRecords?.length) return;
+
+  const closedAt = new Date().toISOString();
+  const updates = await Promise.all(
+    openRecords.map((record) =>
+      supabase
+        .from("attendance_records")
+        .update({
+          clock_out_at: closedAt,
+          note: record.note || "Auto closed at business-day close using scheduled hours.",
+          paid_hours: Number(record.scheduled_hours ?? 8),
+          updated_at: closedAt
+        })
+        .eq("id", record.id)
+        .eq("shop_id", shopId)
+    )
+  );
+  const failedUpdate = updates.find((update) => update.error);
+
+  if (failedUpdate?.error) throw failedUpdate.error;
+
+  const { error: auditError } = await supabase.from("audit_logs").insert({
+    action: "attendance.day_close",
+    actor_id: actorId,
+    detail: `${openRecords.length} open attendance record(s) auto closed for ${businessDate}.`,
+    shop_id: shopId,
+    target_id: businessDate
+  });
+
+  if (auditError) throw auditError;
+}
+
 function resolveEffectiveLicenseStatus(license: {
   auto_lock_days_after_expiry?: number | null;
   expires_at?: string | null;
@@ -289,7 +335,19 @@ async function loadOwnerControlledShopState(
                 website: settings?.website ?? shop.website ?? undefined,
                 currency: settings?.currency ?? shop.currency ?? "SAR",
                 vatNumber: settings?.vat_number ?? undefined,
-                autoDayRolloverEnabled: Boolean((currentState.settingsByShop?.[shop.id]?.pos as { autoDayRolloverEnabled?: boolean } | undefined)?.autoDayRolloverEnabled)
+                autoDayRolloverEnabled: Boolean((currentState.settingsByShop?.[shop.id]?.pos as { autoDayRolloverEnabled?: boolean } | undefined)?.autoDayRolloverEnabled),
+                attendanceEnabled:
+                  (currentState.settingsByShop?.[shop.id]?.pos as { attendanceEnabled?: boolean } | undefined)
+                    ?.attendanceEnabled ?? true,
+                attendanceAllowQrLink:
+                  (currentState.settingsByShop?.[shop.id]?.pos as { attendanceAllowQrLink?: boolean } | undefined)
+                    ?.attendanceAllowQrLink ?? true,
+                attendanceRequireLocation:
+                  (currentState.settingsByShop?.[shop.id]?.pos as { attendanceRequireLocation?: boolean } | undefined)
+                    ?.attendanceRequireLocation ?? true,
+                attendanceRequireSelfie:
+                  (currentState.settingsByShop?.[shop.id]?.pos as { attendanceRequireSelfie?: boolean } | undefined)
+                    ?.attendanceRequireSelfie ?? false
               },
               printer:
                 settings?.printer_settings ??
@@ -562,6 +620,10 @@ async function commitCriticalMutation(
   }
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
+    const attendanceBusinessDate =
+      mutation.type === "close_business_day"
+        ? latestState.businessDays?.find((day) => day.shopId === shopId && !day.endedAt)?.businessDate
+        : undefined;
     const mutationResult = applyCriticalShopMutation(latestState, mutation, {
       allowedShiftCount,
       role: authorization.role,
@@ -607,6 +669,15 @@ async function commitCriticalMutation(
       revision = Math.max(0, Number(commit.revision ?? revision));
       latestState = commit.state ?? latestState;
       continue;
+    }
+
+    if (attendanceBusinessDate) {
+      await closeOpenAttendanceForBusinessDay(
+        authorization.supabase,
+        shopId,
+        attendanceBusinessDate,
+        authorization.userId
+      );
     }
 
     return NextResponse.json({

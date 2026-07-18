@@ -32,6 +32,9 @@ _dev/android-build-tools/
 *.err
 *.err.log
 .logs/
+__pycache__/
+output/
+tmp/
 .next-*.log
 .next-*.err.log
 .next-*.err
