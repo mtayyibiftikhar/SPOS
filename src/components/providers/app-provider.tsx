@@ -55,6 +55,7 @@ import {
   findExistingCustomer,
   findCustomerPhoneConflict,
   getBillStatus,
+  isWalkInCustomerName,
   normalizeDiscountValue,
   normalizeCustomer,
   shouldPersistCustomer
@@ -777,6 +778,7 @@ interface AppContextValue {
   createBill: (payload: CheckoutBillInput) => Promise<{ ok: boolean; billId?: string; message?: string }>;
   updateBillCustomerContact: (payload: {
     billId: string;
+    customerId?: string;
     customerName?: string;
     customerPhone?: string;
     customerEmail?: string;
@@ -8255,7 +8257,7 @@ export function AppProvider({
 
         return result;
       },
-      updateBillCustomerContact: ({ billId, customerEmail, customerName, customerPhone, customerWhatsapp }) => {
+      updateBillCustomerContact: ({ billId, customerEmail, customerId, customerName, customerPhone, customerWhatsapp }) => {
         if (!currentShopId || !session) {
           return {
             ok: false,
@@ -8284,17 +8286,35 @@ export function AppProvider({
           const nextEmail = customerEmail !== undefined ? customerEmail.trim() || undefined : bill.customerEmail;
           const nextWhatsapp =
             customerWhatsapp !== undefined ? customerWhatsapp.trim() || undefined : bill.customerWhatsapp;
+          const selectedCustomer = customerId
+            ? current.customers.find((entry) => entry.id === customerId && entry.shopId === currentShopId) ?? null
+            : null;
+          const billCustomer = bill.customerId
+            ? current.customers.find((entry) => entry.id === bill.customerId && entry.shopId === currentShopId) ?? null
+            : null;
+          const resolvedCustomerId =
+            selectedCustomer?.id ??
+            (!isWalkInCustomerName(billCustomer?.name ?? bill.customerName) ? billCustomer?.id : undefined);
           const customerDraft = {
-            id: bill.customerId,
+            id: resolvedCustomerId,
             name: nextName,
             phone: nextPhone,
             email: nextEmail,
             whatsapp: nextWhatsapp
           };
+
+          if (isWalkInCustomerName(nextName)) {
+            result = {
+              ok: false,
+              message: "Select a saved customer or enter the customer's real name before sharing this receipt."
+            };
+            return current;
+          }
+
           const phoneConflict = findCustomerPhoneConflict(
             current.customers,
             currentShopId,
-            bill.customerId,
+            resolvedCustomerId,
             customerDraft.phone
           );
 
@@ -8308,11 +8328,11 @@ export function AppProvider({
 
           const normalizedCustomer = normalizeCustomer(customerDraft);
           let nextCustomers = current.customers;
-          let nextCustomerId = bill.customerId;
+          let nextCustomerId = resolvedCustomerId;
 
           if (shouldPersistCustomer(customerDraft)) {
             const existingCustomer =
-              current.customers.find((entry) => entry.id === bill.customerId && entry.shopId === currentShopId) ??
+              current.customers.find((entry) => entry.id === resolvedCustomerId && entry.shopId === currentShopId) ??
               null;
 
             if (existingCustomer) {

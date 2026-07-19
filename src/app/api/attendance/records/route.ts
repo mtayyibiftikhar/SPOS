@@ -22,6 +22,20 @@ type AttendanceRequest = {
   userId?: string;
 };
 
+const RIYADH_TIME_ZONE = "Asia/Riyadh";
+
+function currentRiyadhDate(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: RIYADH_TIME_ZONE,
+    year: "numeric"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
 function createSupabaseAuthClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -77,6 +91,23 @@ function normalizeAttendanceRecord(record: Record<string, unknown>): AttendanceR
     note: record.note ? String(record.note) : undefined,
     createdAt: record.created_at ? String(record.created_at) : clockInAt
   };
+}
+
+export async function GET(request: Request) {
+  const session = readShopUserSession(request);
+
+  if (!session) {
+    return NextResponse.json({ ok: false, message: "Sign in before reading attendance time." }, { status: 401 });
+  }
+
+  const now = new Date();
+
+  return NextResponse.json({
+    currentDate: currentRiyadhDate(now),
+    currentTime: now.toISOString(),
+    ok: true,
+    timeZone: RIYADH_TIME_ZONE
+  });
 }
 
 export async function POST(request: Request) {
@@ -192,7 +223,7 @@ export async function POST(request: Request) {
       const state = (snapshot?.state ?? {}) as Partial<DemoAppState>;
       const effectiveFrom =
         state.businessDays?.find((day) => day.shopId === session.shopId && !day.endedAt)?.businessDate ??
-        new Date().toISOString().slice(0, 10);
+        currentRiyadhDate();
       const now = new Date().toISOString();
       const { data: savedRate, error: rateError } = await supabase
         .from("payroll_rates")
@@ -249,6 +280,14 @@ export async function POST(request: Request) {
       }
       if (!validDate(body.businessDate) || !clockInAt || !Number.isFinite(Date.parse(clockInAt))) {
         return NextResponse.json({ ok: false, message: "Select a valid work date and clock-in time." }, { status: 400 });
+      }
+      if (body.businessDate! > currentRiyadhDate()) {
+        return NextResponse.json({ ok: false, message: "Future attendance records are not allowed." }, { status: 400 });
+      }
+      const serverNow = Date.now();
+      const futureTolerance = 2 * 60 * 1000;
+      if (Date.parse(clockInAt) > serverNow + futureTolerance || (clockOutAt && Date.parse(clockOutAt) > serverNow + futureTolerance)) {
+        return NextResponse.json({ ok: false, message: "Clock-in and clock-out cannot be in the future." }, { status: 400 });
       }
       if (clockOutAt && (!Number.isFinite(Date.parse(clockOutAt)) || Date.parse(clockOutAt) <= Date.parse(clockInAt))) {
         return NextResponse.json({ ok: false, message: "Clock-out must be after clock-in." }, { status: 400 });

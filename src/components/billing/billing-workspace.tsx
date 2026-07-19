@@ -23,12 +23,14 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PhoneNumberField } from "@/components/ui/phone-number-field";
+import { Select } from "@/components/ui/select";
 import {
   calculateBillTotals,
   calculateDiscountAmount,
   calculatePaidAndDue,
   customerMatchesSearch,
   getLocalizedProductName,
+  isWalkInCustomerName,
   normalizeDiscountValue
 } from "@/lib/billing";
 import { paymentMethodLabelKeys } from "@/lib/i18n";
@@ -287,7 +289,9 @@ export function BillingWorkspace() {
     (product) => product.shopId === currentShopId && product.status === "active"
   );
   const shopCategories = state.categories.filter((category) => category.shopId === currentShopId);
-  const savedCustomers = state.customers.filter((customer) => customer.shopId === currentShopId);
+  const savedCustomers = state.customers.filter(
+    (customer) => customer.shopId === currentShopId && !isWalkInCustomerName(customer.name)
+  );
   const currency = currentShop?.currency ?? "SAR";
   const taxEnabled = currentSettings?.tax.enabled ?? false;
   const taxLabel = currentSettings?.tax.name ?? t("common.tax");
@@ -499,7 +503,9 @@ export function BillingWorkspace() {
   const normalizedCustomerWhatsapp = customerForm.whatsappSameAsPhone
     ? normalizedCustomerPhone
     : combinePhoneNumber(customerForm.whatsappCountryCode, customerForm.whatsappNumber);
-  const accountCustomerReady = Boolean(normalizedCustomerName && normalizedCustomerPhone);
+  const accountCustomerReady = Boolean(
+    !isWalkInCustomerName(normalizedCustomerName) && normalizedCustomerPhone
+  );
   const accountPaymentBlocked = paymentMethod === "account" && !accountCustomerReady;
   const cartHasInvalidPrice = cartProducts.some((line) => line.unitPrice <= 0);
   const blockerMessage = !currentBusinessDay
@@ -1853,6 +1859,26 @@ export function BillingWorkspace() {
                 />
               </div>
 
+              <Select
+                aria-label={t("billing.customerSearchCompact")}
+                className="mt-3 h-11 rounded-[16px] border-slate-200 bg-white text-sm"
+                onChange={(event) => {
+                  const selectedCustomer = savedCustomers.find((customer) => customer.id === event.target.value);
+
+                  if (selectedCustomer) {
+                    selectCustomer(selectedCustomer);
+                  }
+                }}
+                value={customerForm.id ?? ""}
+              >
+                <option value="">{t("billing.customerSearchCompact")}</option>
+                {savedCustomers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.name} - {customer.phone || customer.whatsapp || customer.email || t("common.notAvailable")}
+                  </option>
+                ))}
+              </Select>
+
               {customerSearchHasValue ? (
                 <div
                   aria-live="polite"
@@ -2173,7 +2199,7 @@ export function BillingWorkspace() {
             </div>
           </div>
 
-          <div className="min-h-0 px-4 py-4">
+          <div className="min-h-0 overflow-y-auto px-4 py-4">
             <div className="space-y-2.5 rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4">
               <SummaryRow label={t("common.subtotal")} value={formatCurrency(totals.subtotal, currency, locale)} />
               {totals.itemDiscountAmount > 0 ? (
@@ -2188,13 +2214,70 @@ export function BillingWorkspace() {
               <SummaryRow label={t("common.total")} strong value={formatCurrency(totals.total, currency, locale)} />
             </div>
 
-            <div className="mt-4 rounded-[22px] border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-              {paymentMethod === "account"
-                ? accountPaymentBlocked
-                  ? t("billing.accountCustomerRequired")
-                  : t("billing.accountCustomerHint")
-                : t("billing.paidSaleHint")}
-            </div>
+            {paymentMethod === "account" && accountPaymentBlocked ? (
+              <div className="mt-4 rounded-[22px] border border-amber-200 bg-amber-50 p-4">
+                <p className="text-sm font-semibold text-amber-950">{t("billing.accountCustomerRequired")}</p>
+                <Select
+                  aria-label={t("billing.customerSearchCompact")}
+                  className="mt-3 h-11 rounded-[16px] border-amber-200 bg-white text-sm"
+                  onChange={(event) => {
+                    const selectedCustomer = savedCustomers.find((customer) => customer.id === event.target.value);
+
+                    if (selectedCustomer) {
+                      selectCustomer(selectedCustomer);
+                    }
+                  }}
+                  value={customerForm.id ?? ""}
+                >
+                  <option value="">{t("billing.customerSearchCompact")}</option>
+                  {savedCustomers.map((customer) => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.name} - {customer.phone || customer.whatsapp || customer.email || t("common.notAvailable")}
+                    </option>
+                  ))}
+                </Select>
+                <div className="mt-3 grid gap-3">
+                  <Input
+                    aria-label={t("common.customerName")}
+                    className="h-11 rounded-[16px] border-amber-200 bg-white"
+                    placeholder={t("common.customerName")}
+                    value={customerForm.name}
+                    onChange={(event) =>
+                      setCustomerForm((current) => ({
+                        ...current,
+                        id: undefined,
+                        name: event.target.value
+                      }))
+                    }
+                  />
+                  <PhoneNumberField
+                    countryCode={customerForm.phoneCountryCode}
+                    label={t("common.phone")}
+                    number={customerForm.phoneNumber}
+                    onCountryCodeChange={(value) =>
+                      setCustomerForm((current) => ({
+                        ...current,
+                        id: undefined,
+                        phoneCountryCode: value,
+                        whatsappCountryCode: current.whatsappSameAsPhone ? value : current.whatsappCountryCode
+                      }))
+                    }
+                    onNumberChange={(value) =>
+                      setCustomerForm((current) => ({
+                        ...current,
+                        id: undefined,
+                        phoneNumber: sanitizePhoneDigits(value),
+                        whatsappNumber: current.whatsappSameAsPhone ? sanitizePhoneDigits(value) : current.whatsappNumber
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 rounded-[22px] border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                {paymentMethod === "account" ? t("billing.accountCustomerHint") : t("billing.paidSaleHint")}
+              </div>
+            )}
           </div>
 
           <div className="space-y-3 border-t border-slate-200 px-4 py-4">
@@ -2206,7 +2289,7 @@ export function BillingWorkspace() {
 
             <Button
               className="h-12 w-full rounded-[18px] bg-emerald-600 text-base font-semibold text-white hover:bg-emerald-700"
-              disabled={isSubmitting || accountPaymentBlocked}
+              disabled={isSubmitting}
               onClick={submitBill}
             >
               <span className="inline-flex items-center gap-2">

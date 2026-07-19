@@ -5,6 +5,7 @@ import {
   calculateDiscountAmount,
   calculatePaidAndDue,
   customerMatchesSearch,
+  isWalkInCustomerName,
   normalizeDiscountValue
 } from "../../src/lib/billing";
 import { calculateBusinessDaySummary, calculateShiftSummary } from "../../src/lib/cash-control";
@@ -106,6 +107,13 @@ test("checkout customer search matches local and international phone formats", (
   assert.equal(customerMatchesSearch(checkoutCustomer, "0538113039"), true);
   assert.equal(customerMatchesSearch(checkoutCustomer, "538113039"), true);
   assert.equal(customerMatchesSearch(checkoutCustomer, "+966 538 113 039"), true);
+});
+
+test("generic walk-in labels are never treated as saved customer identities", () => {
+  assert.equal(isWalkInCustomerName(undefined), true);
+  assert.equal(isWalkInCustomerName("Walk-in Customer"), true);
+  assert.equal(isWalkInCustomerName("walk in customer"), true);
+  assert.equal(isWalkInCustomerName("Muhammad Tayyib"), false);
 });
 
 test("inclusive VAT preserves the charged total and excludes non-taxable lines", () => {

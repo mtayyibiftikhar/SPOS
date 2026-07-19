@@ -1,18 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type MouseEvent } from "react";
 import {
   Banknote,
   CalendarClock,
   ChevronLeft,
   ChevronRight,
   Clock3,
+  Download,
   Edit3,
   Eye,
   FileSpreadsheet,
   LogOut,
   MapPin,
-  Printer,
   ShieldCheck,
   UserRound,
   UserRoundCheck,
@@ -25,10 +25,12 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { calculateShiftSummary } from "@/lib/cash-control";
+import { createStructuredReportPdfBlob, downloadBlob } from "@/lib/report-export";
 import { cn, formatBusinessDate, formatCurrency, formatDateTime } from "@/lib/utils";
 import type { AttendanceRecord, User } from "@/types/pos";
 
 type TimeClockView = "overview" | "timecards" | "payroll" | "adjust";
+type AttendancePeriod = "day" | "week" | "month" | "year" | "custom";
 type Feedback = { tone: "success" | "error"; message: string };
 
 const PAGE_SIZE = 10;
@@ -65,6 +67,28 @@ function sourceLabel(record: AttendanceRecord) {
   return "Legacy admin bypass";
 }
 
+function toIsoDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function periodRange(period: AttendancePeriod, today: string) {
+  const current = new Date(`${today}T12:00:00Z`);
+
+  if (period === "day") return { from: today, to: today };
+  if (period === "week") {
+    const start = new Date(current);
+    const day = start.getUTCDay() || 7;
+    start.setUTCDate(start.getUTCDate() - day + 1);
+    return { from: toIsoDate(start), to: today };
+  }
+  if (period === "year") return { from: `${today.slice(0, 4)}-01-01`, to: today };
+  return { from: `${today.slice(0, 7)}-01`, to: today };
+}
+
+function openPicker(event: MouseEvent<HTMLInputElement>) {
+  event.currentTarget.showPicker?.();
+}
+
 export function TimeClockWorkspace() {
   const {
     clockOut,
@@ -93,7 +117,9 @@ export function TimeClockWorkspace() {
   const [closeShiftOnClockOut, setCloseShiftOnClockOut] = useState(false);
   const [countedCash, setCountedCash] = useState("");
   const [shiftClosingNote, setShiftClosingNote] = useState("");
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState(session?.id ?? "");
+  const [serverToday, setServerToday] = useState(today);
+  const [attendancePeriod, setAttendancePeriod] = useState<AttendancePeriod>("month");
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState(monthStart);
   const [dateTo, setDateTo] = useState(today);
   const [timecardPage, setTimecardPage] = useState(1);
@@ -115,9 +141,40 @@ export function TimeClockWorkspace() {
   }, []);
 
   useEffect(() => {
-    if (!selectedEmployeeId && currentUsers[0]) setSelectedEmployeeId(isAdmin ? currentUsers[0].id : session?.id ?? "");
     if (!rateUserId && currentUsers[0]) setRateUserId(currentUsers[0].id);
-  }, [currentUsers, isAdmin, rateUserId, selectedEmployeeId, session?.id]);
+  }, [currentUsers, rateUserId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetch("/api/attendance/records", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as { currentDate?: string };
+        if (!cancelled && response.ok && payload.currentDate) setServerToday(payload.currentDate);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const availableIds = (isAdmin ? currentUsers : currentUsers.filter((user) => user.id === session?.id)).map(
+      (user) => user.id
+    );
+    setSelectedEmployeeIds((current) => {
+      const valid = current.filter((id) => availableIds.includes(id));
+      return valid.length ? valid : availableIds;
+    });
+  }, [currentUsers, isAdmin, session?.id]);
+
+  useEffect(() => {
+    if (attendancePeriod === "custom") return;
+    const range = periodRange(attendancePeriod, serverToday);
+    setDateFrom(range.from);
+    setDateTo(range.to);
+  }, [attendancePeriod, serverToday]);
 
   useEffect(() => {
     if (!rateUserId) return;
@@ -135,14 +192,16 @@ export function TimeClockWorkspace() {
   const employeeName = (userId: string) => currentUsers.find((user) => user.id === userId)?.name ?? "Employee";
   const employeeStatus = (user: User) => todayRecords.find((record) => record.userId === user.id && !record.clockOutAt) ?? null;
   const visibleEmployees = isAdmin ? currentUsers : currentUsers.filter((user) => user.id === session?.id);
-  const selectedEmployee = visibleEmployees.find((user) => user.id === selectedEmployeeId) ?? visibleEmployees[0];
+  const effectiveEmployeeIds = selectedEmployeeIds.length
+    ? selectedEmployeeIds
+    : visibleEmployees.map((user) => user.id);
   const filteredTimecards = useMemo(
     () =>
       shopRecords
-        .filter((record) => record.userId === selectedEmployee?.id)
+        .filter((record) => effectiveEmployeeIds.includes(record.userId))
         .filter((record) => record.businessDate >= dateFrom && record.businessDate <= dateTo)
         .sort((a, b) => b.businessDate.localeCompare(a.businessDate) || b.clockInAt.localeCompare(a.clockInAt)),
-    [dateFrom, dateTo, selectedEmployee?.id, shopRecords]
+    [dateFrom, dateTo, effectiveEmployeeIds, shopRecords]
   );
   const timecardPages = Math.max(1, Math.ceil(filteredTimecards.length / PAGE_SIZE));
   const pagedTimecards = filteredTimecards.slice((timecardPage - 1) * PAGE_SIZE, timecardPage * PAGE_SIZE);
@@ -168,7 +227,7 @@ export function TimeClockWorkspace() {
       })
     : null;
 
-  useEffect(() => setTimecardPage(1), [dateFrom, dateTo, selectedEmployeeId]);
+  useEffect(() => setTimecardPage(1), [dateFrom, dateTo, selectedEmployeeIds]);
   useEffect(() => setManualPage(1), [manualUserId]);
 
   const endMyClock = async () => {
@@ -209,7 +268,7 @@ export function TimeClockWorkspace() {
 
   const loadManualRecord = (record?: AttendanceRecord) => {
     setManualRecordId(record?.id);
-    setManualDate(record?.businessDate ?? today);
+    setManualDate(record?.businessDate ?? serverToday);
     setManualClockIn(localTime(record?.clockInAt));
     setManualClockOut(localTime(record?.clockOutAt));
     setManualHours(String(record ? recordHours(record, now) || record.scheduledHours : 8));
@@ -218,10 +277,14 @@ export function TimeClockWorkspace() {
 
   const saveManualRecord = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (manualDate > serverToday) {
+      setFeedback({ tone: "error", message: "Future attendance records are not allowed." });
+      return;
+    }
     const result = await saveAttendanceRecord({
       businessDate: manualDate,
-      clockInAt: manualClockIn ? `${manualDate}T${manualClockIn}:00` : "",
-      clockOutAt: manualClockOut ? `${manualDate}T${manualClockOut}:00` : undefined,
+      clockInAt: manualClockIn ? `${manualDate}T${manualClockIn}:00+03:00` : "",
+      clockOutAt: manualClockOut ? `${manualDate}T${manualClockOut}:00+03:00` : undefined,
       id: manualRecordId,
       note: manualNote,
       paidHours: Number(manualHours),
@@ -249,38 +312,60 @@ export function TimeClockWorkspace() {
     });
   };
 
-  const reportRows = filteredTimecards
-    .map(
-      (record) => `<tr><td>${escapeHtml(record.businessDate)}</td><td>${escapeHtml(formatDateTime(record.clockInAt, locale))}</td><td>${escapeHtml(record.clockOutAt ? formatDateTime(record.clockOutAt, locale) : "Open")}</td><td>${recordHours(record, now).toFixed(2)}</td><td>${escapeHtml(sourceLabel(record))}</td><td>${escapeHtml(record.note)}</td></tr>`
-    )
-    .join("");
+  const selectedReportEmployees = visibleEmployees.filter((user) => effectiveEmployeeIds.includes(user.id));
 
-  const reportMarkup = () => `<!doctype html><html><head><meta charset="utf-8"><title>Timecard - ${escapeHtml(selectedEmployee?.name)}</title><style>body{font-family:Arial,sans-serif;color:#0f172a;padding:32px}header{display:flex;align-items:center;gap:18px;border-bottom:2px solid #10b981;padding-bottom:18px;margin-bottom:24px}img{width:64px;height:64px;object-fit:contain}.muted{color:#64748b}.summary{display:flex;gap:16px;margin:18px 0}.pill{background:#ecfdf5;border:1px solid #a7f3d0;border-radius:14px;padding:12px 18px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#0f172a;color:white;text-align:left}th,td{padding:10px;border:1px solid #dbe4ee}footer{margin-top:24px;color:#64748b;font-size:11px}</style></head><body><header>${currentSettings?.pos.logoUrl ? `<img src="${escapeHtml(currentSettings.pos.logoUrl)}" alt="Logo">` : ""}<div><h1>${escapeHtml(currentSettings?.pos.shopName ?? currentShop?.name ?? "Store")}</h1><div class="muted">Employee timecard report</div></div></header><h2>${escapeHtml(selectedEmployee?.name)}</h2><p class="muted">${escapeHtml(selectedEmployee?.email)} | ${escapeHtml(dateFrom)} to ${escapeHtml(dateTo)}</p><div class="summary"><div class="pill"><strong>${filteredTimecards.length}</strong><br>Entries</div><div class="pill"><strong>${totalTimecardHours.toFixed(2)}</strong><br>Total hours</div></div><table><thead><tr><th>Date</th><th>Clock in</th><th>Clock out</th><th>Hours</th><th>Source</th><th>Note</th></tr></thead><tbody>${reportRows || '<tr><td colspan="6">No attendance records.</td></tr>'}</tbody></table><footer>Generated ${escapeHtml(formatDateTime(new Date().toISOString(), locale))}</footer></body></html>`;
+  const downloadAttendancePdf = async () => {
+    try {
+      const sections = selectedReportEmployees.map((user) => {
+        const records = filteredTimecards.filter((record) => record.userId === user.id);
+        const hours = records.reduce((sum, record) => sum + recordHours(record, now), 0);
 
-  const printReport = () => {
-    const reportWindow = window.open("", "_blank", "noopener,noreferrer");
-    if (!reportWindow) {
-      setFeedback({ tone: "error", message: "Allow pop-ups to print or save the timecard PDF." });
-      return;
+        return {
+          title: `${user.name} - ${hours.toFixed(2)} hours`,
+          rows: records.length
+            ? records.map((record) => ({
+                detail: `${formatDateTime(record.clockInAt, locale)} to ${record.clockOutAt ? formatDateTime(record.clockOutAt, locale) : "Open"} | ${sourceLabel(record)}${record.note ? ` | ${record.note}` : ""}`,
+                label: formatBusinessDate(record.businessDate, locale),
+                value: `${recordHours(record, now).toFixed(2)} h`
+              }))
+            : [{ label: "No attendance records", value: "0.00 h" }]
+        };
+      });
+      const blob = await createStructuredReportPdfBlob({
+        generatedAt: new Date().toISOString(),
+        logoUrl: currentSettings?.pos.logoUrl,
+        period: `${dateFrom} to ${dateTo}`,
+        sections,
+        shopName: currentSettings?.pos.shopName ?? currentShop?.name ?? "Store",
+        subtitle: `${selectedReportEmployees.length} employee(s), ${filteredTimecards.length} attendance entries, ${totalTimecardHours.toFixed(2)} total hours`,
+        title: "Attendance report"
+      });
+      downloadBlob(blob, `attendance-${dateFrom}-to-${dateTo}.pdf`);
+      setFeedback({ tone: "success", message: "Attendance PDF downloaded." });
+    } catch {
+      setFeedback({ tone: "error", message: "Attendance PDF could not be generated." });
     }
-    reportWindow.document.write(reportMarkup());
-    reportWindow.document.close();
-    reportWindow.setTimeout(() => reportWindow.print(), 350);
   };
 
   const exportExcel = () => {
-    const blob = new Blob([reportMarkup()], { type: "application/vnd.ms-excel;charset=utf-8" });
+    const reportRows = filteredTimecards
+      .map(
+        (record) => `<tr><td>${escapeHtml(employeeName(record.userId))}</td><td>${escapeHtml(record.businessDate)}</td><td>${escapeHtml(formatDateTime(record.clockInAt, locale))}</td><td>${escapeHtml(record.clockOutAt ? formatDateTime(record.clockOutAt, locale) : "Open")}</td><td>${recordHours(record, now).toFixed(2)}</td><td>${escapeHtml(sourceLabel(record))}</td><td>${escapeHtml(record.note)}</td></tr>`
+      )
+      .join("");
+    const markup = `<!doctype html><html><head><meta charset="utf-8"></head><body><h1>${escapeHtml(currentSettings?.pos.shopName ?? currentShop?.name ?? "Store")}</h1><h2>Attendance report</h2><p>${escapeHtml(dateFrom)} to ${escapeHtml(dateTo)}</p><table><thead><tr><th>Employee</th><th>Date</th><th>Clock in</th><th>Clock out</th><th>Hours</th><th>Source</th><th>Note</th></tr></thead><tbody>${reportRows || '<tr><td colspan="7">No attendance records.</td></tr>'}</tbody></table></body></html>`;
+    const blob = new Blob([markup], { type: "application/vnd.ms-excel;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `timecard-${selectedEmployee?.name ?? "employee"}-${dateFrom}-to-${dateTo}.xls`;
+    anchor.download = `attendance-${dateFrom}-to-${dateTo}.xls`;
     anchor.click();
     URL.revokeObjectURL(url);
   };
 
   const navItems = [
     { id: "overview" as const, label: "Overview", icon: Clock3 },
-    { id: "timecards" as const, label: "Timecard by employee", icon: CalendarClock },
+    { id: "timecards" as const, label: "Attendance report", icon: CalendarClock },
     ...(isAdmin
       ? [
           { id: "payroll" as const, label: "Salary calculator", icon: Banknote },
@@ -413,11 +498,19 @@ export function TimeClockWorkspace() {
 
       {view === "timecards" ? (
         <Card className="overflow-hidden">
-          <div className="grid gap-4 border-b border-slate-200 p-5 lg:grid-cols-[1fr_auto_auto_auto] lg:items-end">
-            <div><p className="text-xs font-bold uppercase tracking-[0.28em] text-emerald-700">Timecard by employee</p><Select className="mt-3" onChange={(event) => setSelectedEmployeeId(event.target.value)} value={selectedEmployee?.id ?? ""}>{visibleEmployees.map((user) => <option key={user.id} value={user.id}>{user.name} · {user.email}</option>)}</Select></div>
-            <label className="text-xs font-semibold text-slate-500">From<Input className="mt-2" onChange={(event) => setDateFrom(event.target.value)} type="date" value={dateFrom} /></label>
-            <label className="text-xs font-semibold text-slate-500">To<Input className="mt-2" onChange={(event) => setDateTo(event.target.value)} type="date" value={dateTo} /></label>
-            <div className="flex gap-2"><Button className="gap-2" onClick={printReport} variant="secondary"><Printer className="h-4 w-4" />Print / PDF</Button><Button className="gap-2" onClick={exportExcel} variant="secondary"><FileSpreadsheet className="h-4 w-4" />Excel</Button></div>
+          <div className="space-y-5 border-b border-slate-200 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div><p className="text-xs font-bold uppercase tracking-[0.28em] text-emerald-700">Attendance report</p><h2 className="mt-2 font-display text-2xl font-semibold text-slate-950">Timecards by period and employee</h2></div>
+              <div className="flex flex-wrap gap-2"><Button className="gap-2" onClick={() => void downloadAttendancePdf()} variant="secondary"><Download className="h-4 w-4" />Download PDF</Button><Button className="gap-2" onClick={exportExcel} variant="secondary"><FileSpreadsheet className="h-4 w-4" />Download Excel</Button></div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {(["day", "week", "month", "year", "custom"] as AttendancePeriod[]).map((period) => <button className={cn("rounded-full border px-4 py-2 text-sm font-semibold capitalize transition hover:-translate-y-0.5", attendancePeriod === period ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50")} key={period} onClick={() => setAttendancePeriod(period)} type="button">{period}</button>)}
+            </div>
+            <div className="grid gap-4 lg:grid-cols-[1.4fr_0.6fr_0.6fr]">
+              <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Employees</p><div className="mt-2 flex flex-wrap gap-2">{visibleEmployees.map((user) => { const checked = effectiveEmployeeIds.includes(user.id); return <label className={cn("flex cursor-pointer items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition", checked ? "border-emerald-300 bg-emerald-50 text-emerald-900" : "border-slate-200 bg-white text-slate-600")} key={user.id}><input checked={checked} className="accent-emerald-600" onChange={(event) => setSelectedEmployeeIds((current) => event.target.checked ? [...new Set([...current, user.id])] : current.filter((id) => id !== user.id))} type="checkbox" />{user.name}</label>; })}</div></div>
+              <label className="text-xs font-semibold text-slate-500">From<Input className="mt-2 cursor-pointer" max={serverToday} onClick={openPicker} onChange={(event) => { setAttendancePeriod("custom"); setDateFrom(event.target.value); }} type="date" value={dateFrom} /></label>
+              <label className="text-xs font-semibold text-slate-500">To<Input className="mt-2 cursor-pointer" max={serverToday} onClick={openPicker} onChange={(event) => { setAttendancePeriod("custom"); setDateTo(event.target.value); }} type="date" value={dateTo} /></label>
+            </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 px-5 py-3 text-sm"><span><strong>{filteredTimecards.length}</strong> entries</span><span><strong>{totalTimecardHours.toFixed(2)}</strong> total hours</span></div>
           <div className="divide-y divide-slate-200">
@@ -437,7 +530,7 @@ export function TimeClockWorkspace() {
       {view === "adjust" && isAdmin ? (
         <div className="grid gap-5 lg:grid-cols-[0.8fr_1.2fr]">
           <Card className="overflow-hidden"><div className="border-b border-slate-200 p-5"><p className="text-xs font-bold uppercase tracking-[0.28em] text-emerald-700">Choose employee</p><Select className="mt-3" onChange={(event) => { setManualUserId(event.target.value); loadManualRecord(); }} value={manualUserId}><option value="">Select employee first</option>{currentUsers.map((user) => <option key={user.id} value={user.id}>{user.name} · {user.email}</option>)}</Select></div>{manualUserId ? <><div className="divide-y divide-slate-200">{pagedManualRecords.length ? pagedManualRecords.map((record) => <button key={record.id} className={cn("w-full p-4 text-left transition hover:bg-emerald-50", manualRecordId === record.id && "bg-emerald-50")} onClick={() => loadManualRecord(record)} type="button"><div className="flex items-center justify-between gap-3"><span className="font-semibold">{formatBusinessDate(record.businessDate, locale)}</span><Badge variant={record.clockOutAt ? "success" : "warning"}>{recordHours(record, now).toFixed(2)} h</Badge></div><p className="mt-1 text-xs text-slate-500">{formatDateTime(record.clockInAt, locale)}</p></button>) : <div className="p-6 text-sm text-slate-500">No records for this employee.</div>}</div><div className="flex items-center justify-between border-t border-slate-200 p-3"><Button disabled={manualPage <= 1} onClick={() => setManualPage((page) => page - 1)} size="sm" variant="secondary"><ChevronLeft className="h-4 w-4" /></Button><span className="text-xs text-slate-500">{manualPage}/{manualPages}</span><Button disabled={manualPage >= manualPages} onClick={() => setManualPage((page) => page + 1)} size="sm" variant="secondary"><ChevronRight className="h-4 w-4" /></Button></div></> : <div className="p-8 text-center text-sm text-slate-500"><UserRoundCheck className="mx-auto h-8 w-8 text-slate-300" /><p className="mt-3">Select an employee to view and adjust their timecards.</p></div>}</Card>
-          <Card className="p-6"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[0.28em] text-emerald-700">Admin adjustment</p><h2 className="mt-1 font-display text-2xl font-semibold">{manualRecordId ? "Edit selected timecard" : "Create manual timecard"}</h2></div>{manualUserId ? <Button onClick={() => loadManualRecord()} size="sm" variant="secondary">New record</Button> : null}</div><form className="mt-6 grid gap-4 md:grid-cols-2" onSubmit={(event) => void saveManualRecord(event)}><Input disabled={!manualUserId} onChange={(event) => setManualDate(event.target.value)} required type="date" value={manualDate} /><Input disabled={!manualUserId} min="0" onChange={(event) => setManualHours(event.target.value)} placeholder="Paid hours" step="0.25" type="number" value={manualHours} /><Input disabled={!manualUserId} onChange={(event) => setManualClockIn(event.target.value)} required type="time" value={manualClockIn} /><Input disabled={!manualUserId} onChange={(event) => setManualClockOut(event.target.value)} type="time" value={manualClockOut} /><Input className="md:col-span-2" disabled={!manualUserId} onChange={(event) => setManualNote(event.target.value)} placeholder="Required adjustment reason" required value={manualNote} /><Button className="md:col-span-2" disabled={!manualUserId} type="submit">Save audited adjustment</Button></form></Card>
+          <Card className="p-6"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[0.28em] text-emerald-700">Admin adjustment</p><h2 className="mt-1 font-display text-2xl font-semibold">{manualRecordId ? "Edit selected timecard" : "Create manual timecard"}</h2></div>{manualUserId ? <Button onClick={() => loadManualRecord()} size="sm" variant="secondary">New record</Button> : null}</div><form className="mt-6 grid gap-4 md:grid-cols-2" onSubmit={(event) => void saveManualRecord(event)}><Input className="cursor-pointer" disabled={!manualUserId} max={serverToday} onClick={openPicker} onChange={(event) => setManualDate(event.target.value)} required type="date" value={manualDate} /><Input disabled={!manualUserId} min="0" onChange={(event) => setManualHours(event.target.value)} placeholder="Paid hours" step="0.25" type="number" value={manualHours} /><Input className="cursor-pointer" disabled={!manualUserId} onClick={openPicker} onChange={(event) => setManualClockIn(event.target.value)} required type="time" value={manualClockIn} /><Input className="cursor-pointer" disabled={!manualUserId} onClick={openPicker} onChange={(event) => setManualClockOut(event.target.value)} type="time" value={manualClockOut} /><Input className="md:col-span-2" disabled={!manualUserId} onChange={(event) => setManualNote(event.target.value)} placeholder="Required adjustment reason" required value={manualNote} /><Button className="md:col-span-2" disabled={!manualUserId} type="submit">Save audited adjustment</Button></form></Card>
         </div>
       ) : null}
     </div>

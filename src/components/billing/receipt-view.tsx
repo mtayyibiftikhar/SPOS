@@ -19,6 +19,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
+import { Select } from "@/components/ui/select";
+import { customerMatchesSearch, isWalkInCustomerName } from "@/lib/billing";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
 import { buildPublicReceiptUrl } from "@/lib/public-receipts";
 import { calculateBillRefundState } from "@/lib/refunds";
@@ -26,6 +28,7 @@ import { hasNativeDownloadSupport, printElementWithNative, saveBlobWithNative } 
 import { getReceiptItemNameLines, getReceiptItemNameText } from "@/lib/receipt-language";
 import { buildPolishedReceiptMessage } from "@/lib/receipt-sharing";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
+import type { Customer } from "@/types/pos";
 
 export function ReceiptView({ billId }: { billId: string }) {
   const router = useRouter();
@@ -36,7 +39,9 @@ export function ReceiptView({ billId }: { billId: string }) {
   const [pendingShareAction, setPendingShareAction] = useState<"email" | "whatsapp" | null>(null);
   const [isSavingContact, setIsSavingContact] = useState(false);
   const [returnCountdown, setReturnCountdown] = useState<number | null>(null);
+  const [contactCustomerSearch, setContactCustomerSearch] = useState("");
   const [contactForm, setContactForm] = useState({
+    id: undefined as string | undefined,
     name: "",
     phone: "",
     email: "",
@@ -67,7 +72,8 @@ export function ReceiptView({ billId }: { billId: string }) {
     }
 
     setContactForm({
-      name: bill.customerName ?? "",
+      id: isWalkInCustomerName(bill.customerName) ? undefined : bill.customerId,
+      name: isWalkInCustomerName(bill.customerName) ? "" : bill.customerName ?? "",
       phone: bill.customerPhone ?? "",
       email: bill.customerEmail ?? "",
       whatsapp: bill.customerWhatsapp ?? ""
@@ -226,6 +232,8 @@ export function ReceiptView({ billId }: { billId: string }) {
         return t("receipt.missingSubtitle");
       case "Another customer already uses this phone number.":
         return t("billing.uniquePhoneError");
+      case "Select a saved customer or enter the customer's real name before sharing this receipt.":
+        return message;
       case "Unable to update customer details.":
       default:
         return t("receipt.contactSaveError");
@@ -294,11 +302,13 @@ export function ReceiptView({ billId }: { billId: string }) {
 
   const openShareDialog = (action: "email" | "whatsapp") => {
     setContactForm({
-      name: bill.customerName ?? "",
+      id: isWalkInCustomerName(bill.customerName) ? undefined : bill.customerId,
+      name: isWalkInCustomerName(bill.customerName) ? "" : bill.customerName ?? "",
       phone: bill.customerPhone ?? "",
       email: bill.customerEmail ?? "",
       whatsapp: bill.customerWhatsapp ?? bill.customerPhone ?? ""
     });
+    setContactCustomerSearch("");
     setPendingShareAction(action);
     setFeedback(null);
   };
@@ -306,6 +316,7 @@ export function ReceiptView({ billId }: { billId: string }) {
   const persistCustomerContact = () => {
     const result = updateBillCustomerContact({
       billId: bill.id,
+      customerId: contactForm.id,
       customerName: contactForm.name,
       customerPhone: contactForm.phone,
       customerEmail: contactForm.email,
@@ -327,6 +338,11 @@ export function ReceiptView({ billId }: { billId: string }) {
 
     const nextEmail = contactForm.email.trim();
     const nextWhatsapp = contactForm.whatsapp.trim() || contactForm.phone.trim();
+
+    if (isWalkInCustomerName(contactForm.name)) {
+      setFeedback("Select a saved customer or enter the customer's real name before sharing this receipt.");
+      return;
+    }
 
     if (pendingShareAction === "email" && !nextEmail) {
       setFeedback(t("receipt.emailMissing"));
@@ -380,6 +396,24 @@ export function ReceiptView({ billId }: { billId: string }) {
       setBusyAction(null);
       setIsSavingContact(false);
     }
+  };
+
+  const savedCustomers = state.customers.filter(
+    (customer) => customer.shopId === bill.shopId && !isWalkInCustomerName(customer.name)
+  );
+  const matchedContactCustomers = contactCustomerSearch.trim()
+    ? savedCustomers.filter((customer) => customerMatchesSearch(customer, contactCustomerSearch)).slice(0, 8)
+    : savedCustomers.slice(0, 8);
+  const selectShareCustomer = (customer: Customer) => {
+    setContactForm({
+      id: customer.id,
+      name: customer.name,
+      phone: customer.phone ?? "",
+      email: customer.email ?? "",
+      whatsapp: customer.whatsapp ?? customer.phone ?? ""
+    });
+    setContactCustomerSearch("");
+    setFeedback(null);
   };
 
   return (
@@ -772,7 +806,7 @@ export function ReceiptView({ billId }: { billId: string }) {
               ) : null}
             </div>
 
-            {feedback ? <p className="mt-4 text-sm font-medium text-olive">{feedback}</p> : null}
+            {feedback && !pendingShareAction ? <p className="mt-4 text-sm font-medium text-olive">{feedback}</p> : null}
 
             <div className="mt-5 flex flex-wrap gap-2">
               <Badge variant="success">{t(paymentMethodLabelKeys[bill.paymentMethod])}</Badge>
@@ -815,7 +849,35 @@ export function ReceiptView({ billId }: { billId: string }) {
               </Button>
             </div>
 
-            <div className="mt-6 grid gap-4 sm:grid-cols-2">
+            <div className="mt-6 rounded-[22px] border border-slate-200 bg-slate-50 p-4">
+              <label className="mb-2 block text-sm font-medium text-ink">{t("billing.customerSearchCompact")}</label>
+              <Input
+                placeholder={t("billing.customerSearchCompact")}
+                value={contactCustomerSearch}
+                onChange={(event) => setContactCustomerSearch(event.target.value)}
+              />
+              <Select
+                aria-label={t("billing.customerSearchCompact")}
+                className="mt-3 bg-white"
+                onChange={(event) => {
+                  const selectedCustomer = savedCustomers.find((customer) => customer.id === event.target.value);
+
+                  if (selectedCustomer) {
+                    selectShareCustomer(selectedCustomer);
+                  }
+                }}
+                value={contactForm.id ?? ""}
+              >
+                <option value="">{t("billing.customerSearchCompact")}</option>
+                {matchedContactCustomers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.name} - {customer.phone || customer.whatsapp || customer.email || t("common.notAvailable")}
+                  </option>
+                ))}
+              </Select>
+            </div>
+
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="mb-2 block text-sm font-medium text-ink">{t("common.customerName")}</label>
                 <Input
@@ -868,6 +930,12 @@ export function ReceiptView({ billId }: { billId: string }) {
                 />
               </div>
             </div>
+
+            {feedback ? (
+              <div className="mt-4 rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700" role="alert">
+                {feedback}
+              </div>
+            ) : null}
 
             <div className="mt-6 flex flex-wrap justify-end gap-3">
               <Button

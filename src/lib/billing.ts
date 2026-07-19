@@ -244,10 +244,18 @@ export function customerMatchesSearch(customer: Customer, rawQuery: string) {
     .some((value) => sanitizePhoneDigits(value!).replace(/^0+/, "").includes(queryDigits));
 }
 
+export function isWalkInCustomerName(value?: string) {
+  const normalized = (value ?? "")
+    .normalize("NFKC")
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[\s-]+/g, " ");
+
+  return !normalized || normalized === "walk in customer";
+}
+
 export function shouldPersistCustomer(customer: CheckoutCustomerInput) {
-  return Boolean(
-    customer.name?.trim() || customer.phone?.trim() || customer.email?.trim() || customer.whatsapp?.trim()
-  );
+  return !isWalkInCustomerName(customer.name);
 }
 
 export function normalizeCustomer(customer: CheckoutCustomerInput) {
