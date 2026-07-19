@@ -21,8 +21,10 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
 import { buildPublicReceiptUrl } from "@/lib/public-receipts";
+import { calculateBillRefundState } from "@/lib/refunds";
 import { hasNativeDownloadSupport, printElementWithNative, saveBlobWithNative } from "@/lib/native-bridge";
 import { getReceiptItemNameLines, getReceiptItemNameText } from "@/lib/receipt-language";
+import { buildPolishedReceiptMessage } from "@/lib/receipt-sharing";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 
 export function ReceiptView({ billId }: { billId: string }) {
@@ -50,6 +52,14 @@ export function ReceiptView({ billId }: { billId: string }) {
   const receiptSettings = bill ? state.settingsByShop[bill.shopId]?.receipt : undefined;
   const printerSettings = bill ? state.settingsByShop[bill.shopId]?.printer : undefined;
   const items = bill ? state.billItems.filter((item) => item.billId === bill.id) : [];
+  const refundState = bill
+    ? calculateBillRefundState({
+        billId: bill.id,
+        billItems: items,
+        refunds: state.refunds,
+        refundItems: state.refundItems
+      })
+    : null;
 
   useEffect(() => {
     if (!bill) {
@@ -151,11 +161,12 @@ export function ReceiptView({ billId }: { billId: string }) {
       .join("") || "SP";
   const formattedCustomerName = bill.customerName?.trim() || t("billing.walkInCustomer");
   const whatsappTarget = bill.customerWhatsapp || bill.customerPhone;
-  const itemSummaryLines = items.map((item, index) => {
-    const itemName = getReceiptItemNameText(item.productName, receiptSettings);
-
-    return `${index + 1}. ${itemName}\n   ${item.quantity} x ${formatCurrency(item.unitPrice, shop?.currency ?? "SAR", locale)} = ${formatCurrency(item.lineTotal, shop?.currency ?? "SAR", locale)}`;
-  });
+  const shareItems = items.map((item) => ({
+    name: getReceiptItemNameText(item.productName, receiptSettings),
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+    lineTotal: item.lineTotal
+  }));
   const renderReceiptItemName = (item: (typeof items)[number]) => (
     <span className="block min-w-0">
       {getReceiptItemNameLines(item.productName, receiptSettings).map((line) => (
@@ -169,31 +180,39 @@ export function ReceiptView({ billId }: { billId: string }) {
       ))}
     </span>
   );
-  const buildReceiptShareMessage = (contact?: { name?: string }) => {
+  const buildReceiptShareMessage = (
+    channel: "email" | "whatsapp",
+    contact?: { name?: string }
+  ) => {
     const customerName = contact?.name?.trim() || bill.customerName?.trim() || t("billing.walkInCustomer");
 
-    return [
-      t("receipt.shareGreeting", { customer: customerName }),
-      "",
-      `${t("receipt.sharePurchasedFrom")}: ${receiptBrand}`,
-      `${t("common.receiptNumber")}: ${bill.number}`,
-      `${t("common.dateTime")}: ${formatDateTime(bill.createdAt, locale)}`,
-      "",
-      `${t("common.items")}:`,
-      ...itemSummaryLines,
-      "",
-      `${t("common.subtotal")}: ${formatCurrency(bill.subtotal, shop?.currency ?? "SAR", locale)}`,
-      `${t("common.discount")}: ${formatCurrency((bill.itemDiscountAmount ?? 0) + bill.discountAmount, shop?.currency ?? "SAR", locale)}`,
-      `${bill.taxName ?? t("common.tax")}: ${formatCurrency(bill.taxAmount, shop?.currency ?? "SAR", locale)}`,
-      `${t("common.total")}: ${formatCurrency(bill.total, shop?.currency ?? "SAR", locale)}`,
-      `${t("common.paidAmount")}: ${formatCurrency(bill.paidAmount, shop?.currency ?? "SAR", locale)}`,
-      `${t("common.dueAmount")}: ${formatCurrency(bill.dueAmount, shop?.currency ?? "SAR", locale)}`,
-      ...(digitalReceiptUrl ? ["", `${t("receipt.shareDigitalReceiptLine")}:`, digitalReceiptUrl] : []),
-      "",
-      t("receipt.shareThanks", { shop: receiptBrand })
-    ].join("\n");
+    return buildPolishedReceiptMessage({
+      channel,
+      customerName,
+      storeName: receiptBrand,
+      receiptNumber: bill.number,
+      createdAt: bill.createdAt,
+      currency: shop?.currency ?? "SAR",
+      locale,
+      items: shareItems,
+      subtotal: bill.subtotal,
+      discountAmount: (bill.itemDiscountAmount ?? 0) + bill.discountAmount,
+      taxLabel: bill.taxName ?? t("common.tax"),
+      taxAmount: bill.taxAmount,
+      total: bill.total,
+      paidAmount: bill.paidAmount,
+      dueAmount: bill.dueAmount,
+      digitalReceiptUrl,
+      refund:
+        refundState && refundState.totalRefundAmount > 0
+          ? {
+              isFullyRefunded: refundState.isFullyRefunded,
+              totalRefundAmount: refundState.totalRefundAmount
+            }
+          : undefined
+    });
   };
-  const shareText = buildReceiptShareMessage();
+  const shareText = buildReceiptShareMessage("whatsapp");
   const emailSubject = t("receipt.emailSubject", {
     number: bill.number,
     shop: receiptBrand
@@ -328,14 +347,21 @@ export function ReceiptView({ billId }: { billId: string }) {
         return;
       }
 
-      const contactAwareMessage = buildReceiptShareMessage({ name: contactForm.name });
+      const contactAwareMessage = buildReceiptShareMessage(pendingShareAction, { name: contactForm.name });
 
       if (pendingShareAction === "email") {
-        window.location.href = buildMailtoLink({
+        const mailtoUrl = buildMailtoLink({
           email: nextEmail,
           subject: emailSubject,
           body: contactAwareMessage
         });
+        const mailLink = document.createElement("a");
+        mailLink.href = mailtoUrl;
+        mailLink.target = "_blank";
+        mailLink.rel = "noopener noreferrer";
+        document.body.appendChild(mailLink);
+        mailLink.click();
+        mailLink.remove();
         setFeedback(t("receipt.emailFallback"));
       } else {
         window.open(
@@ -431,6 +457,23 @@ export function ReceiptView({ billId }: { billId: string }) {
             <p className="mt-1 text-sm text-slate-600">{posSettings?.address ?? shop?.address}</p>
             <p className="text-sm text-slate-600">{posSettings?.phone ?? shop?.phone}</p>
           </div>
+
+          {refundState && refundState.totalRefundAmount > 0 ? (
+            <div
+              className={
+                refundState.isFullyRefunded
+                  ? "my-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-center text-red-800"
+                  : "my-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-center text-amber-900"
+              }
+            >
+              <p className="text-xs font-semibold uppercase tracking-[0.2em]">
+                {refundState.isFullyRefunded ? t("refund.fullRefunded") : t("refund.partialRefunded")}
+              </p>
+              <p className="mt-1 font-semibold">
+                {t("refund.totalRefunded")}: {formatCurrency(refundState.totalRefundAmount, shop?.currency ?? "SAR", locale)}
+              </p>
+            </div>
+          ) : null}
 
           <div className="grid gap-4 border-b border-dashed border-line py-5 sm:grid-cols-2">
             <div className="space-y-2 text-sm text-slate-600">

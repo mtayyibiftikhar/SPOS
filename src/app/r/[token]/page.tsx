@@ -1,11 +1,13 @@
-import { ShieldCheck } from "lucide-react";
+import { RotateCcw, ShieldCheck } from "lucide-react";
 import { notFound } from "next/navigation";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { PublicReceiptActions } from "@/components/billing/public-receipt-actions";
+import { buildQrCodeImageUrl } from "@/lib/qr-code";
 import { getReceiptItemNameLines } from "@/lib/receipt-language";
-import { normalizePublicReceiptToken } from "@/lib/public-receipts";
+import { buildPublicReceiptUrl, normalizePublicReceiptToken } from "@/lib/public-receipts";
+import { calculateBillRefundState } from "@/lib/refunds";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import type { Bill, BillItem, DemoAppState, Shop, ShopSettingsBundle, User } from "@/types/pos";
+import type { Bill, BillItem, DemoAppState, Refund, RefundItem, Shop, ShopSettingsBundle, User } from "@/types/pos";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +27,8 @@ type DigitalReceipt = {
   bill: Bill;
   cashier: User | null;
   items: BillItem[];
+  refunds: Refund[];
+  refundItems: RefundItem[];
   settings: ShopSettingsBundle | null;
   shop: Shop | null;
   updatedAt: string | null;
@@ -79,11 +83,15 @@ async function loadDigitalReceipt(token: string): Promise<DigitalReceipt | null>
   }
 
   const settings = row.state.settingsByShop?.[bill.shopId] ?? null;
+  const refunds = row.state.refunds?.filter((refund) => refund.originalBillId === bill.id) ?? [];
+  const refundIds = new Set(refunds.map((refund) => refund.id));
 
   return {
     bill,
     cashier: row.state.users?.find((user) => user.id === bill.cashierId) ?? null,
     items: row.state.billItems?.filter((item) => item.billId === bill.id) ?? [],
+    refunds,
+    refundItems: row.state.refundItems?.filter((item) => refundIds.has(item.refundId)) ?? [],
     settings,
     shop: row.state.shops?.find((entry) => entry.id === bill.shopId) ?? null,
     updatedAt: row.updated_at
@@ -108,12 +116,20 @@ export default async function PublicReceiptPage({ params }: PublicReceiptPagePro
     notFound();
   }
 
-  const { bill, cashier, items, settings, shop, updatedAt } = receipt;
+  const { bill, cashier, items, refunds, refundItems, settings, shop, updatedAt } = receipt;
   const currency = shop?.currency ?? settings?.pos.currency ?? "SAR";
   const shopName = settings?.pos.shopName ?? shop?.name ?? "Simple POS";
   const logoUrl = settings?.pos.logoUrl;
   const receiptSettings = settings?.receipt;
   const taxLabel = bill.taxName ?? settings?.tax.name ?? "Tax";
+  const refundState = calculateBillRefundState({
+    billId: bill.id,
+    billItems: items,
+    refunds,
+    refundItems
+  });
+  const publicReceiptUrl = buildPublicReceiptUrl(token);
+  const qrImageUrl = buildQrCodeImageUrl(publicReceiptUrl, 200);
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.12),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(245,158,11,0.12),_transparent_34%),linear-gradient(180deg,#f8fbf9_0%,#eef5f1_100%)] px-4 py-8 text-slate-950">
@@ -145,6 +161,42 @@ export default async function PublicReceiptPage({ params }: PublicReceiptPagePro
             ) : null}
           </header>
 
+          {refundState.totalRefundAmount > 0 ? (
+            <section
+              className={
+                refundState.isFullyRefunded
+                  ? "border-b border-red-200 bg-red-50 px-5 py-5 text-red-900 sm:px-8"
+                  : "border-b border-amber-200 bg-amber-50 px-5 py-5 text-amber-950 sm:px-8"
+              }
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/80 shadow-sm">
+                    <RotateCcw className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em]">Current receipt status</p>
+                    <p className="mt-1 text-xl font-semibold">
+                      {refundState.isFullyRefunded ? "Fully refunded" : "Partially refunded"}
+                    </p>
+                  </div>
+                </div>
+                <div className="rounded-2xl bg-white/80 px-4 py-3 text-left sm:text-right">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em]">Refunded amount</p>
+                  <p className="mt-1 text-lg font-semibold">
+                    {formatCurrency(refundState.totalRefundAmount, currency, "en")}
+                  </p>
+                </div>
+              </div>
+              {refundState.billRefunds.length > 0 ? (
+                <p className="mt-3 text-sm">
+                  Latest refund: {formatDateTime(refundState.billRefunds.at(-1)?.returnDate, "en")}
+                  {refundState.billRefunds.at(-1)?.reason ? ` · ${refundState.billRefunds.at(-1)?.reason}` : ""}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+
           <section className="grid gap-3 border-b border-slate-200 bg-slate-50/70 p-5 sm:grid-cols-2 sm:p-8">
             <div className="rounded-3xl border border-slate-200 bg-white p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Receipt</p>
@@ -163,6 +215,9 @@ export default async function PublicReceiptPage({ params }: PublicReceiptPagePro
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Payment</p>
               <p className="mt-2 text-base font-semibold capitalize">{bill.paymentMethod === "account" ? "Pay later" : bill.paymentMethod}</p>
               <p className="mt-1 text-sm text-slate-600">Cashier: {cashier?.name ?? "Not available"}</p>
+              <p className="mt-1 text-sm font-medium text-slate-700">
+                Status: {refundState.isFullyRefunded ? "Refunded" : refundState.totalRefundAmount > 0 ? "Partially refunded" : bill.status}
+              </p>
             </div>
           </section>
 
@@ -239,11 +294,39 @@ export default async function PublicReceiptPage({ params }: PublicReceiptPagePro
                 <span className="text-slate-600">Due</span>
                 <span className="font-semibold">{formatCurrency(bill.dueAmount, currency, "en")}</span>
               </div>
+              {refundState.totalRefundAmount > 0 ? (
+                <div className="flex items-center justify-between border-t border-slate-200 pt-3 text-red-700">
+                  <span>Refunded</span>
+                  <span className="font-semibold">-{formatCurrency(refundState.totalRefundAmount, currency, "en")}</span>
+                </div>
+              ) : null}
             </div>
           </section>
 
+          {qrImageUrl && publicReceiptUrl ? (
+            <section className="border-t border-slate-200 px-5 py-6 sm:px-8">
+              <div className="mx-auto flex max-w-lg flex-col items-center gap-4 rounded-[28px] border border-emerald-200 bg-emerald-50/70 p-5 text-center sm:flex-row sm:text-left">
+                <img
+                  alt={`QR code for receipt ${bill.number}`}
+                  className="h-28 w-28 rounded-2xl border border-emerald-200 bg-white p-2"
+                  src={qrImageUrl}
+                />
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">Verified digital receipt</p>
+                  <p className="mt-2 font-semibold text-slate-950">Scan to reopen this exact receipt</p>
+                  <a
+                    className="mt-2 block break-all text-sm font-medium text-emerald-800 underline decoration-emerald-300 underline-offset-4"
+                    href={publicReceiptUrl}
+                  >
+                    {publicReceiptUrl}
+                  </a>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
           <footer className="border-t border-slate-200 px-5 py-5 text-center text-xs leading-6 text-slate-500 sm:px-8">
-            <p>This is a read-only digital receipt generated from the shop POS record.</p>
+            <p>This verified receipt reflects the latest sale and refund records saved by the shop.</p>
             {updatedAt ? <p>Last synced {formatDateTime(updatedAt, "en")}</p> : null}
           </footer>
         </article>
