@@ -1865,31 +1865,43 @@ export function BillingWorkspace() {
           </div>
 
           <div className="min-h-0 overflow-y-auto px-4 py-4">
-            <div className="relative">
+            <div>
               <label className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
                 {t("billing.customerSearchCompact")}
               </label>
-              <Search className="pointer-events-none absolute left-4 top-[calc(50%+0.65rem)] h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <Input
-                className="h-11 rounded-[16px] border-slate-200 bg-slate-50 pl-11 text-sm text-slate-950"
-                placeholder={t("billing.customerSearchCompact")}
-                value={customerSearch}
-                onChange={(event) => setCustomerSearch(event.target.value)}
-              />
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  className="h-11 rounded-[16px] border-slate-200 bg-slate-50 pl-11 text-sm text-slate-950"
+                  placeholder={t("billing.customerSearchCompact")}
+                  value={customerSearch}
+                  onChange={(event) => setCustomerSearch(event.target.value)}
+                />
+              </div>
 
               {customerSearchHasValue ? (
-                <div className="absolute inset-x-0 top-[calc(100%+0.55rem)] z-20 rounded-[20px] border border-slate-200 bg-white p-2 shadow-[0_22px_50px_rgba(15,23,42,0.14)]">
+                <div
+                  aria-live="polite"
+                  className="mt-2 max-h-52 overflow-y-auto rounded-[20px] border border-slate-200 bg-white p-2 shadow-[0_16px_38px_rgba(15,23,42,0.1)]"
+                >
                   {matchedCustomers.length > 0 ? (
                     <div className="space-y-1.5">
                       {matchedCustomers.map((customer) => (
                         <button
                           key={customer.id}
-                          className="block w-full rounded-2xl px-3 py-2.5 text-left transition hover:bg-slate-50"
+                          className="flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2.5 text-left transition hover:bg-emerald-50 focus-visible:bg-emerald-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30"
                           onClick={() => selectCustomer(customer)}
                           type="button"
                         >
-                          <p className="text-sm font-semibold text-slate-950">{customer.name}</p>
-                          <p className="mt-1 text-xs text-slate-500">{customer.phone || customer.whatsapp}</p>
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-semibold text-slate-950">{customer.name}</span>
+                            <span className="mt-1 block truncate text-xs text-slate-500">
+                              {customer.phone || customer.whatsapp || customer.email}
+                            </span>
+                          </span>
+                          <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-800">
+                            {t("common.open")}
+                          </span>
                         </button>
                       ))}
                     </div>
