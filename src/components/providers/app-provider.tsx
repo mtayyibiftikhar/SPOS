@@ -8270,7 +8270,7 @@ export function AppProvider({
           message: "Unable to update customer details."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const bill = current.bills.find((entry) => entry.id === billId && entry.shopId === currentShopId);
 
           if (!bill) {
@@ -8383,7 +8383,7 @@ export function AppProvider({
                 : entry
             )
           };
-        });
+        }));
 
         return result;
       },

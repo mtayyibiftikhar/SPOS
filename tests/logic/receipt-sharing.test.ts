@@ -34,10 +34,11 @@ test("WhatsApp receipt message includes polished purchase details and the verifi
   });
 
   assert.match(message, /\*Thank you for shopping with us, Muhammad Tayyib!\*/);
-  assert.match(message, /🧾 \*Receipt Details\*/);
+  assert.match(message, /\*RECEIPT DETAILS\*/);
   assert.match(message, /\*Icecream\*/);
   assert.match(message, /VAT: \*SAR\s?2\.61\*/);
   assert.match(message, /https:\/\/shop\.globalfsms\.com\/r\/test-token/);
+  assert.doesNotMatch(message, /�|ðŸ|â€¢|Ã—/);
 });
 
 test("Email receipt message stays readable without WhatsApp markdown", () => {
@@ -47,8 +48,8 @@ test("Email receipt message stays readable without WhatsApp markdown", () => {
   });
 
   assert.match(message, /Thank you for shopping with us, Muhammad Tayyib!/);
-  assert.doesNotMatch(message, /\*Receipt Details\*/);
-  assert.match(message, /View or download your verified digital receipt:/);
+  assert.doesNotMatch(message, /\*RECEIPT DETAILS\*/);
+  assert.match(message, /VIEW OR DOWNLOAD YOUR VERIFIED DIGITAL RECEIPT/);
 });
 
 test("Receipt message reports full and partial refund state", () => {
