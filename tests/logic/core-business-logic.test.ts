@@ -19,6 +19,7 @@ import type {
   BillItem,
   BusinessDay,
   CashMovement,
+  CustomerAccountPayment,
   Expense,
   Product,
   ProductCategory,
@@ -243,6 +244,71 @@ test("business-day summary includes all shifts for the date and keeps expenses s
   assert.equal(summary.totalSales, 160);
   assert.equal(summary.expenses, 30);
   assert.equal(summary.expectedCash, 175);
+});
+
+test("account settlements update cash control without inflating sales", () => {
+  const shift: Shift = {
+    id: "shift_1",
+    shopId: SHOP_ID,
+    businessDate: BUSINESS_DATE,
+    cashierId: "user_1",
+    openingCash: 50,
+    startedAt: "2026-07-14T07:00:00.000Z"
+  };
+  const accountPayments: CustomerAccountPayment[] = [
+    {
+      id: "account_cash",
+      shopId: SHOP_ID,
+      customerId: "customer_1",
+      number: "PAY-000001",
+      businessDate: BUSINESS_DATE,
+      shiftId: shift.id,
+      amount: 25,
+      method: "cash",
+      createdBy: "user_1",
+      createdAt: "2026-07-14T09:00:00.000Z"
+    },
+    {
+      id: "account_card",
+      shopId: SHOP_ID,
+      customerId: "customer_1",
+      number: "PAY-000002",
+      businessDate: BUSINESS_DATE,
+      shiftId: shift.id,
+      amount: 30,
+      method: "card",
+      createdBy: "user_1",
+      createdAt: "2026-07-14T09:10:00.000Z"
+    }
+  ];
+
+  const shiftSummary = calculateShiftSummary({
+    shift,
+    bills: [bill({ total: 100 })],
+    cashMovements: [],
+    customerAccountPayments: accountPayments,
+    refunds: []
+  });
+  const daySummary = calculateBusinessDaySummary({
+    businessDate: BUSINESS_DATE,
+    shopId: SHOP_ID,
+    timeZone: "Asia/Riyadh",
+    bills: [bill({ total: 100 })],
+    cashMovements: [],
+    shifts: [shift],
+    customerAccountPayments: accountPayments,
+    refunds: []
+  });
+
+  assert.equal(shiftSummary.cashSales, 100);
+  assert.equal(shiftSummary.accountPaymentsReceived, 55);
+  assert.equal(shiftSummary.accountCashPayments, 25);
+  assert.equal(shiftSummary.accountCardPayments, 30);
+  assert.equal(shiftSummary.expectedCash, 175);
+  assert.equal(daySummary.totalSales, 100);
+  assert.equal(daySummary.netSales, 100);
+  assert.equal(daySummary.accountPaymentsReceived, 55);
+  assert.equal(daySummary.expectedCash, 175);
 });
 
 test("selected customer settlement never exceeds receipt dues", () => {

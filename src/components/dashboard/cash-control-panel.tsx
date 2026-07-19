@@ -229,11 +229,12 @@ export function CashControlPanel() {
       timeZone: currentShop.timezone,
       bills: state.bills,
       cashMovements: state.cashMovements,
+      customerAccountPayments: state.customerAccountPayments,
       expenses: state.expenses,
       shifts: state.shifts,
       refunds: state.refunds
     });
-  }, [currentBusinessDay, currentShop, state.bills, state.cashMovements, state.expenses, state.refunds, state.shifts]);
+  }, [currentBusinessDay, currentShop, state.bills, state.cashMovements, state.customerAccountPayments, state.expenses, state.refunds, state.shifts]);
 
   const activeShiftSummary = useMemo(() => {
     if (!currentShift) {
@@ -244,9 +245,10 @@ export function CashControlPanel() {
       shift: currentShift,
       bills: state.bills,
       cashMovements: state.cashMovements,
+      customerAccountPayments: state.customerAccountPayments,
       refunds: state.refunds
     });
-  }, [currentShift, state.bills, state.cashMovements, state.refunds]);
+  }, [currentShift, state.bills, state.cashMovements, state.customerAccountPayments, state.refunds]);
 
   const latestClosedShift = useMemo(
     () => getLatestClosedShift(state.shifts, currentShop?.id ?? null, session?.id ?? null),
@@ -262,9 +264,10 @@ export function CashControlPanel() {
       shift: latestClosedShift,
       bills: state.bills,
       cashMovements: state.cashMovements,
+      customerAccountPayments: state.customerAccountPayments,
       refunds: state.refunds
     });
-  }, [latestClosedShift, state.bills, state.cashMovements, state.refunds]);
+  }, [latestClosedShift, state.bills, state.cashMovements, state.customerAccountPayments, state.refunds]);
 
   const openShiftsForDay = useMemo(() => {
     if (!currentBusinessDay || !currentShop) {
@@ -742,6 +745,11 @@ export function CashControlPanel() {
                     value={formatCurrency(activeDaySummary?.accountSales ?? 0, currency, locale)}
                   />
                   <SummaryRow
+                    label="Account payments received"
+                    value={formatCurrency(activeDaySummary?.accountPaymentsReceived ?? 0, currency, locale)}
+                    emphasis
+                  />
+                  <SummaryRow
                     label={t("cashControl.refunds")}
                     value={formatCurrency(activeDaySummary?.refunds ?? 0, currency, locale)}
                   />
@@ -831,6 +839,19 @@ export function CashControlPanel() {
                   <SummaryRow
                     label={t("cashControl.accountSales")}
                     value={formatCurrency(activeDaySummary.accountSales, currency, locale)}
+                  />
+                  <SummaryRow
+                    label="Account payments received"
+                    value={formatCurrency(activeDaySummary.accountPaymentsReceived, currency, locale)}
+                    emphasis
+                  />
+                  <SummaryRow
+                    label="Account payments by cash"
+                    value={formatCurrency(activeDaySummary.accountCashPayments, currency, locale)}
+                  />
+                  <SummaryRow
+                    label="Account payments by card"
+                    value={formatCurrency(activeDaySummary.accountCardPayments, currency, locale)}
                   />
                   <SummaryRow
                     label={t("cashControl.refunds")}
@@ -937,6 +958,19 @@ export function CashControlPanel() {
                 <SummaryRow
                   label={t("cashControl.cashSales")}
                   value={formatCurrency(activeShiftSummary.cashSales, currency, locale)}
+                />
+                <SummaryRow
+                  label="Account payments received"
+                  value={formatCurrency(activeShiftSummary.accountPaymentsReceived, currency, locale)}
+                  emphasis
+                />
+                <SummaryRow
+                  label="Account payments by cash"
+                  value={formatCurrency(activeShiftSummary.accountCashPayments, currency, locale)}
+                />
+                <SummaryRow
+                  label="Account payments by card"
+                  value={formatCurrency(activeShiftSummary.accountCardPayments, currency, locale)}
                 />
                 <SummaryRow
                   label={t("cashControl.cashIn")}
@@ -1088,6 +1122,10 @@ export function CashControlPanel() {
                   <SummaryRow
                     label={t("cashControl.expectedCash")}
                     value={formatCurrency(latestClosedShiftSummary.expectedCash, currency, locale)}
+                  />
+                  <SummaryRow
+                    label="Account payments received"
+                    value={formatCurrency(latestClosedShiftSummary.accountPaymentsReceived, currency, locale)}
                   />
                   <SummaryRow
                     label={t("cashControl.countedCash")}

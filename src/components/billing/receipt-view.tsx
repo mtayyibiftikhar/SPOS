@@ -42,6 +42,7 @@ export function ReceiptView({ billId }: { billId: string }) {
   });
   const hasAutoPrinted = useRef(false);
   const isFreshReceipt = searchParams.get("fresh") === "1";
+  const fromAccounts = searchParams.get("from") === "accounts";
   const bill = state.bills.find((entry) => entry.id === billId);
   const shop = bill ? state.shops.find((entry) => entry.id === bill.shopId) ?? null : null;
   const cashier = bill ? state.users.find((entry) => entry.id === bill.cashierId) ?? null : null;
@@ -366,22 +367,35 @@ export function ReceiptView({ billId }: { billId: string }) {
       </div>
 
       <div className="flex flex-wrap gap-3 print:hidden">
-        <Button asChild variant="secondary">
-          <Link href="/billing">
-            <span className="inline-flex items-center gap-2">
-              <ArrowLeft className="h-4 w-4" />
-              {t("receipt.backToBilling")}
-            </span>
-          </Link>
-        </Button>
-        <Button asChild variant="secondary">
-          <Link href="/bills">
-            <span className="inline-flex items-center gap-2">
-              {t("receipt.backToBills")}
-              <ArrowRight className="h-4 w-4" />
-            </span>
-          </Link>
-        </Button>
+        {fromAccounts ? (
+          <Button asChild variant="secondary">
+            <Link href="/customers?view=account">
+              <span className="inline-flex items-center gap-2">
+                <ArrowLeft className="h-4 w-4" />
+                Back to accounts
+              </span>
+            </Link>
+          </Button>
+        ) : (
+          <>
+            <Button asChild variant="secondary">
+              <Link href="/billing">
+                <span className="inline-flex items-center gap-2">
+                  <ArrowLeft className="h-4 w-4" />
+                  {t("receipt.backToBilling")}
+                </span>
+              </Link>
+            </Button>
+            <Button asChild variant="secondary">
+              <Link href="/bills">
+                <span className="inline-flex items-center gap-2">
+                  {t("receipt.backToBills")}
+                  <ArrowRight className="h-4 w-4" />
+                </span>
+              </Link>
+            </Button>
+          </>
+        )}
       </div>
 
       {returnCountdown !== null ? (

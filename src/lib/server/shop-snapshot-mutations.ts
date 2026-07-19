@@ -150,6 +150,7 @@ function closeBusinessDayMutation(
     bills: state.bills ?? [],
     businessDate: openDay.businessDate,
     cashMovements: state.cashMovements ?? [],
+    customerAccountPayments: state.customerAccountPayments ?? [],
     expenses: state.expenses ?? [],
     refunds: state.refunds ?? [],
     shifts: state.shifts ?? [],
@@ -189,6 +190,9 @@ function closeBusinessDayMutation(
           cashSales: summary.cashSales,
           cardSales: summary.cardSales,
           accountSales: summary.accountSales,
+          accountPaymentsReceived: summary.accountPaymentsReceived,
+          accountCashPayments: summary.accountCashPayments,
+          accountCardPayments: summary.accountCardPayments,
           refunds: summary.refunds,
           expenses: summary.expenses,
           netSales: summary.netSales,
@@ -279,6 +283,7 @@ function endShiftMutation(
   const summary = calculateShiftSummary({
     bills: state.bills ?? [],
     cashMovements: state.cashMovements ?? [],
+    customerAccountPayments: state.customerAccountPayments ?? [],
     refunds: state.refunds ?? [],
     shift: activeShift
   });
@@ -407,7 +412,7 @@ function createBillMutation(
   const phoneConflict = findCustomerPhoneConflict(
     customers,
     context.shopId,
-    payload.customer.id,
+    existingCustomer?.id ?? payload.customer.id,
     normalizedCustomerData.phone
   );
 

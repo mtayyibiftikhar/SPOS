@@ -462,6 +462,9 @@ export interface DayClose {
   cashSales: number;
   cardSales: number;
   accountSales: number;
+  accountPaymentsReceived?: number;
+  accountCashPayments?: number;
+  accountCardPayments?: number;
   refunds: number;
   expenses: number;
   netSales: number;

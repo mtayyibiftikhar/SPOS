@@ -2531,6 +2531,7 @@ export function AppProvider({
               shift,
               bills: current.bills,
               cashMovements: current.cashMovements,
+              customerAccountPayments: current.customerAccountPayments,
               refunds: current.refunds
             })
           ])
@@ -2559,6 +2560,7 @@ export function AppProvider({
           timeZone,
           bills: current.bills,
           cashMovements: current.cashMovements,
+          customerAccountPayments: current.customerAccountPayments,
           expenses: current.expenses,
           shifts,
           refunds: current.refunds
@@ -2584,6 +2586,9 @@ export function AppProvider({
               cashSales: summary.cashSales,
               cardSales: summary.cardSales,
               accountSales: summary.accountSales,
+              accountPaymentsReceived: summary.accountPaymentsReceived,
+              accountCashPayments: summary.accountCashPayments,
+              accountCardPayments: summary.accountCardPayments,
               refunds: summary.refunds,
               expenses: summary.expenses,
               netSales: summary.netSales,
@@ -6746,6 +6751,7 @@ export function AppProvider({
             timeZone: shop?.timezone ?? "Asia/Riyadh",
             bills: current.bills,
             cashMovements: current.cashMovements,
+            customerAccountPayments: current.customerAccountPayments,
             expenses: current.expenses,
             shifts: current.shifts,
             refunds: current.refunds
@@ -6773,6 +6779,9 @@ export function AppProvider({
                 cashSales: summary.cashSales,
                 cardSales: summary.cardSales,
                 accountSales: summary.accountSales,
+                accountPaymentsReceived: summary.accountPaymentsReceived,
+                accountCashPayments: summary.accountCashPayments,
+                accountCardPayments: summary.accountCardPayments,
                 refunds: summary.refunds,
                 expenses: summary.expenses,
                 netSales: summary.netSales,
@@ -6865,6 +6874,7 @@ export function AppProvider({
                 shift,
                 bills: current.bills,
                 cashMovements: current.cashMovements,
+                customerAccountPayments: current.customerAccountPayments,
                 refunds: current.refunds
               })
             ])
@@ -6891,6 +6901,7 @@ export function AppProvider({
             timeZone: shop?.timezone ?? "Asia/Riyadh",
             bills: current.bills,
             cashMovements: current.cashMovements,
+            customerAccountPayments: current.customerAccountPayments,
             expenses: current.expenses,
             shifts,
             refunds: current.refunds
@@ -6968,6 +6979,9 @@ export function AppProvider({
                 cashSales: summary.cashSales,
                 cardSales: summary.cardSales,
                 accountSales: summary.accountSales,
+                accountPaymentsReceived: summary.accountPaymentsReceived,
+                accountCashPayments: summary.accountCashPayments,
+                accountCardPayments: summary.accountCardPayments,
                 refunds: summary.refunds,
                 expenses: summary.expenses,
                 netSales: summary.netSales,
@@ -7599,6 +7613,7 @@ export function AppProvider({
             shift: targetShift,
             bills: current.bills,
             cashMovements: current.cashMovements,
+            customerAccountPayments: current.customerAccountPayments,
             refunds: current.refunds
           });
           const now = new Date().toISOString();
@@ -7678,6 +7693,7 @@ export function AppProvider({
             shift: activeShift,
             bills: current.bills,
             cashMovements: current.cashMovements,
+            customerAccountPayments: current.customerAccountPayments,
             refunds: current.refunds
           });
           const endedAt = new Date().toISOString();
@@ -8015,7 +8031,7 @@ export function AppProvider({
           const phoneConflict = findCustomerPhoneConflict(
             current.customers,
             currentShopId,
-            payload.customer.id,
+            existingCustomer?.id ?? payload.customer.id,
             normalizedCustomer.phone
           );
 

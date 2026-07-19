@@ -480,6 +480,7 @@ export function CustomerWorkspace() {
   }, [currentShopId, customerMetricsById, state.customerAccountPayments]);
   const accountCustomers = useMemo(() => {
     const query = search.trim().toLowerCase();
+    const queryDigits = sanitizePhoneDigits(query).replace(/^0+/, "");
 
     return shopCustomers
       .filter((customer) => (customerMetricsById[customer.id]?.outstandingBalance ?? 0) > 0)
@@ -488,9 +489,17 @@ export function CustomerWorkspace() {
           return true;
         }
 
-        return [customer.name, customer.phone, customer.email, customer.whatsapp]
+        const textMatch = [customer.name, customer.phone, customer.email, customer.whatsapp]
           .filter(Boolean)
           .some((value) => value!.toLowerCase().includes(query));
+
+        if (textMatch || queryDigits.length < 3) {
+          return textMatch;
+        }
+
+        return [customer.phone, customer.whatsapp]
+          .filter(Boolean)
+          .some((value) => sanitizePhoneDigits(value!).replace(/^0+/, "").includes(queryDigits));
       })
       .sort(
         (left, right) =>
@@ -685,6 +694,10 @@ export function CustomerWorkspace() {
     setSettlementAmount("");
     setSettlementNote("");
     setSelectedSettlementBillIds([]);
+
+    if (result.paymentId) {
+      window.location.assign(`/bills/payments/${encodeURIComponent(result.paymentId)}?from=accounts&fresh=1`);
+    }
   };
 
   const toggleSettlementBill = (billId: string) => {
@@ -1358,7 +1371,7 @@ export function CustomerWorkspace() {
                     >
                       {t("customers.receiveThisReceipt")}
                     </Button>
-                    <Link className="inline-flex h-9 items-center rounded-[13px] border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50" href={`/bills/${bill.id}`}>
+                    <Link className="inline-flex h-9 items-center rounded-[13px] border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50" href={`/bills/${bill.id}?from=accounts`}>
                       {t("bills.viewReceipt")}
                     </Link>
                   </div>
@@ -1503,7 +1516,7 @@ export function CustomerWorkspace() {
                             >
                               {t("customers.receiveThisReceipt")}
                             </Button>
-                            <Link className="inline-flex h-9 items-center rounded-[13px] border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50" href={`/bills/${bill.id}`}>
+                            <Link className="inline-flex h-9 items-center rounded-[13px] border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50" href={`/bills/${bill.id}?from=accounts`}>
                               {t("bills.viewReceipt")}
                             </Link>
                           </div>
@@ -1747,7 +1760,7 @@ export function CustomerWorkspace() {
                         >
                           {t("customers.receiveThisReceipt")}
                         </Button>
-                        <Link className="inline-flex h-10 items-center rounded-[15px] border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50" href={`/bills/${bill.id}`}>
+                        <Link className="inline-flex h-10 items-center rounded-[15px] border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50" href={`/bills/${bill.id}?from=accounts`}>
                           {t("bills.viewReceipt")}
                         </Link>
                       </div>
@@ -1894,7 +1907,9 @@ export function CustomerWorkspace() {
                     <div className="mt-2 space-y-1">
                       {payment.allocations.map((allocation) => (
                         <div key={`${payment.id}-${allocation.billId}`} className="flex items-center justify-between gap-3">
-                          <span>{allocation.billNumber}</span>
+                          <Link className="font-medium text-emerald-700 hover:text-emerald-800 hover:underline" href={`/bills/${allocation.billId}?from=accounts`}>
+                            {allocation.billNumber}
+                          </Link>
                           <span className="font-medium text-slate-950">
                             {formatCurrency(allocation.amount, currentShop?.currency ?? "SAR", locale)}
                           </span>
@@ -1904,6 +1919,9 @@ export function CustomerWorkspace() {
                   </div>
                 ) : null}
                 {payment.note ? <p className="mt-3 text-sm leading-6 text-slate-600">{payment.note}</p> : null}
+                <Button asChild className="mt-4 w-full" variant="secondary">
+                  <Link href={`/bills/payments/${payment.id}?from=accounts`}>View payment receipt</Link>
+                </Button>
               </div>
             );
           })

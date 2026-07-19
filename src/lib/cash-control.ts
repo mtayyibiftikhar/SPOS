@@ -1,4 +1,4 @@
-import type { Bill, BusinessDay, CashMovement, DayClose, Expense, Refund, Shift } from "@/types/pos";
+import type { Bill, BusinessDay, CashMovement, CustomerAccountPayment, DayClose, Expense, Refund, Shift } from "@/types/pos";
 
 function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
@@ -8,6 +8,9 @@ export type ShiftCashSummary = {
   billCount: number;
   openingCash: number;
   cashSales: number;
+  accountPaymentsReceived: number;
+  accountCashPayments: number;
+  accountCardPayments: number;
   cashRefunds: number;
   cashIn: number;
   cashOut: number;
@@ -24,6 +27,9 @@ export type BusinessDaySummary = {
   cashSales: number;
   cardSales: number;
   accountSales: number;
+  accountPaymentsReceived: number;
+  accountCashPayments: number;
+  accountCardPayments: number;
   refunds: number;
   cashIn: number;
   cashOut: number;
@@ -97,16 +103,19 @@ export function calculateShiftSummary({
   shift,
   bills,
   cashMovements,
+  customerAccountPayments = [],
   refunds = []
 }: {
   shift: Shift;
   bills: Bill[];
   cashMovements: CashMovement[];
+  customerAccountPayments?: CustomerAccountPayment[];
   refunds?: Refund[];
 }): ShiftCashSummary {
   const shiftBills = bills.filter((bill) => bill.shiftId === shift.id && isSalesBill(bill));
   const movementLines = cashMovements.filter((movement) => movement.shiftId === shift.id);
   const shiftRefunds = refunds.filter((refund) => refund.shiftId === shift.id);
+  const shiftAccountPayments = customerAccountPayments.filter((payment) => payment.shiftId === shift.id);
   const cashSales = roundMoney(
     shiftBills
       .filter((bill) => bill.paymentMethod === "cash")
@@ -119,6 +128,13 @@ export function calculateShiftSummary({
         .reduce((sum, refund) => sum + refund.amount, 0)
     )
   );
+  const accountCashPayments = roundMoney(
+    shiftAccountPayments.filter((payment) => payment.method === "cash").reduce((sum, payment) => sum + payment.amount, 0)
+  );
+  const accountCardPayments = roundMoney(
+    shiftAccountPayments.filter((payment) => payment.method === "card").reduce((sum, payment) => sum + payment.amount, 0)
+  );
+  const accountPaymentsReceived = roundMoney(accountCashPayments + accountCardPayments);
   const cashIn = roundMoney(
     movementLines
       .filter((movement) => movement.type === "cash_in")
@@ -129,7 +145,7 @@ export function calculateShiftSummary({
       .filter((movement) => movement.type === "cash_out")
       .reduce((sum, movement) => sum + movement.amount, 0)
   );
-  const expectedCash = roundMoney(shift.openingCash + cashSales + cashIn - cashOut - cashRefunds);
+  const expectedCash = roundMoney(shift.openingCash + cashSales + accountCashPayments + cashIn - cashOut - cashRefunds);
   const countedCash = shift.countedCash ?? null;
   const difference =
     countedCash === null || countedCash === undefined ? null : roundMoney(countedCash - expectedCash);
@@ -138,6 +154,9 @@ export function calculateShiftSummary({
     billCount: shiftBills.length,
     openingCash: roundMoney(shift.openingCash),
     cashSales,
+    accountPaymentsReceived,
+    accountCashPayments,
+    accountCardPayments,
     cashRefunds,
     cashIn,
     cashOut,
@@ -154,6 +173,7 @@ export function calculateBusinessDaySummary({
   bills,
   cashMovements,
   shifts,
+  customerAccountPayments = [],
   expenses = [],
   refunds = []
 }: {
@@ -163,6 +183,7 @@ export function calculateBusinessDaySummary({
   bills: Bill[];
   cashMovements: CashMovement[];
   shifts: Shift[];
+  customerAccountPayments?: CustomerAccountPayment[];
   expenses?: Expense[];
   refunds?: Refund[];
 }): BusinessDaySummary {
@@ -184,6 +205,10 @@ export function calculateBusinessDaySummary({
   const dayExpenses = expenses.filter(
     (expense) => expense.shopId === shopId && expense.businessDate === businessDate
   );
+  const dayAccountPayments = customerAccountPayments.filter(
+    (payment) =>
+      payment.shopId === shopId && resolveBusinessDate(payment, timeZone) === businessDate
+  );
   const openingCash = roundMoney(dayShifts.reduce((sum, shift) => sum + shift.openingCash, 0));
   const totalSales = roundMoney(dayBills.reduce((sum, bill) => sum + bill.total, 0));
   const cashSales = roundMoney(
@@ -201,6 +226,13 @@ export function calculateBusinessDaySummary({
       .filter((bill) => bill.paymentMethod === "account")
       .reduce((sum, bill) => sum + bill.total, 0)
   );
+  const accountCashPayments = roundMoney(
+    dayAccountPayments.filter((payment) => payment.method === "cash").reduce((sum, payment) => sum + payment.amount, 0)
+  );
+  const accountCardPayments = roundMoney(
+    dayAccountPayments.filter((payment) => payment.method === "card").reduce((sum, payment) => sum + payment.amount, 0)
+  );
+  const accountPaymentsReceived = roundMoney(accountCashPayments + accountCardPayments);
   const cashIn = roundMoney(
     dayMovements
       .filter((movement) => movement.type === "cash_in")
@@ -221,7 +253,7 @@ export function calculateBusinessDaySummary({
     )
   );
   const netSales = roundMoney(totalSales - refundsTotal);
-  const expectedCash = roundMoney(openingCash + cashSales + cashIn - cashOut - cashRefunds);
+  const expectedCash = roundMoney(openingCash + cashSales + accountCashPayments + cashIn - cashOut - cashRefunds);
 
   return {
     billCount: dayBills.length,
@@ -231,6 +263,9 @@ export function calculateBusinessDaySummary({
     cashSales,
     cardSales,
     accountSales,
+    accountPaymentsReceived,
+    accountCashPayments,
+    accountCardPayments,
     refunds: refundsTotal,
     cashIn,
     cashOut,

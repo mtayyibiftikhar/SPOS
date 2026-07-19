@@ -163,6 +163,7 @@ export function TimeClockWorkspace() {
         shift: currentShift,
         bills: state.bills,
         cashMovements: state.cashMovements,
+        customerAccountPayments: state.customerAccountPayments,
         refunds: state.refunds
       })
     : null;

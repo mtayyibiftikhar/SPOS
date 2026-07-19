@@ -173,6 +173,32 @@ function productMatchesSearch(product: Product, query: string) {
     .some((value) => value!.toLowerCase().includes(query));
 }
 
+function customerMatchesSearch(customer: Customer, rawQuery: string) {
+  const query = rawQuery.trim().toLowerCase();
+
+  if (!query) {
+    return false;
+  }
+
+  const textMatch = [customer.name, customer.email, customer.phone, customer.whatsapp]
+    .filter(Boolean)
+    .some((value) => value!.toLowerCase().includes(query));
+
+  if (textMatch) {
+    return true;
+  }
+
+  const queryDigits = sanitizePhoneDigits(query).replace(/^0+/, "");
+
+  if (queryDigits.length < 3) {
+    return false;
+  }
+
+  return [customer.phone, customer.whatsapp]
+    .filter(Boolean)
+    .some((value) => sanitizePhoneDigits(value!).replace(/^0+/, "").includes(queryDigits));
+}
+
 function StatusChip({ icon: Icon, label, tone }: StatusChipProps) {
   return (
     <span
@@ -392,19 +418,13 @@ export function BillingWorkspace() {
   const showQuickSearchProducts = Boolean(quickSearchTerm && !selectedQuickCategory);
 
   const matchedCustomers = useMemo(() => {
-    const query = deferredCustomerSearch.trim().toLowerCase();
+    const query = deferredCustomerSearch.trim();
 
     if (!query) {
       return [];
     }
 
-    return savedCustomers
-      .filter((customer) =>
-        [customer.name, customer.phone, customer.whatsapp]
-          .filter(Boolean)
-          .some((value) => value!.toLowerCase().includes(query))
-      )
-      .slice(0, 6);
+    return savedCustomers.filter((customer) => customerMatchesSearch(customer, query)).slice(0, 6);
   }, [deferredCustomerSearch, savedCustomers]);
 
   const searchResults = useMemo(() => {
@@ -2190,8 +2210,12 @@ export function BillingWorkspace() {
             </div>
           </div>
 
-          <div className="border-t border-slate-200 px-4 py-4">
-            {error ? <p className="mb-3 text-sm font-medium text-red-700">{error}</p> : null}
+          <div className="space-y-3 border-t border-slate-200 px-4 py-4">
+            {error ? (
+              <div className="rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium leading-5 text-red-700" role="alert">
+                {error}
+              </div>
+            ) : null}
 
             <Button
               className="h-12 w-full rounded-[18px] bg-emerald-600 text-base font-semibold text-white hover:bg-emerald-700"

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { ArrowRight, Printer, ReceiptText, Search } from "lucide-react";
+import { ArrowRight, Printer, ReceiptText, Search, WalletCards } from "lucide-react";
 import { getBusinessDateInTimezone } from "@/lib/cash-control";
 import { billStatusLabelKeys, paymentMethodLabelKeys } from "@/lib/i18n";
 import { usePosApp } from "@/components/providers/app-provider";
@@ -14,7 +14,7 @@ import { cn, formatBusinessDate, formatCurrency, formatDateTime } from "@/lib/ut
 import type { Bill, BillItem, Locale, POSSettings, Shop, User } from "@/types/pos";
 
 type RangePreset = "today" | "yesterday" | "week" | "month" | "year" | "custom";
-type BillsTab = "sales" | "refunded";
+type BillsTab = "sales" | "refunded" | "accountPayments";
 
 const PAGE_SIZE = 10;
 
@@ -248,6 +248,19 @@ export function BillsCenter() {
     [currentShopId, state.bills]
   );
 
+  const customerById = useMemo(
+    () => new Map(state.customers.map((customer) => [customer.id, customer])),
+    [state.customers]
+  );
+
+  const accountPayments = useMemo(
+    () =>
+      state.customerAccountPayments
+        .filter((payment) => payment.shopId === currentShopId)
+        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
+    [currentShopId, state.customerAccountPayments]
+  );
+
   const refundMetaByBillId = useMemo(() => {
     const next = new Map<string, { count: number; total: number }>();
 
@@ -265,6 +278,10 @@ export function BillsCenter() {
   }, [currentShopId, state.refunds]);
 
   const tabBills = useMemo(() => {
+    if (activeTab === "accountPayments") {
+      return [];
+    }
+
     if (activeTab === "refunded") {
       return bills.filter((bill) => bill.status === "refunded" || refundMetaByBillId.has(bill.id));
     }
@@ -323,16 +340,54 @@ export function BillsCenter() {
     });
   }, [deferredSearch, selectedRange.dateFrom, selectedRange.dateTo, tabBills]);
 
+  const filteredAccountPayments = useMemo(() => {
+    if (activeTab !== "accountPayments") {
+      return [];
+    }
+
+    const query = deferredSearch.trim().toLowerCase();
+    const queryDigits = query.replace(/\D/g, "");
+
+    return accountPayments.filter((payment) => {
+      const businessDate = payment.businessDate ?? payment.createdAt.slice(0, 10);
+
+      if (businessDate < selectedRange.dateFrom || businessDate > selectedRange.dateTo) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      const customer = customerById.get(payment.customerId);
+      const textMatch = [
+        payment.number,
+        customer?.name,
+        customer?.email,
+        customer?.phone,
+        ...(payment.allocations ?? []).map((allocation) => allocation.billNumber)
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query));
+      const phoneDigits = customer?.phone?.replace(/\D/g, "") ?? "";
+
+      return textMatch || Boolean(queryDigits && phoneDigits.includes(queryDigits));
+    });
+  }, [accountPayments, activeTab, customerById, deferredSearch, selectedRange.dateFrom, selectedRange.dateTo]);
+
   useEffect(() => {
     setCurrentPage(1);
     setSelectedBillIds(new Set());
   }, [activeTab, deferredSearch, selectedRange.dateFrom, selectedRange.dateTo]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredBills.length / PAGE_SIZE));
+  const activeResultCount = activeTab === "accountPayments" ? filteredAccountPayments.length : filteredBills.length;
+  const totalPages = Math.max(1, Math.ceil(activeResultCount / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
   const paginatedBills = filteredBills.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-  const rangeStart = filteredBills.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
-  const rangeEnd = filteredBills.length === 0 ? 0 : rangeStart + paginatedBills.length - 1;
+  const paginatedAccountPayments = filteredAccountPayments.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const activePageLength = activeTab === "accountPayments" ? paginatedAccountPayments.length : paginatedBills.length;
+  const rangeStart = activeResultCount === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+  const rangeEnd = activeResultCount === 0 ? 0 : rangeStart + activePageLength - 1;
   const selectedBills = filteredBills.filter((bill) => selectedBillIds.has(bill.id));
   const refundedBillCount = bills.filter((bill) => bill.status === "refunded" || refundMetaByBillId.has(bill.id)).length;
 
@@ -396,7 +451,7 @@ export function BillsCenter() {
   return (
     <div className="space-y-6">
       <Card className="p-4">
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-3">
           {([
             {
               key: "sales",
@@ -409,6 +464,12 @@ export function BillsCenter() {
               title: t("bills.refundedTab"),
               count: refundedBillCount,
               description: t("bills.refundCount", { count: refundedBillCount })
+            },
+            {
+              key: "accountPayments",
+              title: "Account payments",
+              count: accountPayments.length,
+              description: "Payments received against due receipts"
             }
           ] as const).map((tab) => (
             <button
@@ -488,13 +549,17 @@ export function BillsCenter() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-olive">{t("bills.searchLabel")}</p>
             <h2 className="mt-2 font-display text-2xl font-semibold text-ink">
-              {activeTab === "refunded" ? t("bills.refundedTab") : t("bills.searchTitle")}
+              {activeTab === "accountPayments"
+                ? "Account payments received"
+                : activeTab === "refunded"
+                  ? t("bills.refundedTab")
+                  : t("bills.searchTitle")}
             </h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
               {t("common.showingItemsRange", {
                 from: String(rangeStart),
                 to: String(rangeEnd),
-                total: String(filteredBills.length)
+                total: String(activeResultCount)
               })}
             </p>
           </div>
@@ -509,7 +574,7 @@ export function BillsCenter() {
           </label>
         </div>
 
-        <div className="mt-5 flex flex-wrap gap-3 rounded-[26px] border border-line bg-shell/60 p-3">
+        {activeTab !== "accountPayments" ? <div className="mt-5 flex flex-wrap gap-3 rounded-[26px] border border-line bg-shell/60 p-3">
           <Badge variant="neutral">{t("bills.selectedCount", { count: selectedBills.length })}</Badge>
           <Button className="h-11 rounded-[16px]" onClick={selectVisiblePage} variant="secondary">
             {t("bills.selectVisiblePage")}
@@ -540,11 +605,62 @@ export function BillsCenter() {
             <Printer className="mr-2 h-4 w-4" />
             {t("bills.printAll")}
           </Button>
-        </div>
+        </div> : null}
 
         {printFeedback ? <p className="mt-3 text-sm font-medium text-red-600">{printFeedback}</p> : null}
 
         <div className="mt-6 space-y-4">
+          {paginatedAccountPayments.map((payment) => {
+            const customer = customerById.get(payment.customerId);
+
+            return (
+              <Card key={payment.id} className="border-emerald-100 p-5">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="flex gap-4">
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
+                      <WalletCards className="h-5 w-5" />
+                    </span>
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-base font-semibold text-ink">{payment.number}</p>
+                        <Badge variant="success">Account payment</Badge>
+                        <Badge variant="neutral">{payment.method === "cash" ? "Cash" : "Card"}</Badge>
+                        <Badge variant="neutral">
+                          {formatBusinessDate(payment.businessDate ?? payment.createdAt.slice(0, 10), locale)}
+                        </Badge>
+                      </div>
+                      <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2 xl:grid-cols-4">
+                        <p><span className="font-medium text-ink">Customer:</span> {customer?.name ?? "Unknown customer"}</p>
+                        <p><span className="font-medium text-ink">Phone:</span> {customer?.phone || t("common.notAvailable")}</p>
+                        <p><span className="font-medium text-ink">Received:</span> {formatDateTime(payment.createdAt, locale)}</p>
+                        <p><span className="font-medium text-ink">Amount:</span> {formatCurrency(payment.amount, currency, locale)}</p>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {(payment.allocations ?? []).map((allocation) => (
+                          <Link
+                            className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700"
+                            href={`/bills/${allocation.billId}`}
+                            key={`${payment.id}-${allocation.billId}`}
+                          >
+                            {allocation.billNumber}: {formatCurrency(allocation.amount, currency, locale)}
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <Button asChild variant="secondary">
+                    <Link href={`/bills/payments/${payment.id}`}>
+                      <span className="inline-flex items-center gap-2">
+                        View payment receipt
+                        <ArrowRight className="h-4 w-4" />
+                      </span>
+                    </Link>
+                  </Button>
+                </div>
+              </Card>
+            );
+          })}
+
           {paginatedBills.map((bill) => {
             const refundMeta = refundMetaByBillId.get(bill.id);
 
@@ -616,26 +732,30 @@ export function BillsCenter() {
             );
           })}
 
-          {filteredBills.length === 0 ? (
+          {activeResultCount === 0 ? (
             <Card className="border-dashed p-6 text-center">
               <ReceiptText className="mx-auto h-6 w-6 text-slate-400" />
               <p className="mt-3 text-sm leading-6 text-slate-600">
-                {bills.length === 0 ? t("bills.emptyState") : t("bills.rangeEmpty")}
+                {activeTab === "accountPayments"
+                  ? "No account payments were received in this period."
+                  : bills.length === 0
+                    ? t("bills.emptyState")
+                    : t("bills.rangeEmpty")}
               </p>
-              <Button asChild className="mt-5">
+              {activeTab !== "accountPayments" ? <Button asChild className="mt-5">
                 <Link href="/billing">{t("bills.goToBilling")}</Link>
-              </Button>
+              </Button> : null}
             </Card>
           ) : null}
         </div>
 
-        {filteredBills.length > PAGE_SIZE ? (
+        {activeResultCount > PAGE_SIZE ? (
           <div className="mt-6 flex flex-col gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-slate-600">
               {t("common.showingItemsRange", {
                 from: String(rangeStart),
                 to: String(rangeEnd),
-                total: String(filteredBills.length)
+                total: String(activeResultCount)
               })}
             </p>
             <div className="flex items-center gap-2">

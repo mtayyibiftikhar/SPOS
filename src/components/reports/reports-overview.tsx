@@ -45,6 +45,7 @@ type ReportView =
   | "inventory"
   | "suppliers"
   | "expenses"
+  | "accountPayments"
   | "refunds"
   | "tax";
 
@@ -234,6 +235,7 @@ export function ReportsOverview() {
     requestedView === "inventory" ||
     requestedView === "suppliers" ||
     requestedView === "expenses" ||
+    requestedView === "accountPayments" ||
     requestedView === "refunds" ||
     requestedView === "tax"
       ? requestedView
@@ -278,6 +280,10 @@ export function ReportsOverview() {
   );
 
   const billById = useMemo(() => new Map(state.bills.map((bill) => [bill.id, bill])), [state.bills]);
+  const customerById = useMemo(
+    () => new Map(state.customers.map((customer) => [customer.id, customer])),
+    [state.customers]
+  );
   const periodBillIds = useMemo(() => new Set(periodBills.map((bill) => bill.id)), [periodBills]);
 
   const periodBillItems = useMemo(
@@ -329,6 +335,36 @@ export function ReportsOverview() {
         .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
     [currentShop?.id, selectedRange.dateFrom, selectedRange.dateTo, state.cashMovements]
   );
+
+  const periodAccountPayments = useMemo(
+    () =>
+      state.customerAccountPayments
+        .filter((payment) => {
+          if (payment.shopId !== currentShop?.id) {
+            return false;
+          }
+
+          const businessDate = getEntryBusinessDate(payment.createdAt, timeZone, payment.businessDate);
+          return isInRange(businessDate, selectedRange.dateFrom, selectedRange.dateTo);
+        })
+        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
+    [currentShop?.id, selectedRange.dateFrom, selectedRange.dateTo, state.customerAccountPayments, timeZone]
+  );
+
+  const accountPaymentSummary = useMemo(() => {
+    const cash = periodAccountPayments
+      .filter((payment) => payment.method === "cash")
+      .reduce((sum, payment) => sum + payment.amount, 0);
+    const card = periodAccountPayments
+      .filter((payment) => payment.method === "card")
+      .reduce((sum, payment) => sum + payment.amount, 0);
+
+    return {
+      cash: roundMoney(cash),
+      card: roundMoney(card),
+      total: roundMoney(cash + card)
+    };
+  }, [periodAccountPayments]);
 
   const periodShifts = useMemo(
     () =>
@@ -755,6 +791,7 @@ export function ReportsOverview() {
           shift,
           bills: state.bills,
           cashMovements: state.cashMovements,
+          customerAccountPayments: state.customerAccountPayments,
           refunds: state.refunds
         });
         const cashier = state.users.find((user) => user.id === shift.cashierId);
@@ -765,7 +802,7 @@ export function ReportsOverview() {
           summary
         };
       }),
-    [periodShifts, state.bills, state.cashMovements, state.refunds, state.users]
+    [periodShifts, state.bills, state.cashMovements, state.customerAccountPayments, state.refunds, state.users]
   );
 
   const taxSummary = useMemo(() => {
@@ -845,7 +882,11 @@ export function ReportsOverview() {
   );
 
   const hasRangeData =
-    periodBills.length > 0 || periodRefunds.length > 0 || periodExpenses.length > 0 || periodMovements.length > 0;
+    periodBills.length > 0 ||
+    periodRefunds.length > 0 ||
+    periodExpenses.length > 0 ||
+    periodMovements.length > 0 ||
+    periodAccountPayments.length > 0;
 
   const reportTabs: Array<{
     href: string;
@@ -861,6 +902,7 @@ export function ReportsOverview() {
     { href: "/reports?view=inventory", icon: <Boxes className="h-4 w-4" />, label: "Inventory", view: "inventory" },
     { href: "/reports?view=suppliers", icon: <Truck className="h-4 w-4" />, label: "Suppliers", view: "suppliers" },
     { href: "/reports?view=expenses", icon: <WalletCards className="h-4 w-4" />, label: "Expenses / Drawer", view: "expenses" },
+    { href: "/reports?view=accountPayments", icon: <WalletCards className="h-4 w-4" />, label: "Account payments", view: "accountPayments" },
     { href: "/reports?view=refunds", icon: <ReceiptText className="h-4 w-4" />, label: "Refunds", view: "refunds" },
     { href: "/reports?view=tax", icon: <ReceiptText className="h-4 w-4" />, label: "Tax", view: "tax" }
   ];
@@ -874,6 +916,7 @@ export function ReportsOverview() {
     inventory: "Inventory Report",
     suppliers: "Supplier Purchase Report",
     expenses: "Expenses and Drawer Report",
+    accountPayments: "Customer Account Payments Report",
     refunds: "Refund Report",
     tax: "Tax Payable Report"
   };
@@ -1172,6 +1215,35 @@ export function ReportsOverview() {
       ];
     }
 
+    if (view === "accountPayments") {
+      return [
+        summaryRows([
+          { label: "Payments received", value: String(periodAccountPayments.length) },
+          { label: "Total received", value: money(accountPaymentSummary.total) },
+          { label: "Cash received", value: money(accountPaymentSummary.cash) },
+          { label: "Card received", value: money(accountPaymentSummary.card) }
+        ]),
+        {
+          title: "Account settlement audit",
+          rows:
+            periodAccountPayments.length > 0
+              ? compactRows(periodAccountPayments, 60).map((payment) => {
+                  const customer = customerById.get(payment.customerId);
+                  const allocations = (payment.allocations ?? [])
+                    .map((allocation) => `${allocation.billNumber} ${money(allocation.amount)}`)
+                    .join(" | ");
+
+                  return {
+                    label: `${payment.number} | ${customer?.name ?? "Unknown customer"}`,
+                    value: money(payment.amount),
+                    detail: `${payment.method.toUpperCase()} | ${formatDateTime(payment.createdAt, "en")}${allocations ? ` | Applied: ${allocations}` : ""}`
+                  };
+                })
+              : [{ label: "No account payments", value: "-" }]
+        }
+      ];
+    }
+
     if (view === "tax") {
       return [
         summaryRows([
@@ -1204,6 +1276,7 @@ export function ReportsOverview() {
           { label: "Bills", value: String(periodBills.length) },
           { label: "Refunds", value: String(periodRefunds.length) },
           { label: "Expenses", value: String(periodExpenses.length) },
+          { label: "Account payments", value: String(periodAccountPayments.length) },
           { label: "Open/closed shifts", value: String(periodShifts.length) },
           { label: "Purchase orders", value: String(purchaseOrdersInRange.length) }
         ]
@@ -1347,6 +1420,10 @@ export function ReportsOverview() {
               {tableRows([
                 { label: "Bills", value: String(periodBills.length) },
                 { label: "Refunds", value: String(periodRefunds.length) },
+                {
+                  label: "Account payments",
+                  value: formatCurrency(accountPaymentSummary.total, currency, locale)
+                },
                 { label: "Top item", value: salesByItem[0]?.name ?? "-" },
                 { label: "Top customer", value: salesByCustomer[0]?.name ?? "-" }
               ])}
@@ -1464,7 +1541,7 @@ export function ReportsOverview() {
             {tableRows(shiftReportRows.map((row) => ({
               label: `${row.cashierName} | ${formatDateTime(row.shift.startedAt, locale)}`,
               value: formatCurrency(row.summary.expectedCash, currency, locale),
-              detail: `${row.shift.endedAt ? "Closed" : "Open"} | cash sales ${formatCurrency(row.summary.cashSales, currency, locale)} | difference ${formatCurrency(row.summary.difference ?? 0, currency, locale)}`
+              detail: `${row.shift.endedAt ? "Closed" : "Open"} | cash sales ${formatCurrency(row.summary.cashSales, currency, locale)} | account payments ${formatCurrency(row.summary.accountPaymentsReceived, currency, locale)} | difference ${formatCurrency(row.summary.difference ?? 0, currency, locale)}`
             })))}
           </ReportPanel>
         </div>
@@ -1582,6 +1659,42 @@ export function ReportsOverview() {
                 label: `${bill?.number ?? refund.originalBillId} | ${formatDateTime(refund.returnDate, locale)}`,
                 value: formatCurrency(refund.amount, currency, locale),
                 detail: `${refund.reason} | original sale ${refund.originalSaleDate}`
+              };
+            }))}
+          </ReportPanel>
+        </div>
+      ) : null}
+
+      {activeView === "accountPayments" ? (
+        <div className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MetricCard label="Payments received" value={periodAccountPayments.length} />
+            <MetricCard
+              accent="green"
+              label="Total received"
+              value={formatCurrency(accountPaymentSummary.total, currency, locale)}
+            />
+            <MetricCard
+              label="Cash received"
+              value={formatCurrency(accountPaymentSummary.cash, currency, locale)}
+            />
+            <MetricCard
+              accent="blue"
+              label="Card received"
+              value={formatCurrency(accountPaymentSummary.card, currency, locale)}
+            />
+          </div>
+          <ReportPanel icon={<WalletCards className="h-5 w-5" />} title="Customer account settlements">
+            {tableRows(periodAccountPayments.map((payment) => {
+              const customer = customerById.get(payment.customerId);
+              const allocations = (payment.allocations ?? [])
+                .map((allocation) => `${allocation.billNumber} ${formatCurrency(allocation.amount, currency, locale)}`)
+                .join(" | ");
+
+              return {
+                label: `${payment.number} | ${customer?.name ?? "Unknown customer"}`,
+                value: formatCurrency(payment.amount, currency, locale),
+                detail: `${payment.method.toUpperCase()} | ${formatDateTime(payment.createdAt, locale)}${allocations ? ` | ${allocations}` : ""}`
               };
             }))}
           </ReportPanel>
