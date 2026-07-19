@@ -8,6 +8,7 @@ import type {
   Product,
   TaxMode
 } from "@/types/pos";
+import { sanitizePhoneDigits } from "@/lib/phone";
 
 type CalculationItem = {
   discountType?: DiscountType;
@@ -215,6 +216,32 @@ export function findExistingCustomer(
   }
 
   return null;
+}
+
+export function customerMatchesSearch(customer: Customer, rawQuery: string) {
+  const query = rawQuery.normalize("NFKC").trim().toLocaleLowerCase();
+
+  if (!query) {
+    return false;
+  }
+
+  const textMatch = [customer.name, customer.email, customer.phone, customer.whatsapp]
+    .filter(Boolean)
+    .some((value) => value!.normalize("NFKC").toLocaleLowerCase().includes(query));
+
+  if (textMatch) {
+    return true;
+  }
+
+  const queryDigits = sanitizePhoneDigits(query).replace(/^0+/, "");
+
+  if (queryDigits.length < 3) {
+    return false;
+  }
+
+  return [customer.phone, customer.whatsapp]
+    .filter(Boolean)
+    .some((value) => sanitizePhoneDigits(value!).replace(/^0+/, "").includes(queryDigits));
 }
 
 export function shouldPersistCustomer(customer: CheckoutCustomerInput) {

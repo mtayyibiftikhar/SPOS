@@ -4,6 +4,7 @@ import {
   calculateBillTotals,
   calculateDiscountAmount,
   calculatePaidAndDue,
+  customerMatchesSearch,
   normalizeDiscountValue
 } from "../../src/lib/billing";
 import { calculateBusinessDaySummary, calculateShiftSummary } from "../../src/lib/cash-control";
@@ -19,6 +20,7 @@ import type {
   BillItem,
   BusinessDay,
   CashMovement,
+  Customer,
   CustomerAccountPayment,
   Expense,
   Product,
@@ -30,6 +32,16 @@ import type {
 
 const SHOP_ID = "shop_test";
 const BUSINESS_DATE = "2026-07-14";
+
+const checkoutCustomer: Customer = {
+  id: "customer_1",
+  shopId: SHOP_ID,
+  name: "Muhammad Tayyib",
+  phone: "+966538113039",
+  email: "mohamedtaeyib@gmail.com",
+  whatsapp: "+966538113039",
+  createdAt: "2026-07-14T08:00:00.000Z"
+};
 
 function bill(overrides: Partial<Bill> = {}): Bill {
   return {
@@ -81,6 +93,19 @@ test("discounts are clamped to the eligible amount and never become negative", (
   assert.equal(normalizeDiscountValue("fixed", 125, 80), 80);
   assert.equal(calculateDiscountAmount(80, "fixed", 125), 80);
   assert.equal(calculateDiscountAmount(80, "percentage", 25), 20);
+});
+
+test("checkout customer search matches normalized names and contact details", () => {
+  assert.equal(customerMatchesSearch(checkoutCustomer, "tayyib"), true);
+  assert.equal(customerMatchesSearch(checkoutCustomer, "MUHAMMAD"), true);
+  assert.equal(customerMatchesSearch(checkoutCustomer, "mohamedtaeyib@gmail.com"), true);
+  assert.equal(customerMatchesSearch(checkoutCustomer, "unrelated customer"), false);
+});
+
+test("checkout customer search matches local and international phone formats", () => {
+  assert.equal(customerMatchesSearch(checkoutCustomer, "0538113039"), true);
+  assert.equal(customerMatchesSearch(checkoutCustomer, "538113039"), true);
+  assert.equal(customerMatchesSearch(checkoutCustomer, "+966 538 113 039"), true);
 });
 
 test("inclusive VAT preserves the charged total and excludes non-taxable lines", () => {

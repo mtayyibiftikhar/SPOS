@@ -27,6 +27,7 @@ import {
   calculateBillTotals,
   calculateDiscountAmount,
   calculatePaidAndDue,
+  customerMatchesSearch,
   getLocalizedProductName,
   normalizeDiscountValue
 } from "@/lib/billing";
@@ -173,32 +174,6 @@ function productMatchesSearch(product: Product, query: string) {
     .some((value) => value!.toLowerCase().includes(query));
 }
 
-function customerMatchesSearch(customer: Customer, rawQuery: string) {
-  const query = rawQuery.trim().toLowerCase();
-
-  if (!query) {
-    return false;
-  }
-
-  const textMatch = [customer.name, customer.email, customer.phone, customer.whatsapp]
-    .filter(Boolean)
-    .some((value) => value!.toLowerCase().includes(query));
-
-  if (textMatch) {
-    return true;
-  }
-
-  const queryDigits = sanitizePhoneDigits(query).replace(/^0+/, "");
-
-  if (queryDigits.length < 3) {
-    return false;
-  }
-
-  return [customer.phone, customer.whatsapp]
-    .filter(Boolean)
-    .some((value) => sanitizePhoneDigits(value!).replace(/^0+/, "").includes(queryDigits));
-}
-
 function StatusChip({ icon: Icon, label, tone }: StatusChipProps) {
   return (
     <span
@@ -306,7 +281,6 @@ export function BillingWorkspace() {
   const [heldBillsLoaded, setHeldBillsLoaded] = useState(false);
   const [showHeldBills, setShowHeldBills] = useState(false);
 
-  const deferredCustomerSearch = useDeferredValue(customerSearch);
   const deferredQuickSearch = useDeferredValue(quickSearch);
 
   const shopProducts = state.products.filter(
@@ -330,7 +304,7 @@ export function BillingWorkspace() {
   const promotionAppliesToBill = promotionEnabled && promotionScope === "bill";
   const permanentItemDiscounts = currentSettings?.tax.permanentItemDiscounts ?? {};
   const checkoutBlocked = !currentBusinessDay || !currentShift;
-  const customerSearchHasValue = deferredCustomerSearch.trim().length > 0;
+  const customerSearchHasValue = customerSearch.trim().length > 0;
   const productSearchHasValue = productSearch.trim().length > 0;
   const quickSearchTerm = deferredQuickSearch.trim().toLowerCase();
   const heldBillsStorageKey = currentShopId ? `${HELD_BILLS_STORAGE_PREFIX}:${currentShopId}` : null;
@@ -418,14 +392,14 @@ export function BillingWorkspace() {
   const showQuickSearchProducts = Boolean(quickSearchTerm && !selectedQuickCategory);
 
   const matchedCustomers = useMemo(() => {
-    const query = deferredCustomerSearch.trim();
+    const query = customerSearch.trim();
 
     if (!query) {
       return [];
     }
 
     return savedCustomers.filter((customer) => customerMatchesSearch(customer, query)).slice(0, 6);
-  }, [deferredCustomerSearch, savedCustomers]);
+  }, [customerSearch, savedCustomers]);
 
   const searchResults = useMemo(() => {
     const query = productSearch.trim().toLowerCase();
@@ -1883,6 +1857,7 @@ export function BillingWorkspace() {
                 <div
                   aria-live="polite"
                   className="mt-2 max-h-52 overflow-y-auto rounded-[20px] border border-slate-200 bg-white p-2 shadow-[0_16px_38px_rgba(15,23,42,0.1)]"
+                  data-testid="checkout-customer-search-results"
                 >
                   {matchedCustomers.length > 0 ? (
                     <div className="space-y-1.5">
