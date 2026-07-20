@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Camera, CheckCircle2, Clock3, LocateFixed, QrCode, ShieldCheck } from "lucide-react";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
 import { resizeImageFileToDataUrl } from "@/lib/image-upload";
+import { findOpenAttendanceRecord } from "@/lib/attendance";
 import { cn, formatBusinessDate, formatDateTime } from "@/lib/utils";
 import { usePosApp } from "@/components/providers/app-provider";
 import { Button } from "@/components/ui/button";
@@ -14,7 +15,13 @@ async function readJsonResponse(response: Response) {
   const text = await response.text();
 
   try {
-    return JSON.parse(text) as { message?: string; ok?: boolean; scanUrl?: string };
+    return JSON.parse(text) as {
+      attendanceId?: string;
+      clockedIn?: boolean;
+      message?: string;
+      ok?: boolean;
+      scanUrl?: string;
+    };
   } catch {
     return { ok: false, message: text.trim() || `Attendance service returned HTTP ${response.status}.` };
   }
@@ -54,33 +61,37 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
   const [feedback, setFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [scanUrl, setScanUrl] = useState("");
   const [isPending, setIsPending] = useState(false);
-  const [bypassActive, setBypassActive] = useState(false);
+  const [remoteClockedIn, setRemoteClockedIn] = useState(false);
+  const [adminBypassActive, setAdminBypassActive] = useState(false);
   const attendanceEnabled = currentSettings?.pos.attendanceEnabled ?? true;
   const allowQrLink = currentSettings?.pos.attendanceAllowQrLink ?? true;
   const requireLocation = currentSettings?.pos.attendanceRequireLocation ?? true;
   const requireSelfie = currentSettings?.pos.attendanceRequireSelfie ?? false;
-  const bypassKey =
-    currentShopId && session?.id && currentBusinessDay?.businessDate
-      ? `pos-attendance-bypass:${currentShopId}:${session.id}:${currentBusinessDay.businessDate}`
-      : "";
-
   const openAttendance = useMemo(
     () =>
-      currentShopId && session?.workspace === "shop" && currentBusinessDay
-        ? state.attendanceRecords.find(
-            (record) =>
-              record.shopId === currentShopId &&
-              record.userId === session.id &&
-              record.businessDate === currentBusinessDay.businessDate &&
-              !record.clockOutAt
-          ) ?? null
+      currentShopId && session?.workspace === "shop"
+        ? findOpenAttendanceRecord(
+            state.attendanceRecords,
+            currentShopId,
+            session.id,
+            currentBusinessDay?.businessDate
+          )
         : null,
     [currentBusinessDay, currentShopId, session, state.attendanceRecords]
   );
+  const bypassStorageKey =
+    currentShopId && session?.workspace === "shop" && currentBusinessDay
+      ? `pos-attendance-bypass:${currentShopId}:${session.id}:${currentBusinessDay.businessDate}`
+      : "";
 
   useEffect(() => {
-    setBypassActive(Boolean(bypassKey && window.sessionStorage.getItem(bypassKey) === "1"));
-  }, [bypassKey]);
+    if (!bypassStorageKey || typeof window === "undefined") {
+      setAdminBypassActive(false);
+      return;
+    }
+
+    setAdminBypassActive(window.sessionStorage.getItem(bypassStorageKey) === "1");
+  }, [bypassStorageKey]);
 
   useEffect(() => {
     if (
@@ -96,23 +107,37 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
 
     let active = true;
 
-    void fetch("/api/attendance/session", {
-      body: JSON.stringify({ businessDate: currentBusinessDay.businessDate }),
-      headers: { "content-type": "application/json" },
-      method: "POST"
-    })
-      .then(async (response) => {
-        const payload = await readJsonResponse(response);
+    const prepareAttendance = async () => {
+      const query = new URLSearchParams({ businessDate: currentBusinessDay.businessDate });
+      const statusResponse = await fetch(`/api/attendance/session?${query.toString()}`, { cache: "no-store" });
+      const status = await readJsonResponse(statusResponse);
 
-        if (!response.ok || !payload.ok || !payload.scanUrl) {
-          throw new Error(payload.message ?? "Unable to create attendance QR.");
-        }
+      if (statusResponse.ok && status.clockedIn) {
+        if (active) setRemoteClockedIn(true);
+        return;
+      }
 
-        if (active) setScanUrl(payload.scanUrl);
-      })
+      const response = await fetch("/api/attendance/session", {
+        body: JSON.stringify({ businessDate: currentBusinessDay.businessDate }),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      });
+      const payload = await readJsonResponse(response);
+
+      if (!response.ok || !payload.ok || !payload.scanUrl) {
+        throw new Error(payload.message ?? "Unable to prepare attendance check-in.");
+      }
+
+      if (active) setScanUrl(payload.scanUrl);
+    };
+
+    void prepareAttendance()
       .catch((error) => {
         if (active) {
-          setFeedback({ tone: "error", message: error instanceof Error ? error.message : "Unable to create attendance QR." });
+          setFeedback({
+            tone: "error",
+            message: error instanceof Error ? error.message : "Unable to prepare attendance check-in."
+          });
         }
       });
 
@@ -122,7 +147,7 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
   }, [attendanceEnabled, currentBusinessDay?.businessDate, currentShopId, openAttendance?.id, session?.id]);
 
   useEffect(() => {
-    if (!scanUrl || !currentBusinessDay || openAttendance || bypassActive) return;
+    if (!scanUrl || !currentBusinessDay || openAttendance || remoteClockedIn) return;
 
     const interval = window.setInterval(() => {
       const query = new URLSearchParams({ businessDate: currentBusinessDay.businessDate });
@@ -130,13 +155,13 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
       void fetch(`/api/attendance/session?${query.toString()}`, { cache: "no-store" })
         .then((response) => readJsonResponse(response))
         .then((result) => {
-          if ((result as { clockedIn?: boolean }).clockedIn) window.location.reload();
+          if (result.clockedIn) setRemoteClockedIn(true);
         })
         .catch(() => undefined);
     }, 2500);
 
     return () => window.clearInterval(interval);
-  }, [bypassActive, currentBusinessDay, openAttendance, scanUrl]);
+  }, [currentBusinessDay, openAttendance, remoteClockedIn, scanUrl]);
 
   if (
     !session ||
@@ -144,7 +169,8 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
     !attendanceEnabled ||
     !currentBusinessDay ||
     openAttendance ||
-    bypassActive
+    remoteClockedIn ||
+    adminBypassActive
   ) {
     return <>{children}</>;
   }
@@ -238,7 +264,7 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
       }
 
       setFeedback({ tone: "success", message: result.message ?? "Clock-in saved securely." });
-      window.setTimeout(() => window.location.reload(), 700);
+      setRemoteClockedIn(true);
     } catch (error) {
       setFeedback({
         tone: "error",
@@ -250,9 +276,11 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
   };
 
   const bypassClockIn = () => {
-    if (!bypassKey) return;
-    window.sessionStorage.setItem(bypassKey, "1");
-    setBypassActive(true);
+    setFeedback(null);
+    if (bypassStorageKey && typeof window !== "undefined") {
+      window.sessionStorage.setItem(bypassStorageKey, "1");
+    }
+    setAdminBypassActive(true);
   };
 
   return (
@@ -395,7 +423,12 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
                 {isPending ? "Saving clock-in..." : "Clock in and enter POS"}
               </Button>
               {isAdmin ? (
-                <Button className="h-14 rounded-[22px]" onClick={bypassClockIn} variant="secondary">
+                <Button
+                  className="h-14 rounded-[22px]"
+                  disabled={isPending}
+                  onClick={bypassClockIn}
+                  variant="secondary"
+                >
                   Admin bypass
                 </Button>
               ) : null}

@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { findOpenAttendanceRecord } from "@/lib/attendance";
 import { calculateShiftSummary } from "@/lib/cash-control";
 import { createStructuredReportPdfBlob, downloadBlob } from "@/lib/report-export";
 import { cn, formatBusinessDate, formatCurrency, formatDateTime } from "@/lib/utils";
@@ -64,7 +65,7 @@ function escapeHtml(value: string | number | undefined) {
 function sourceLabel(record: AttendanceRecord) {
   if (record.source === "qr") return "Verified clock-in";
   if (record.source === "manual") return "Manual record";
-  return "Legacy admin bypass";
+  return "Admin force clock-in";
 }
 
 function toIsoDate(date: Date) {
@@ -91,6 +92,7 @@ function openPicker(event: MouseEvent<HTMLInputElement>) {
 
 export function TimeClockWorkspace() {
   const {
+    clockIn,
     clockOut,
     currentBusinessDay,
     currentSettings,
@@ -118,6 +120,8 @@ export function TimeClockWorkspace() {
   const [countedCash, setCountedCash] = useState("");
   const [shiftClosingNote, setShiftClosingNote] = useState("");
   const [serverToday, setServerToday] = useState(today);
+  const [remoteRecords, setRemoteRecords] = useState<AttendanceRecord[]>([]);
+  const [pendingAttendanceUserId, setPendingAttendanceUserId] = useState<string | null>(null);
   const [attendancePeriod, setAttendancePeriod] = useState<AttendancePeriod>("month");
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState(monthStart);
@@ -147,15 +151,23 @@ export function TimeClockWorkspace() {
   useEffect(() => {
     let cancelled = false;
 
-    void fetch("/api/attendance/records", { cache: "no-store" })
-      .then(async (response) => {
-        const payload = (await response.json()) as { currentDate?: string };
-        if (!cancelled && response.ok && payload.currentDate) setServerToday(payload.currentDate);
-      })
-      .catch(() => undefined);
+    const loadAttendance = () => {
+      void fetch("/api/attendance/records", { cache: "no-store" })
+        .then(async (response) => {
+          const payload = (await response.json()) as { currentDate?: string; records?: AttendanceRecord[] };
+          if (cancelled || !response.ok) return;
+          if (payload.currentDate) setServerToday(payload.currentDate);
+          if (payload.records) setRemoteRecords(payload.records);
+        })
+        .catch(() => undefined);
+    };
+
+    loadAttendance();
+    const timer = window.setInterval(loadAttendance, 30_000);
 
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
   }, []);
 
@@ -183,14 +195,29 @@ export function TimeClockWorkspace() {
     setDefaultHours(String(rate?.defaultDailyHours ?? 8));
   }, [currentShopId, rateUserId, state.payrollRates]);
 
-  const shopRecords = useMemo(
-    () => state.attendanceRecords.filter((record) => record.shopId === currentShopId),
-    [currentShopId, state.attendanceRecords]
-  );
-  const todayRecords = shopRecords.filter((record) => record.businessDate === today);
-  const currentRecord = todayRecords.find((record) => record.userId === session?.id && !record.clockOutAt) ?? null;
+  const shopRecords = useMemo(() => {
+    const merged = new Map<string, AttendanceRecord>();
+
+    for (const record of [...remoteRecords, ...state.attendanceRecords]) {
+      if (record.shopId !== currentShopId) continue;
+      const existing = merged.get(record.id);
+
+      // Once a timecard is closed, an older open copy must not reopen it in the UI.
+      if (existing?.clockOutAt && !record.clockOutAt) continue;
+      merged.set(record.id, record);
+    }
+
+    return [...merged.values()];
+  }, [currentShopId, remoteRecords, state.attendanceRecords]);
+  const currentRecord = session && currentShopId
+    ? findOpenAttendanceRecord(shopRecords, currentShopId, session.id, today)
+    : null;
   const employeeName = (userId: string) => currentUsers.find((user) => user.id === userId)?.name ?? "Employee";
-  const employeeStatus = (user: User) => todayRecords.find((record) => record.userId === user.id && !record.clockOutAt) ?? null;
+  const employeeStatus = (user: User) =>
+    currentShopId ? findOpenAttendanceRecord(shopRecords, currentShopId, user.id, today) : null;
+  const openAttendanceCount = new Set(
+    shopRecords.filter((record) => !record.clockOutAt).map((record) => record.userId)
+  ).size;
   const visibleEmployees = isAdmin ? currentUsers : currentUsers.filter((user) => user.id === session?.id);
   const effectiveEmployeeIds = selectedEmployeeIds.length
     ? selectedEmployeeIds
@@ -257,13 +284,40 @@ export function TimeClockWorkspace() {
     if (result.ok) setClockOutPassword("");
   };
 
+  const adminClockIn = async (user: User) => {
+    setFeedback(null);
+    setPendingAttendanceUserId(user.id);
+
+    const result = await clockIn({
+      note: `Force clock-in by ${session?.name ?? "shop admin"}.`,
+      source: "admin_bypass",
+      userId: user.id
+    });
+
+    setFeedback({
+      tone: result.ok ? "success" : "error",
+      message: result.message ?? (result.ok ? `${user.name} is now clocked in.` : "Clock-in failed.")
+    });
+    setPendingAttendanceUserId(null);
+  };
+
   const adminClockOut = async (record: AttendanceRecord) => {
-    const result = await clockOut({ note: "Closed by shop admin from attendance overview.", userId: record.userId });
+    setFeedback(null);
+    setPendingAttendanceUserId(record.userId);
+
+    const result = await clockOut({
+      note: `Force clock-out by ${session?.name ?? "shop admin"}.`,
+      userId: record.userId
+    });
+
     setFeedback({
       tone: result.ok ? "success" : "error",
       message: result.message ?? (result.ok ? "Employee clocked out." : "Clock-out failed.")
     });
-    if (result.ok) setSelectedEvidence(null);
+    if (result.ok) {
+      setSelectedEvidence(null);
+    }
+    setPendingAttendanceUserId(null);
   };
 
   const loadManualRecord = (record?: AttendanceRecord) => {
@@ -463,7 +517,7 @@ export function TimeClockWorkspace() {
         <Card className="overflow-hidden">
           <div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 p-6">
             <div><p className="text-xs font-bold uppercase tracking-[0.28em] text-emerald-700">Live attendance</p><h1 className="mt-2 font-display text-3xl font-semibold text-slate-950">Employee status</h1></div>
-            <Badge variant="success">{todayRecords.filter((record) => !record.clockOutAt).length} clocked in</Badge>
+            <Badge variant={openAttendanceCount ? "success" : "neutral"}>{openAttendanceCount} clocked in</Badge>
           </div>
           <div className="grid gap-4 p-6 md:grid-cols-2 xl:grid-cols-3">
             {currentUsers.map((user) => {
@@ -476,6 +530,26 @@ export function TimeClockWorkspace() {
                   </div>
                   <p className="mt-4 font-semibold text-slate-950">{user.name}</p><p className="mt-1 text-sm text-slate-500">{user.email}</p>
                   {record ? <><p className="mt-4 text-sm text-slate-600">Since {formatDateTime(record.clockInAt, locale)} · {recordHours(record, now).toFixed(2)} h</p><Button className="mt-4 w-full gap-2" onClick={() => setSelectedEvidence(record)} variant="secondary"><Eye className="h-4 w-4" />View verification</Button></> : null}
+                  {record ? (
+                    <Button
+                      className="mt-2 w-full gap-2"
+                      disabled={pendingAttendanceUserId === user.id}
+                      onClick={() => void adminClockOut(record)}
+                      variant="danger"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      {pendingAttendanceUserId === user.id ? "Closing..." : "Force clock out"}
+                    </Button>
+                  ) : (
+                    <Button
+                      className="mt-4 w-full gap-2"
+                      disabled={pendingAttendanceUserId === user.id}
+                      onClick={() => void adminClockIn(user)}
+                    >
+                      <UserRoundCheck className="h-4 w-4" />
+                      {pendingAttendanceUserId === user.id ? "Clocking in..." : "Force clock in"}
+                    </Button>
+                  )}
                 </div>
               );
             })}
@@ -492,7 +566,7 @@ export function TimeClockWorkspace() {
           </div>
           {selectedEvidence.clockInSelfieUrl ? <img alt={`Clock-in selfie for ${employeeName(selectedEvidence.userId)}`} className="mt-5 max-h-80 w-full rounded-[28px] bg-slate-100 object-contain" src={selectedEvidence.clockInSelfieUrl} /> : <div className="mt-5 rounded-[24px] border border-dashed border-slate-200 p-5 text-sm text-slate-500">No selfie was required or captured.</div>}
           {selectedEvidence.clockInLocation ? <a className="mt-4 flex items-center gap-3 rounded-[22px] border border-emerald-200 bg-emerald-50 p-4 font-semibold text-emerald-800 transition hover:-translate-y-0.5 hover:shadow-lg" href={`https://www.google.com/maps?q=${selectedEvidence.clockInLocation.latitude},${selectedEvidence.clockInLocation.longitude}`} rel="noreferrer" target="_blank"><MapPin className="h-5 w-5" />Open verified location</a> : null}
-          {!selectedEvidence.clockOutAt ? <Button className="mt-4 w-full" onClick={() => void adminClockOut(selectedEvidence)} variant="danger">Clock out this employee</Button> : null}
+          {!selectedEvidence.clockOutAt ? <Button className="mt-4 w-full" disabled={pendingAttendanceUserId === selectedEvidence.userId} onClick={() => void adminClockOut(selectedEvidence)} variant="danger">{pendingAttendanceUserId === selectedEvidence.userId ? "Clocking out..." : "Force clock out this employee"}</Button> : null}
         </Card>
       ) : null}
 

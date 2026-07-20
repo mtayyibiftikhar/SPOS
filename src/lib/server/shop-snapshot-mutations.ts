@@ -24,6 +24,7 @@ import {
 import { applySettlementToBills, getCustomerAccountMetrics } from "@/lib/customer-accounts";
 import { createPublicReceiptToken } from "@/lib/public-receipts";
 import { calculateBillRefundState } from "@/lib/refunds";
+import { calculateAutoClosedAttendanceHours } from "@/lib/attendance";
 import { createId } from "@/lib/utils";
 import type {
   Bill,
@@ -174,7 +175,11 @@ function closeBusinessDayMutation(
               ...record,
               status: "auto_closed" as const,
               clockOutAt: closedAt,
-              paidHours: record.scheduledHours,
+              paidHours: calculateAutoClosedAttendanceHours(
+                record.clockInAt,
+                closedAt,
+                record.scheduledHours
+              ),
               note: record.note || "Auto closed at business-day close using scheduled hours.",
               editedBy: context.userId,
               editedAt: closedAt

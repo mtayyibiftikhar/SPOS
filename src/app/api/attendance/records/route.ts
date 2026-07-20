@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { readShopUserSession } from "@/lib/supabase/shop-session";
+import { calculateAutoClosedAttendanceHours } from "@/lib/attendance";
 import type { AttendanceRecord, DemoAppState } from "@/types/pos";
 
 type AttendanceAction = "clock_in" | "clock_out" | "close_day" | "save_adjustment" | "save_payroll_rate";
@@ -100,14 +101,32 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, message: "Sign in before reading attendance time." }, { status: 401 });
   }
 
-  const now = new Date();
+  try {
+    const now = new Date();
+    const supabase = createSupabaseAdminClient();
+    const { data, error } = await supabase
+      .from("attendance_records")
+      .select(attendanceSelect)
+      .eq("shop_id", session.shopId)
+      .order("business_date", { ascending: false })
+      .order("clock_in_at", { ascending: false })
+      .limit(1000);
 
-  return NextResponse.json({
-    currentDate: currentRiyadhDate(now),
-    currentTime: now.toISOString(),
-    ok: true,
-    timeZone: RIYADH_TIME_ZONE
-  });
+    if (error) throw error;
+
+    return NextResponse.json({
+      currentDate: currentRiyadhDate(now),
+      currentTime: now.toISOString(),
+      ok: true,
+      records: (data ?? []).map((record) => normalizeAttendanceRecord(record as Record<string, unknown>)),
+      timeZone: RIYADH_TIME_ZONE
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, message: error instanceof Error ? error.message : "Unable to load attendance." },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(request: Request) {
@@ -149,7 +168,7 @@ export async function POST(request: Request) {
 
       const { data: openRecords, error: recordsError } = await supabase
         .from("attendance_records")
-        .select("id, scheduled_hours, note")
+        .select("id, clock_in_at, scheduled_hours, note")
         .eq("shop_id", session.shopId)
         .eq("business_date", body.businessDate)
         .is("clock_out_at", null);
@@ -165,7 +184,11 @@ export async function POST(request: Request) {
               .update({
                 clock_out_at: closedAt,
                 note: record.note || "Auto closed by business-day rollover using scheduled hours.",
-                paid_hours: Number(record.scheduled_hours ?? 8),
+                paid_hours: calculateAutoClosedAttendanceHours(
+                  String(record.clock_in_at),
+                  closedAt,
+                  Number(record.scheduled_hours ?? 8)
+                ),
                 updated_at: closedAt
               })
               .eq("id", record.id)
@@ -332,7 +355,7 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "clock_out") {
-      if (targetUserId === session.userId) {
+      if (targetUserId === session.userId && session.role !== "shop_admin") {
         const password = body.password?.trim() ?? "";
 
         if (!password) {
@@ -438,16 +461,19 @@ export async function POST(request: Request) {
     if (rateError) throw rateError;
 
     const now = new Date().toISOString();
+    const isManualClockIn = body.source === "manual";
     const { data: inserted, error: insertError } = await supabase
       .from("attendance_records")
       .insert({
         business_date: openDay.businessDate,
         clock_in_at: now,
         hourly_rate: Number(payrollRate?.hourly_rate ?? 0),
-        note: body.note?.trim() || "Admin bypassed attendance capture.",
+        note:
+          body.note?.trim() ||
+          (isManualClockIn ? "Clocked in by shop admin." : "Admin bypassed attendance capture."),
         scheduled_hours: Number(payrollRate?.default_daily_hours ?? 8),
         shop_id: session.shopId,
-        source: body.source === "manual" ? "manual" : "admin_bypass",
+        source: isManualClockIn ? "manual" : "admin_bypass",
         user_id: targetUserId
       })
       .select(attendanceSelect)
@@ -456,16 +482,18 @@ export async function POST(request: Request) {
     if (insertError) throw insertError;
 
     await supabase.from("audit_logs").insert({
-      action: body.source === "manual" ? "attendance.clock_in.manual" : "attendance.clock_in.bypass",
+      action: isManualClockIn ? "attendance.clock_in.manual" : "attendance.clock_in.bypass",
       actor_id: session.userId,
-      detail: `Clock-in capture bypassed for ${profile.name}.`,
+      detail: isManualClockIn
+        ? `Shop admin clocked in ${profile.name}.`
+        : `Clock-in capture bypassed for ${profile.name}.`,
       shop_id: session.shopId,
       target_id: targetUserId
     });
 
     return NextResponse.json({
       ok: true,
-      message: "Admin bypass saved.",
+      message: isManualClockIn ? "Employee clocked in." : "Admin bypass saved.",
       record: normalizeAttendanceRecord(inserted as Record<string, unknown>)
     });
   } catch (error) {

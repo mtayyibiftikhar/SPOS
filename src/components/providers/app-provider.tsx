@@ -68,6 +68,7 @@ import {
   normalizeBarcode
 } from "@/lib/catalog";
 import { calculateBillRefundState } from "@/lib/refunds";
+import { calculateAutoClosedAttendanceHours, findOpenAttendanceRecord } from "@/lib/attendance";
 import { clearShopDataScope, ownerClearShopDataScopeLabels, type OwnerClearShopDataScope } from "@/lib/shop-data-reset";
 import { createPublicReceiptToken } from "@/lib/public-receipts";
 import { createId, getDirection, hashSecret } from "@/lib/utils";
@@ -2196,21 +2197,21 @@ export function AppProvider({
   const currentBusinessDay = getActiveBusinessDay(state.businessDays, currentShopId);
   const currentShift = getActiveShift(state.shifts, currentShopId, session?.id ?? null);
   const currentAttendance =
-    currentShopId && session?.workspace === "shop" && currentBusinessDay
-      ? state.attendanceRecords.find(
-          (record) =>
-            record.shopId === currentShopId &&
-            record.userId === session.id &&
-            record.businessDate === currentBusinessDay.businessDate &&
-            !record.clockOutAt
+    currentShopId && session?.workspace === "shop"
+      ? findOpenAttendanceRecord(
+          state.attendanceRecords,
+          currentShopId,
+          session.id,
+          currentBusinessDay?.businessDate
         ) ??
-        state.attendanceRecords.find(
-          (record) =>
-            record.shopId === currentShopId &&
-            record.userId === session.id &&
-            record.businessDate === currentBusinessDay.businessDate
-        ) ??
-        null
+        (currentBusinessDay
+          ? state.attendanceRecords.find(
+              (record) =>
+                record.shopId === currentShopId &&
+                record.userId === session.id &&
+                record.businessDate === currentBusinessDay.businessDate
+            ) ?? null
+          : null)
       : null;
   const currentBrowserInfo = typeof window === "undefined" ? "" : getCurrentBrowserInfo();
   const currentDeviceActivation =
@@ -6803,8 +6804,14 @@ export function AppProvider({
                     ...record,
                     status: "auto_closed",
                     clockOutAt: closedAt,
-                    paidHours: record.scheduledHours,
-                    note: record.note ?? "Auto closed at day close using default scheduled hours."
+                    paidHours: calculateAutoClosedAttendanceHours(
+                      record.clockInAt,
+                      closedAt,
+                      record.scheduledHours
+                    ),
+                    note:
+                      record.note ??
+                      "Auto closed at day close; paid hours capped at the configured daily hours."
                   }
                 : record
             )
@@ -6967,8 +6974,14 @@ export function AppProvider({
                     ...record,
                     status: "auto_closed",
                     clockOutAt: closedAt,
-                    paidHours: record.scheduledHours,
-                    note: record.note ?? "Auto closed by day rollover using default scheduled hours."
+                    paidHours: calculateAutoClosedAttendanceHours(
+                      record.clockInAt,
+                      closedAt,
+                      record.scheduledHours
+                    ),
+                    note:
+                      record.note ??
+                      "Auto closed by day rollover; paid hours capped at the configured daily hours."
                   }
                 : record
             ),
@@ -7027,7 +7040,7 @@ export function AppProvider({
           return { ok: false, message: "Capture a selfie before clocking in." };
         }
 
-        if (!shouldUseSharedStateEndpoint() && source === "admin_bypass") {
+        if (!shouldUseSharedStateEndpoint() && (source === "admin_bypass" || source === "manual")) {
           try {
             const response = await fetch("/api/attendance/records", {
               body: JSON.stringify({
@@ -7089,12 +7102,11 @@ export function AppProvider({
             return current;
           }
 
-          const existingOpen = current.attendanceRecords.find(
-            (record) =>
-              record.shopId === currentShopId &&
-              record.userId === targetUserId &&
-              record.businessDate === openDay.businessDate &&
-              !record.clockOutAt
+          const existingOpen = findOpenAttendanceRecord(
+            current.attendanceRecords,
+            currentShopId,
+            targetUserId,
+            openDay.businessDate
           );
 
           if (existingOpen) {
@@ -7162,7 +7174,7 @@ export function AppProvider({
           return { ok: false, message: "Only the shop admin can clock out another employee." };
         }
 
-        if (targetUserId === session.id && !payload.password?.trim()) {
+        if (targetUserId === session.id && session.role !== "shop_admin" && !payload.password?.trim()) {
           return { ok: false, message: "Enter your password to confirm clock-out." };
         }
 
@@ -7215,18 +7227,21 @@ export function AppProvider({
             return current;
           }
 
-          if (targetUserId === session.id && employee.passwordHash !== hashSecret(payload.password?.trim() ?? "")) {
+          if (
+            targetUserId === session.id &&
+            session.role !== "shop_admin" &&
+            employee.passwordHash !== hashSecret(payload.password?.trim() ?? "")
+          ) {
             result = { ok: false, message: "Password is incorrect." };
             return current;
           }
 
           const openDay = getActiveBusinessDay(current.businessDays, currentShopId);
-          const activeAttendance = current.attendanceRecords.find(
-            (record) =>
-              record.shopId === currentShopId &&
-              record.userId === targetUserId &&
-              (!openDay || record.businessDate === openDay.businessDate) &&
-              !record.clockOutAt
+          const activeAttendance = findOpenAttendanceRecord(
+            current.attendanceRecords,
+            currentShopId,
+            targetUserId,
+            openDay?.businessDate
           );
 
           if (!activeAttendance) {

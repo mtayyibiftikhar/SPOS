@@ -34,7 +34,6 @@ export async function GET(request: Request) {
       .select("id, clock_in_at")
       .eq("shop_id", session.shopId)
       .eq("user_id", session.userId)
-      .eq("business_date", businessDate)
       .is("clock_out_at", null)
       .order("clock_in_at", { ascending: false })
       .limit(1)
