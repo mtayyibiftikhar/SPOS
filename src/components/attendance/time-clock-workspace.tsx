@@ -24,7 +24,12 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { findOpenAttendanceRecord } from "@/lib/attendance";
+import {
+  DEFAULT_SHIFT_END_TIME,
+  DEFAULT_SHIFT_START_TIME,
+  findOpenAttendanceRecord,
+  getAttendanceScheduleWindow
+} from "@/lib/attendance";
 import { calculateShiftSummary } from "@/lib/cash-control";
 import { createStructuredReportPdfBlob, downloadBlob } from "@/lib/report-export";
 import { cn, formatBusinessDate, formatCurrency, formatDateTime } from "@/lib/utils";
@@ -66,6 +71,25 @@ function sourceLabel(record: AttendanceRecord) {
   if (record.source === "qr") return "Verified clock-in";
   if (record.source === "manual") return "Manual record";
   return "Admin force clock-in";
+}
+
+function scheduleLabel(record: AttendanceRecord) {
+  const start = record.shiftStartTime ?? DEFAULT_SHIFT_START_TIME;
+  const end = record.shiftEndTime ?? DEFAULT_SHIFT_END_TIME;
+  return `${start} - ${end}${record.overnightShift ? " (overnight)" : ""}`;
+}
+
+function arrivalLabel(record: AttendanceRecord) {
+  const { startAt } = getAttendanceScheduleWindow(record);
+  const clockInAt = Date.parse(record.clockInAt);
+  const lateMinutes = Math.max(0, Math.round((clockInAt - startAt.getTime()) / 60_000));
+
+  if (!Number.isFinite(clockInAt) || lateMinutes <= 0) return "On time";
+  if (lateMinutes < 60) return `Late ${lateMinutes} min`;
+
+  const hours = Math.floor(lateMinutes / 60);
+  const minutes = lateMinutes % 60;
+  return `Late ${hours}h${minutes ? ` ${minutes}m` : ""}`;
 }
 
 function toIsoDate(date: Date) {
@@ -130,6 +154,9 @@ export function TimeClockWorkspace() {
   const [rateUserId, setRateUserId] = useState(session?.id ?? "");
   const [hourlyRate, setHourlyRate] = useState("0");
   const [defaultHours, setDefaultHours] = useState("8");
+  const [shiftStartTime, setShiftStartTime] = useState(DEFAULT_SHIFT_START_TIME);
+  const [shiftEndTime, setShiftEndTime] = useState(DEFAULT_SHIFT_END_TIME);
+  const [overnightShift, setOvernightShift] = useState(false);
   const [manualUserId, setManualUserId] = useState("");
   const [manualPage, setManualPage] = useState(1);
   const [manualRecordId, setManualRecordId] = useState<string | undefined>();
@@ -193,6 +220,9 @@ export function TimeClockWorkspace() {
     const rate = state.payrollRates.find((entry) => entry.shopId === currentShopId && entry.userId === rateUserId);
     setHourlyRate(String(rate?.hourlyRate ?? 0));
     setDefaultHours(String(rate?.defaultDailyHours ?? 8));
+    setShiftStartTime(rate?.shiftStartTime ?? DEFAULT_SHIFT_START_TIME);
+    setShiftEndTime(rate?.shiftEndTime ?? DEFAULT_SHIFT_END_TIME);
+    setOvernightShift(Boolean(rate?.overnightShift));
   }, [currentShopId, rateUserId, state.payrollRates]);
 
   const shopRecords = useMemo(() => {
@@ -335,6 +365,9 @@ export function TimeClockWorkspace() {
       setFeedback({ tone: "error", message: "Future attendance records are not allowed." });
       return;
     }
+    const employeeSchedule = state.payrollRates.find(
+      (rate) => rate.shopId === currentShopId && rate.userId === manualUserId
+    );
     const result = await saveAttendanceRecord({
       businessDate: manualDate,
       clockInAt: manualClockIn ? `${manualDate}T${manualClockIn}:00+03:00` : "",
@@ -342,7 +375,10 @@ export function TimeClockWorkspace() {
       id: manualRecordId,
       note: manualNote,
       paidHours: Number(manualHours),
-      scheduledHours: Number(manualHours),
+      scheduledHours: Number(employeeSchedule?.defaultDailyHours ?? manualHours),
+      shiftEndTime: employeeSchedule?.shiftEndTime ?? DEFAULT_SHIFT_END_TIME,
+      shiftStartTime: employeeSchedule?.shiftStartTime ?? DEFAULT_SHIFT_START_TIME,
+      overnightShift: Boolean(employeeSchedule?.overnightShift),
       userId: manualUserId
     });
 
@@ -358,6 +394,9 @@ export function TimeClockWorkspace() {
     const result = await savePayrollRate({
       defaultDailyHours: Number(defaultHours),
       hourlyRate: Number(hourlyRate),
+      overnightShift,
+      shiftEndTime,
+      shiftStartTime,
       userId: rateUserId
     });
     setFeedback({
@@ -378,7 +417,7 @@ export function TimeClockWorkspace() {
           title: `${user.name} - ${hours.toFixed(2)} hours`,
           rows: records.length
             ? records.map((record) => ({
-                detail: `${formatDateTime(record.clockInAt, locale)} to ${record.clockOutAt ? formatDateTime(record.clockOutAt, locale) : "Open"} | ${sourceLabel(record)}${record.note ? ` | ${record.note}` : ""}`,
+                detail: `${formatDateTime(record.clockInAt, locale)} to ${record.clockOutAt ? formatDateTime(record.clockOutAt, locale) : "Open"} | ${scheduleLabel(record)} | ${arrivalLabel(record)} | ${sourceLabel(record)}${record.note ? ` | ${record.note}` : ""}`,
                 label: formatBusinessDate(record.businessDate, locale),
                 value: `${recordHours(record, now).toFixed(2)} h`
               }))
@@ -404,10 +443,10 @@ export function TimeClockWorkspace() {
   const exportExcel = () => {
     const reportRows = filteredTimecards
       .map(
-        (record) => `<tr><td>${escapeHtml(employeeName(record.userId))}</td><td>${escapeHtml(record.businessDate)}</td><td>${escapeHtml(formatDateTime(record.clockInAt, locale))}</td><td>${escapeHtml(record.clockOutAt ? formatDateTime(record.clockOutAt, locale) : "Open")}</td><td>${recordHours(record, now).toFixed(2)}</td><td>${escapeHtml(sourceLabel(record))}</td><td>${escapeHtml(record.note)}</td></tr>`
+        (record) => `<tr><td>${escapeHtml(employeeName(record.userId))}</td><td>${escapeHtml(record.businessDate)}</td><td>${escapeHtml(scheduleLabel(record))}</td><td>${escapeHtml(arrivalLabel(record))}</td><td>${escapeHtml(formatDateTime(record.clockInAt, locale))}</td><td>${escapeHtml(record.clockOutAt ? formatDateTime(record.clockOutAt, locale) : "Open")}</td><td>${recordHours(record, now).toFixed(2)}</td><td>${escapeHtml(sourceLabel(record))}</td><td>${escapeHtml(record.note)}</td></tr>`
       )
       .join("");
-    const markup = `<!doctype html><html><head><meta charset="utf-8"></head><body><h1>${escapeHtml(currentSettings?.pos.shopName ?? currentShop?.name ?? "Store")}</h1><h2>Attendance report</h2><p>${escapeHtml(dateFrom)} to ${escapeHtml(dateTo)}</p><table><thead><tr><th>Employee</th><th>Date</th><th>Clock in</th><th>Clock out</th><th>Hours</th><th>Source</th><th>Note</th></tr></thead><tbody>${reportRows || '<tr><td colspan="7">No attendance records.</td></tr>'}</tbody></table></body></html>`;
+    const markup = `<!doctype html><html><head><meta charset="utf-8"></head><body><h1>${escapeHtml(currentSettings?.pos.shopName ?? currentShop?.name ?? "Store")}</h1><h2>Attendance report</h2><p>${escapeHtml(dateFrom)} to ${escapeHtml(dateTo)}</p><table><thead><tr><th>Employee</th><th>Date</th><th>Schedule</th><th>Arrival</th><th>Clock in</th><th>Clock out</th><th>Hours</th><th>Source</th><th>Note</th></tr></thead><tbody>${reportRows || '<tr><td colspan="9">No attendance records.</td></tr>'}</tbody></table></body></html>`;
     const blob = new Blob([markup], { type: "application/vnd.ms-excel;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -529,7 +568,7 @@ export function TimeClockWorkspace() {
                     <Badge variant={record ? "success" : "neutral"}>{record ? "Clocked in" : "Not clocked in"}</Badge>
                   </div>
                   <p className="mt-4 font-semibold text-slate-950">{user.name}</p><p className="mt-1 text-sm text-slate-500">{user.email}</p>
-                  {record ? <><p className="mt-4 text-sm text-slate-600">Since {formatDateTime(record.clockInAt, locale)} · {recordHours(record, now).toFixed(2)} h</p><Button className="mt-4 w-full gap-2" onClick={() => setSelectedEvidence(record)} variant="secondary"><Eye className="h-4 w-4" />View verification</Button></> : null}
+                  {record ? <><p className="mt-4 text-sm text-slate-600">Since {formatDateTime(record.clockInAt, locale)} | {recordHours(record, now).toFixed(2)} h</p><p className="mt-2 text-xs font-semibold text-slate-500">{scheduleLabel(record)} | {arrivalLabel(record)}</p><Button className="mt-4 w-full gap-2" onClick={() => setSelectedEvidence(record)} variant="secondary"><Eye className="h-4 w-4" />View verification</Button></> : null}
                   {record ? (
                     <Button
                       className="mt-2 w-full gap-2"
@@ -560,8 +599,9 @@ export function TimeClockWorkspace() {
       {selectedEvidence ? (
         <Card className="fixed inset-4 z-50 m-auto h-fit max-h-[calc(100vh-2rem)] max-w-3xl overflow-y-auto border-white bg-white p-6 shadow-[0_30px_100px_rgba(15,23,42,0.32)]">
           <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.25em] text-emerald-700">Attendance evidence</p><h2 className="mt-2 font-display text-2xl font-semibold">{employeeName(selectedEvidence.userId)}</h2></div><button aria-label="Close evidence" className="grid h-10 w-10 place-items-center rounded-full bg-slate-100 transition hover:bg-slate-200" onClick={() => setSelectedEvidence(null)} type="button"><X className="h-4 w-4" /></button></div>
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <div className="mt-5 grid gap-4 sm:grid-cols-3">
             <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5"><p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Clock in</p><p className="mt-2 font-semibold">{formatDateTime(selectedEvidence.clockInAt, locale)}</p><p className="mt-2 text-sm text-slate-500">{sourceLabel(selectedEvidence)}</p></div>
+            <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5"><p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Assigned shift</p><p className="mt-2 font-semibold">{scheduleLabel(selectedEvidence)}</p><p className={cn("mt-2 text-sm font-semibold", arrivalLabel(selectedEvidence) === "On time" ? "text-emerald-700" : "text-amber-700")}>{arrivalLabel(selectedEvidence)}</p></div>
             <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5"><p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Recorded hours</p><p className="mt-2 text-2xl font-semibold">{recordHours(selectedEvidence, now).toFixed(2)} h</p></div>
           </div>
           {selectedEvidence.clockInSelfieUrl ? <img alt={`Clock-in selfie for ${employeeName(selectedEvidence.userId)}`} className="mt-5 max-h-80 w-full rounded-[28px] bg-slate-100 object-contain" src={selectedEvidence.clockInSelfieUrl} /> : <div className="mt-5 rounded-[24px] border border-dashed border-slate-200 p-5 text-sm text-slate-500">No selfie was required or captured.</div>}
@@ -588,7 +628,7 @@ export function TimeClockWorkspace() {
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 px-5 py-3 text-sm"><span><strong>{filteredTimecards.length}</strong> entries</span><span><strong>{totalTimecardHours.toFixed(2)}</strong> total hours</span></div>
           <div className="divide-y divide-slate-200">
-            {pagedTimecards.length ? pagedTimecards.map((record) => <button key={record.id} className="grid w-full gap-3 p-4 text-left text-sm transition hover:bg-emerald-50/50 md:grid-cols-[1fr_1.2fr_1.2fr_0.6fr_0.8fr] md:items-center" onClick={() => setSelectedEvidence(record)} type="button"><span className="font-semibold text-slate-950">{formatBusinessDate(record.businessDate, locale)}</span><span>{formatDateTime(record.clockInAt, locale)}</span><span>{record.clockOutAt ? formatDateTime(record.clockOutAt, locale) : "Still clocked in"}</span><span className="font-semibold">{recordHours(record, now).toFixed(2)} h</span><Badge variant={record.clockOutAt ? "success" : "warning"}>{record.clockOutAt ? "Closed" : "Open"}</Badge></button>) : <div className="p-8 text-center text-sm text-slate-500">No timecards in this date range.</div>}
+            {pagedTimecards.length ? pagedTimecards.map((record) => <button key={record.id} className="grid w-full gap-3 p-4 text-left text-sm transition hover:bg-emerald-50/50 md:grid-cols-[0.9fr_1fr_1.2fr_1.2fr_0.55fr_0.7fr] md:items-center" onClick={() => setSelectedEvidence(record)} type="button"><span className="font-semibold text-slate-950">{formatBusinessDate(record.businessDate, locale)}</span><span><span className="block font-semibold text-slate-800">{scheduleLabel(record)}</span><span className={cn("mt-1 block text-xs font-semibold", arrivalLabel(record) === "On time" ? "text-emerald-700" : "text-amber-700")}>{arrivalLabel(record)}</span></span><span>{formatDateTime(record.clockInAt, locale)}</span><span>{record.clockOutAt ? formatDateTime(record.clockOutAt, locale) : "Still clocked in"}</span><span className="font-semibold">{recordHours(record, now).toFixed(2)} h</span><Badge variant={record.clockOutAt ? "success" : "warning"}>{record.clockOutAt ? "Closed" : "Open"}</Badge></button>) : <div className="p-8 text-center text-sm text-slate-500">No timecards in this date range.</div>}
           </div>
           <div className="flex items-center justify-between border-t border-slate-200 p-4"><Button disabled={timecardPage <= 1} onClick={() => setTimecardPage((page) => page - 1)} size="sm" variant="secondary"><ChevronLeft className="h-4 w-4" /></Button><span className="text-sm text-slate-500">Page {timecardPage} of {timecardPages}</span><Button disabled={timecardPage >= timecardPages} onClick={() => setTimecardPage((page) => page + 1)} size="sm" variant="secondary"><ChevronRight className="h-4 w-4" /></Button></div>
         </Card>
@@ -597,13 +637,33 @@ export function TimeClockWorkspace() {
       {view === "payroll" && isAdmin ? (
         <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
           <Card className="p-6"><p className="text-xs font-bold uppercase tracking-[0.28em] text-emerald-700">Salary estimate</p><h2 className="mt-2 font-display text-2xl font-semibold">{employeeName(rateUserId)}</h2><div className="mt-6 grid gap-3 sm:grid-cols-2"><div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5"><p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Month hours</p><p className="mt-2 text-3xl font-semibold">{rateHours.toFixed(2)}</p></div><div className="rounded-[24px] border border-emerald-200 bg-emerald-50 p-5"><p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">Estimated salary</p><p className="mt-2 text-2xl font-semibold">{formatCurrency(rateEstimate, currency, locale)}</p></div></div></Card>
-          <Card className="p-6"><div className="flex items-center gap-3"><ShieldCheck className="h-5 w-5 text-emerald-700" /><h3 className="font-display text-xl font-semibold">Employee hourly rate</h3></div><form className="mt-5 grid gap-4 sm:grid-cols-3" onSubmit={(event) => void saveRate(event)}><Select onChange={(event) => setRateUserId(event.target.value)} required value={rateUserId}><option value="">Select employee</option>{currentUsers.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}</Select><Input min="0" onChange={(event) => setHourlyRate(event.target.value)} placeholder="Hourly rate" step="0.01" type="number" value={hourlyRate} /><Input min="0.25" onChange={(event) => setDefaultHours(event.target.value)} placeholder="Default daily hours" step="0.25" type="number" value={defaultHours} /><Button className="sm:col-span-3" type="submit">Save payroll rate</Button></form></Card>
+          <Card className="p-6">
+            <div className="flex items-center gap-3">
+              <ShieldCheck className="h-5 w-5 text-emerald-700" />
+              <div>
+                <h3 className="font-display text-xl font-semibold">Employee schedule and payroll</h3>
+                <p className="mt-1 text-sm text-slate-500">The schedule controls late-arrival tracking and forgotten clock-out limits.</p>
+              </div>
+            </div>
+            <form className="mt-5 grid gap-4 sm:grid-cols-2" onSubmit={(event) => void saveRate(event)}>
+              <label className="text-xs font-semibold text-slate-500 sm:col-span-2">Employee<Select className="mt-2" onChange={(event) => setRateUserId(event.target.value)} required value={rateUserId}><option value="">Select employee</option>{currentUsers.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}</Select></label>
+              <label className="text-xs font-semibold text-slate-500">Hourly rate<Input className="mt-2" min="0" onChange={(event) => setHourlyRate(event.target.value)} placeholder="0.00" step="0.01" type="number" value={hourlyRate} /></label>
+              <label className="text-xs font-semibold text-slate-500">Maximum paid hours<Input className="mt-2" min="0.25" onChange={(event) => setDefaultHours(event.target.value)} placeholder="8" step="0.25" type="number" value={defaultHours} /></label>
+              <label className="text-xs font-semibold text-slate-500">Shift starts<Input className="mt-2 cursor-pointer" onClick={openPicker} onChange={(event) => setShiftStartTime(event.target.value)} required type="time" value={shiftStartTime} /></label>
+              <label className="text-xs font-semibold text-slate-500">Shift ends<Input className="mt-2 cursor-pointer" onClick={openPicker} onChange={(event) => setShiftEndTime(event.target.value)} required type="time" value={shiftEndTime} /></label>
+              <label className="flex cursor-pointer items-start gap-3 rounded-[22px] border border-slate-200 bg-slate-50 p-4 sm:col-span-2">
+                <input checked={overnightShift} className="mt-1 h-4 w-4 accent-emerald-600" onChange={(event) => setOvernightShift(event.target.checked)} type="checkbox" />
+                <span><span className="block text-sm font-semibold text-slate-950">Overnight shift</span><span className="mt-1 block text-xs text-slate-500">The end time belongs to the next calendar day.</span></span>
+              </label>
+              <Button className="sm:col-span-2" type="submit">Save schedule and payroll</Button>
+            </form>
+          </Card>
         </div>
       ) : null}
 
       {view === "adjust" && isAdmin ? (
         <div className="grid gap-5 lg:grid-cols-[0.8fr_1.2fr]">
-          <Card className="overflow-hidden"><div className="border-b border-slate-200 p-5"><p className="text-xs font-bold uppercase tracking-[0.28em] text-emerald-700">Choose employee</p><Select className="mt-3" onChange={(event) => { setManualUserId(event.target.value); loadManualRecord(); }} value={manualUserId}><option value="">Select employee first</option>{currentUsers.map((user) => <option key={user.id} value={user.id}>{user.name} · {user.email}</option>)}</Select></div>{manualUserId ? <><div className="divide-y divide-slate-200">{pagedManualRecords.length ? pagedManualRecords.map((record) => <button key={record.id} className={cn("w-full p-4 text-left transition hover:bg-emerald-50", manualRecordId === record.id && "bg-emerald-50")} onClick={() => loadManualRecord(record)} type="button"><div className="flex items-center justify-between gap-3"><span className="font-semibold">{formatBusinessDate(record.businessDate, locale)}</span><Badge variant={record.clockOutAt ? "success" : "warning"}>{recordHours(record, now).toFixed(2)} h</Badge></div><p className="mt-1 text-xs text-slate-500">{formatDateTime(record.clockInAt, locale)}</p></button>) : <div className="p-6 text-sm text-slate-500">No records for this employee.</div>}</div><div className="flex items-center justify-between border-t border-slate-200 p-3"><Button disabled={manualPage <= 1} onClick={() => setManualPage((page) => page - 1)} size="sm" variant="secondary"><ChevronLeft className="h-4 w-4" /></Button><span className="text-xs text-slate-500">{manualPage}/{manualPages}</span><Button disabled={manualPage >= manualPages} onClick={() => setManualPage((page) => page + 1)} size="sm" variant="secondary"><ChevronRight className="h-4 w-4" /></Button></div></> : <div className="p-8 text-center text-sm text-slate-500"><UserRoundCheck className="mx-auto h-8 w-8 text-slate-300" /><p className="mt-3">Select an employee to view and adjust their timecards.</p></div>}</Card>
+          <Card className="overflow-hidden"><div className="border-b border-slate-200 p-5"><p className="text-xs font-bold uppercase tracking-[0.28em] text-emerald-700">Choose employee</p><Select className="mt-3" onChange={(event) => { setManualUserId(event.target.value); loadManualRecord(); }} value={manualUserId}><option value="">Select employee first</option>{currentUsers.map((user) => <option key={user.id} value={user.id}>{user.name} | {user.email}</option>)}</Select></div>{manualUserId ? <><div className="divide-y divide-slate-200">{pagedManualRecords.length ? pagedManualRecords.map((record) => <button key={record.id} className={cn("w-full p-4 text-left transition hover:bg-emerald-50", manualRecordId === record.id && "bg-emerald-50")} onClick={() => loadManualRecord(record)} type="button"><div className="flex items-center justify-between gap-3"><span className="font-semibold">{formatBusinessDate(record.businessDate, locale)}</span><Badge variant={record.clockOutAt ? "success" : "warning"}>{recordHours(record, now).toFixed(2)} h</Badge></div><p className="mt-1 text-xs text-slate-500">{formatDateTime(record.clockInAt, locale)} | {scheduleLabel(record)} | {arrivalLabel(record)}</p></button>) : <div className="p-6 text-sm text-slate-500">No records for this employee.</div>}</div><div className="flex items-center justify-between border-t border-slate-200 p-3"><Button disabled={manualPage <= 1} onClick={() => setManualPage((page) => page - 1)} size="sm" variant="secondary"><ChevronLeft className="h-4 w-4" /></Button><span className="text-xs text-slate-500">{manualPage}/{manualPages}</span><Button disabled={manualPage >= manualPages} onClick={() => setManualPage((page) => page + 1)} size="sm" variant="secondary"><ChevronRight className="h-4 w-4" /></Button></div></> : <div className="p-8 text-center text-sm text-slate-500"><UserRoundCheck className="mx-auto h-8 w-8 text-slate-300" /><p className="mt-3">Select an employee to view and adjust their timecards.</p></div>}</Card>
           <Card className="p-6"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[0.28em] text-emerald-700">Admin adjustment</p><h2 className="mt-1 font-display text-2xl font-semibold">{manualRecordId ? "Edit selected timecard" : "Create manual timecard"}</h2></div>{manualUserId ? <Button onClick={() => loadManualRecord()} size="sm" variant="secondary">New record</Button> : null}</div><form className="mt-6 grid gap-4 md:grid-cols-2" onSubmit={(event) => void saveManualRecord(event)}><Input className="cursor-pointer" disabled={!manualUserId} max={serverToday} onClick={openPicker} onChange={(event) => setManualDate(event.target.value)} required type="date" value={manualDate} /><Input disabled={!manualUserId} min="0" onChange={(event) => setManualHours(event.target.value)} placeholder="Paid hours" step="0.25" type="number" value={manualHours} /><Input className="cursor-pointer" disabled={!manualUserId} onClick={openPicker} onChange={(event) => setManualClockIn(event.target.value)} required type="time" value={manualClockIn} /><Input className="cursor-pointer" disabled={!manualUserId} onClick={openPicker} onChange={(event) => setManualClockOut(event.target.value)} type="time" value={manualClockOut} /><Input className="md:col-span-2" disabled={!manualUserId} onChange={(event) => setManualNote(event.target.value)} placeholder="Required adjustment reason" required value={manualNote} /><Button className="md:col-span-2" disabled={!manualUserId} type="submit">Save audited adjustment</Button></form></Card>
         </div>
       ) : null}

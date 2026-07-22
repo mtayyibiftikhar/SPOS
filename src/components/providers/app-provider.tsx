@@ -68,7 +68,12 @@ import {
   normalizeBarcode
 } from "@/lib/catalog";
 import { calculateBillRefundState } from "@/lib/refunds";
-import { calculateAutoClosedAttendanceHours, findOpenAttendanceRecord } from "@/lib/attendance";
+import {
+  calculateScheduledAttendanceClosure,
+  DEFAULT_SHIFT_END_TIME,
+  DEFAULT_SHIFT_START_TIME,
+  findOpenAttendanceRecord
+} from "@/lib/attendance";
 import { clearShopDataScope, ownerClearShopDataScopeLabels, type OwnerClearShopDataScope } from "@/lib/shop-data-reset";
 import { createPublicReceiptToken } from "@/lib/public-receipts";
 import { createId, getDirection, hashSecret } from "@/lib/utils";
@@ -588,11 +593,33 @@ function getPayrollRateForUser(state: DemoAppState, shopId: string, userId: stri
       userId,
       hourlyRate: 0,
       defaultDailyHours: 8,
+      shiftStartTime: DEFAULT_SHIFT_START_TIME,
+      shiftEndTime: DEFAULT_SHIFT_END_TIME,
+      overnightShift: false,
       currency,
       createdAt: "",
       updatedAt: ""
     }
   );
+}
+
+function closeExpiredLocalAttendanceRecords(records: AttendanceRecord[], now = new Date()) {
+  return records.map((record) => {
+    if (record.clockOutAt) return record;
+
+    const closure = calculateScheduledAttendanceClosure(record, now);
+    if (!closure) return record;
+
+    return {
+      ...record,
+      status: "auto_closed" as const,
+      clockOutAt: closure.clockOutAt,
+      paidHours: closure.paidHours,
+      note:
+        record.note ??
+        "Auto closed after the scheduled shift ended; paid hours were capped to the assigned schedule."
+    };
+  });
 }
 
 interface AppContextValue {
@@ -812,11 +839,17 @@ interface AppContextValue {
     note?: string;
     paidHours?: number;
     scheduledHours?: number;
+    shiftEndTime?: string;
+    shiftStartTime?: string;
+    overnightShift?: boolean;
     userId: string;
   }) => Promise<{ ok: boolean; message?: string }>;
   savePayrollRate: (payload: {
     defaultDailyHours: number;
     hourlyRate: number;
+    shiftEndTime?: string;
+    shiftStartTime?: string;
+    overnightShift?: boolean;
     userId: string;
   }) => Promise<{ ok: boolean; message?: string }>;
   startShift: (payload: { openingCash: number }) => Promise<{ ok: boolean; message?: string }>;
@@ -1024,22 +1057,30 @@ function normalizeStoredState(stored: DemoAppState, ownerBootstrap: OwnerBootstr
     })),
     businessDays: stored.businessDays ?? [],
     shifts: stored.shifts ?? [],
-    attendanceRecords: (stored.attendanceRecords ?? []).map((record) => ({
-      ...record,
-      scheduledHours: Number.isFinite(record.scheduledHours) ? record.scheduledHours : 8,
-      hourlyRate: Number.isFinite(record.hourlyRate) ? record.hourlyRate : 0,
-      paidHours:
-        Number.isFinite(record.paidHours)
-          ? record.paidHours
-          : record.status === "closed" || record.status === "auto_closed"
-            ? calculateAttendanceHours(record.clockInAt, record.clockOutAt, record.scheduledHours)
-            : record.paidHours
-    })),
+    attendanceRecords: closeExpiredLocalAttendanceRecords(
+      (stored.attendanceRecords ?? []).map((record) => ({
+        ...record,
+        scheduledHours: Number.isFinite(record.scheduledHours) ? record.scheduledHours : 8,
+        hourlyRate: Number.isFinite(record.hourlyRate) ? record.hourlyRate : 0,
+        shiftStartTime: record.shiftStartTime ?? DEFAULT_SHIFT_START_TIME,
+        shiftEndTime: record.shiftEndTime ?? DEFAULT_SHIFT_END_TIME,
+        overnightShift: record.overnightShift ?? false,
+        paidHours:
+          Number.isFinite(record.paidHours)
+            ? record.paidHours
+            : record.status === "closed" || record.status === "auto_closed"
+              ? calculateAttendanceHours(record.clockInAt, record.clockOutAt, record.scheduledHours)
+              : record.paidHours
+      }))
+    ),
     attendanceQrSessions: stored.attendanceQrSessions ?? [],
     payrollRates: (stored.payrollRates ?? []).map((rate) => ({
       ...rate,
       defaultDailyHours: Number.isFinite(rate.defaultDailyHours) ? rate.defaultDailyHours : 8,
       hourlyRate: Number.isFinite(rate.hourlyRate) ? rate.hourlyRate : 0,
+      shiftStartTime: rate.shiftStartTime ?? DEFAULT_SHIFT_START_TIME,
+      shiftEndTime: rate.shiftEndTime ?? DEFAULT_SHIFT_END_TIME,
+      overnightShift: rate.overnightShift ?? false,
       currency: rate.currency || "SAR"
     })),
     dayCloses: stored.dayCloses ?? [],
@@ -2490,6 +2531,35 @@ export function AppProvider({
 
     return () => window.clearInterval(timer);
   }, [isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated || !currentShopId || session?.workspace !== "shop") {
+      return;
+    }
+
+    setState((current) => {
+      let changed = false;
+      const attendanceRecords = current.attendanceRecords.map((record) => {
+        if (record.shopId !== currentShopId || record.clockOutAt) return record;
+
+        const closure = calculateScheduledAttendanceClosure(record);
+        if (!closure) return record;
+
+        changed = true;
+        return {
+          ...record,
+          status: "auto_closed" as const,
+          clockOutAt: closure.clockOutAt,
+          paidHours: closure.paidHours,
+          note:
+            record.note ??
+            "Auto closed after the scheduled shift ended; paid hours were capped to the assigned schedule."
+        };
+      });
+
+      return changed ? { ...current, attendanceRecords } : current;
+    });
+  }, [autoRolloverTick, currentShopId, isHydrated, session?.workspace]);
 
   useEffect(() => {
     if (
@@ -6796,25 +6866,26 @@ export function AppProvider({
               },
               ...current.dayCloses
             ],
-            attendanceRecords: current.attendanceRecords.map((record) =>
-              record.shopId === currentShopId &&
-              record.businessDate === openDay.businessDate &&
-              !record.clockOutAt
+            attendanceRecords: current.attendanceRecords.map((record) => {
+              const closure =
+                record.shopId === currentShopId &&
+                record.businessDate === openDay.businessDate &&
+                !record.clockOutAt
+                  ? calculateScheduledAttendanceClosure(record, new Date(closedAt))
+                  : null;
+
+              return closure
                 ? {
                     ...record,
-                    status: "auto_closed",
-                    clockOutAt: closedAt,
-                    paidHours: calculateAutoClosedAttendanceHours(
-                      record.clockInAt,
-                      closedAt,
-                      record.scheduledHours
-                    ),
+                    status: "auto_closed" as const,
+                    clockOutAt: closure.clockOutAt,
+                    paidHours: closure.paidHours,
                     note:
                       record.note ??
-                      "Auto closed at day close; paid hours capped at the configured daily hours."
+                      "Auto closed at the employee's scheduled shift end."
                   }
-                : record
-            )
+                : record;
+            })
           };
         });
 
@@ -6838,7 +6909,7 @@ export function AppProvider({
         if (!shouldUseSharedStateEndpoint()) {
           try {
             const response = await fetch("/api/attendance/records", {
-              body: JSON.stringify({ action: "close_day", businessDate: attendanceBusinessDate }),
+              body: JSON.stringify({ action: "rollover", businessDate: attendanceBusinessDate }),
               headers: { "content-type": "application/json" },
               method: "POST"
             });
@@ -6966,25 +7037,26 @@ export function AppProvider({
                   ...shifts
                 ]
               : shifts,
-            attendanceRecords: current.attendanceRecords.map((record) =>
-              record.shopId === currentShopId &&
-              record.businessDate === openDay.businessDate &&
-              !record.clockOutAt
+            attendanceRecords: current.attendanceRecords.map((record) => {
+              const closure =
+                record.shopId === currentShopId &&
+                record.businessDate === openDay.businessDate &&
+                !record.clockOutAt
+                  ? calculateScheduledAttendanceClosure(record, new Date(closedAt))
+                  : null;
+
+              return closure
                 ? {
                     ...record,
-                    status: "auto_closed",
-                    clockOutAt: closedAt,
-                    paidHours: calculateAutoClosedAttendanceHours(
-                      record.clockInAt,
-                      closedAt,
-                      record.scheduledHours
-                    ),
+                    status: "auto_closed" as const,
+                    clockOutAt: closure.clockOutAt,
+                    paidHours: closure.paidHours,
                     note:
                       record.note ??
-                      "Auto closed by day rollover; paid hours capped at the configured daily hours."
+                      "Auto closed at the employee's scheduled shift end during day rollover."
                   }
-                : record
-            ),
+                : record;
+            }),
             dayCloses: [
               {
                 id: createId("day_close"),
@@ -7087,6 +7159,7 @@ export function AppProvider({
 
         flushSync(() => setState((current) => {
           const openDay = getActiveBusinessDay(current.businessDays, currentShopId);
+          const attendanceRecords = closeExpiredLocalAttendanceRecords(current.attendanceRecords);
 
           if (!openDay) {
             result = { ok: false, message: "Open the business day before clocking in." };
@@ -7103,7 +7176,7 @@ export function AppProvider({
           }
 
           const existingOpen = findOpenAttendanceRecord(
-            current.attendanceRecords,
+            attendanceRecords,
             currentShopId,
             targetUserId,
             openDay.businessDate
@@ -7135,10 +7208,13 @@ export function AppProvider({
                 clockInSelfieUrl: payload.selfieUrl,
                 scheduledHours: rate.defaultDailyHours,
                 hourlyRate: rate.hourlyRate,
+                shiftStartTime: rate.shiftStartTime,
+                shiftEndTime: rate.shiftEndTime,
+                overnightShift: rate.overnightShift,
                 note: payload.note?.trim() || undefined,
                 createdAt: now
               },
-              ...current.attendanceRecords
+              ...attendanceRecords
             ],
             auditLogs:
               source === "admin_bypass" || targetUserId !== session.id
@@ -7373,6 +7449,9 @@ export function AppProvider({
             scheduledHours,
             paidHours: payload.clockOutAt ? paidHours : undefined,
             hourlyRate,
+            shiftStartTime: payload.shiftStartTime ?? rate.shiftStartTime,
+            shiftEndTime: payload.shiftEndTime ?? rate.shiftEndTime,
+            overnightShift: payload.overnightShift ?? rate.overnightShift,
             note: payload.note?.trim() || undefined,
             editedBy: session.id,
             editedAt: now,
@@ -7403,7 +7482,14 @@ export function AppProvider({
 
         return result;
       },
-      savePayrollRate: async ({ userId, hourlyRate, defaultDailyHours }) => {
+      savePayrollRate: async ({
+        userId,
+        hourlyRate,
+        defaultDailyHours,
+        shiftStartTime = DEFAULT_SHIFT_START_TIME,
+        shiftEndTime = DEFAULT_SHIFT_END_TIME,
+        overnightShift = false
+      }) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
         }
@@ -7416,10 +7502,26 @@ export function AppProvider({
           return { ok: false, message: "Enter valid salary and default hours." };
         }
 
+        if (
+          !/^([01]\d|2[0-3]):[0-5]\d$/.test(shiftStartTime) ||
+          !/^([01]\d|2[0-3]):[0-5]\d$/.test(shiftEndTime) ||
+          (!overnightShift && shiftEndTime <= shiftStartTime)
+        ) {
+          return { ok: false, message: "Enter a valid employee shift schedule." };
+        }
+
         if (!shouldUseSharedStateEndpoint()) {
           try {
             const response = await fetch("/api/attendance/records", {
-              body: JSON.stringify({ action: "save_payroll_rate", defaultDailyHours, hourlyRate, userId }),
+              body: JSON.stringify({
+                action: "save_payroll_rate",
+                defaultDailyHours,
+                hourlyRate,
+                overnightShift,
+                shiftEndTime,
+                shiftStartTime,
+                userId
+              }),
               headers: { "content-type": "application/json" },
               method: "POST"
             });
@@ -7466,6 +7568,9 @@ export function AppProvider({
             userId,
             hourlyRate: Math.round(Math.max(0, hourlyRate) * 100) / 100,
             defaultDailyHours: Math.round(Math.max(0.25, defaultDailyHours) * 100) / 100,
+            shiftStartTime,
+            shiftEndTime,
+            overnightShift,
             currency: currentSettings?.pos.currency ?? "SAR",
             createdAt: existing?.createdAt ?? now,
             updatedAt: now

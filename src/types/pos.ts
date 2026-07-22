@@ -133,6 +133,9 @@ export interface AttendanceRecord {
   clockInSelfieUrl?: string;
   clockOutSelfieUrl?: string;
   scheduledHours: number;
+  shiftStartTime?: string;
+  shiftEndTime?: string;
+  overnightShift?: boolean;
   paidHours?: number;
   hourlyRate: number;
   note?: string;
@@ -158,6 +161,9 @@ export interface PayrollRate {
   userId: string;
   hourlyRate: number;
   defaultDailyHours: number;
+  shiftStartTime?: string;
+  shiftEndTime?: string;
+  overnightShift?: boolean;
   currency: string;
   createdAt: string;
   updatedAt: string;

@@ -24,7 +24,7 @@ import {
 import { applySettlementToBills, getCustomerAccountMetrics } from "@/lib/customer-accounts";
 import { createPublicReceiptToken } from "@/lib/public-receipts";
 import { calculateBillRefundState } from "@/lib/refunds";
-import { calculateAutoClosedAttendanceHours } from "@/lib/attendance";
+import { calculateScheduledAttendanceClosure } from "@/lib/attendance";
 import { createId } from "@/lib/utils";
 import type {
   Bill,
@@ -167,25 +167,26 @@ function closeBusinessDayMutation(
       businessDays: (state.businessDays ?? []).map((day) =>
         day.id === openDay.id ? { ...day, endedAt: closedAt } : day
       ),
-      attendanceRecords: (state.attendanceRecords ?? []).map((record) =>
-        record.shopId === context.shopId &&
-        record.businessDate === openDay.businessDate &&
-        !record.clockOutAt
+      attendanceRecords: (state.attendanceRecords ?? []).map((record) => {
+        const closure =
+          record.shopId === context.shopId &&
+          record.businessDate === openDay.businessDate &&
+          !record.clockOutAt
+            ? calculateScheduledAttendanceClosure(record, new Date(closedAt))
+            : null;
+
+        return closure
           ? {
               ...record,
               status: "auto_closed" as const,
-              clockOutAt: closedAt,
-              paidHours: calculateAutoClosedAttendanceHours(
-                record.clockInAt,
-                closedAt,
-                record.scheduledHours
-              ),
-              note: record.note || "Auto closed at business-day close using scheduled hours.",
+              clockOutAt: closure.clockOutAt,
+              paidHours: closure.paidHours,
+              note: record.note || "Auto closed at the employee's scheduled shift end.",
               editedBy: context.userId,
               editedAt: closedAt
             }
-          : record
-      ),
+          : record;
+      }),
       dayCloses: [
         {
           id: createId("day_close"),

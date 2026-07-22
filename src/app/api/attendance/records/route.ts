@@ -2,10 +2,21 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { readShopUserSession } from "@/lib/supabase/shop-session";
-import { calculateAutoClosedAttendanceHours } from "@/lib/attendance";
+import {
+  calculateAutoClosedAttendanceHours,
+  DEFAULT_SHIFT_END_TIME,
+  DEFAULT_SHIFT_START_TIME
+} from "@/lib/attendance";
+import { closeExpiredAttendanceRecords } from "@/lib/server/attendance-rollover";
 import type { AttendanceRecord, DemoAppState } from "@/types/pos";
 
-type AttendanceAction = "clock_in" | "clock_out" | "close_day" | "save_adjustment" | "save_payroll_rate";
+type AttendanceAction =
+  | "clock_in"
+  | "clock_out"
+  | "close_day"
+  | "rollover"
+  | "save_adjustment"
+  | "save_payroll_rate";
 
 type AttendanceRequest = {
   action?: AttendanceAction;
@@ -19,6 +30,9 @@ type AttendanceRequest = {
   paidHours?: number;
   password?: string;
   scheduledHours?: number;
+  shiftEndTime?: string;
+  shiftStartTime?: string;
+  overnightShift?: boolean;
   source?: "admin_bypass" | "manual";
   userId?: string;
 };
@@ -52,8 +66,12 @@ function validDate(value: string | undefined) {
   return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
 }
 
+function validShiftTime(value: string | undefined) {
+  return Boolean(value && /^([01]\d|2[0-3]):[0-5]\d$/.test(value));
+}
+
 const attendanceSelect =
-  "id, shop_id, user_id, business_date, clock_in_at, clock_out_at, scheduled_hours, paid_hours, hourly_rate, source, clock_in_latitude, clock_in_longitude, clock_out_latitude, clock_out_longitude, clock_in_selfie_url, clock_out_selfie_url, note, created_at";
+  "id, shop_id, user_id, business_date, clock_in_at, clock_out_at, scheduled_hours, paid_hours, hourly_rate, shift_start_time, shift_end_time, overnight_shift, source, clock_in_latitude, clock_in_longitude, clock_out_latitude, clock_out_longitude, clock_in_selfie_url, clock_out_selfie_url, note, created_at";
 
 function normalizeAttendanceRecord(record: Record<string, unknown>): AttendanceRecord {
   const clockInAt = String(record.clock_in_at);
@@ -87,6 +105,9 @@ function normalizeAttendanceRecord(record: Record<string, unknown>): AttendanceR
     clockInSelfieUrl: record.clock_in_selfie_url ? String(record.clock_in_selfie_url) : undefined,
     clockOutSelfieUrl: record.clock_out_selfie_url ? String(record.clock_out_selfie_url) : undefined,
     scheduledHours: Number(record.scheduled_hours ?? 8),
+    shiftStartTime: String(record.shift_start_time ?? DEFAULT_SHIFT_START_TIME),
+    shiftEndTime: String(record.shift_end_time ?? DEFAULT_SHIFT_END_TIME),
+    overnightShift: Boolean(record.overnight_shift),
     paidHours: record.paid_hours == null ? undefined : Number(record.paid_hours),
     hourlyRate: Number(record.hourly_rate ?? 0),
     note: record.note ? String(record.note) : undefined,
@@ -104,6 +125,7 @@ export async function GET(request: Request) {
   try {
     const now = new Date();
     const supabase = createSupabaseAdminClient();
+    await closeExpiredAttendanceRecords(supabase, session.shopId, now);
     const { data, error } = await supabase
       .from("attendance_records")
       .select(attendanceSelect)
@@ -154,12 +176,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "Only the shop admin can update another employee." }, { status: 403 });
   }
 
-  if (["clock_in", "close_day", "save_adjustment", "save_payroll_rate"].includes(body.action) && session.role !== "shop_admin") {
+  if (["clock_in", "close_day", "rollover", "save_adjustment", "save_payroll_rate"].includes(body.action) && session.role !== "shop_admin") {
     return NextResponse.json({ ok: false, message: "Only the shop admin can bypass verified clock-in." }, { status: 403 });
   }
 
   try {
     const supabase = createSupabaseAdminClient();
+
+    if (body.action === "rollover") {
+      const closedCount = await closeExpiredAttendanceRecords(supabase, session.shopId, new Date());
+      return NextResponse.json({
+        closedCount,
+        message: closedCount
+          ? `${closedCount} expired attendance record(s) closed at their scheduled shift end.`
+          : "No expired attendance records required closing.",
+        ok: true
+      });
+    }
 
     if (body.action === "close_day") {
       if (!validDate(body.businessDate)) {
@@ -231,9 +264,21 @@ export async function POST(request: Request) {
     if (body.action === "save_payroll_rate") {
       const hourlyRate = Number(body.hourlyRate);
       const defaultDailyHours = Number(body.defaultDailyHours);
+      const shiftStartTime = body.shiftStartTime?.trim() || DEFAULT_SHIFT_START_TIME;
+      const shiftEndTime = body.shiftEndTime?.trim() || DEFAULT_SHIFT_END_TIME;
+      const overnightShift = Boolean(body.overnightShift);
 
       if (!Number.isFinite(hourlyRate) || hourlyRate < 0 || !Number.isFinite(defaultDailyHours) || defaultDailyHours <= 0) {
         return NextResponse.json({ ok: false, message: "Enter a valid hourly rate and default hours." }, { status: 400 });
+      }
+      if (!validShiftTime(shiftStartTime) || !validShiftTime(shiftEndTime)) {
+        return NextResponse.json({ ok: false, message: "Enter a valid employee shift start and end time." }, { status: 400 });
+      }
+      if (!overnightShift && shiftStartTime >= shiftEndTime) {
+        return NextResponse.json(
+          { ok: false, message: "The shift end must be after its start, or enable overnight shift." },
+          { status: 400 }
+        );
       }
 
       const { data: snapshot, error: snapshotError } = await supabase
@@ -255,13 +300,18 @@ export async function POST(request: Request) {
             default_daily_hours: Math.round(defaultDailyHours * 100) / 100,
             effective_from: effectiveFrom,
             hourly_rate: Math.round(hourlyRate * 100) / 100,
+            overnight_shift: overnightShift,
             shop_id: session.shopId,
+            shift_end_time: shiftEndTime,
+            shift_start_time: shiftStartTime,
             updated_at: now,
             user_id: targetUserId
           },
           { onConflict: "shop_id,user_id,effective_from" }
         )
-        .select("id, shop_id, user_id, hourly_rate, default_daily_hours, created_at, updated_at")
+        .select(
+          "id, shop_id, user_id, hourly_rate, default_daily_hours, shift_start_time, shift_end_time, overnight_shift, created_at, updated_at"
+        )
         .single();
 
       if (rateError) throw rateError;
@@ -283,6 +333,9 @@ export async function POST(request: Request) {
           userId: savedRate.user_id,
           hourlyRate: Number(savedRate.hourly_rate),
           defaultDailyHours: Number(savedRate.default_daily_hours),
+          shiftStartTime: savedRate.shift_start_time,
+          shiftEndTime: savedRate.shift_end_time,
+          overnightShift: Boolean(savedRate.overnight_shift),
           currency: "SAR",
           createdAt: savedRate.created_at,
           updatedAt: savedRate.updated_at
@@ -297,6 +350,9 @@ export async function POST(request: Request) {
       const scheduledHours = Number(body.scheduledHours ?? 8);
       const paidHours = body.paidHours == null ? null : Number(body.paidHours);
       const hourlyRate = Number(body.hourlyRate ?? 0);
+      const shiftStartTime = body.shiftStartTime?.trim() || DEFAULT_SHIFT_START_TIME;
+      const shiftEndTime = body.shiftEndTime?.trim() || DEFAULT_SHIFT_END_TIME;
+      const overnightShift = Boolean(body.overnightShift);
 
       if (!note) {
         return NextResponse.json({ ok: false, message: "Enter a reason for this attendance adjustment." }, { status: 400 });
@@ -318,6 +374,15 @@ export async function POST(request: Request) {
       if (!Number.isFinite(scheduledHours) || scheduledHours <= 0 || (paidHours != null && (!Number.isFinite(paidHours) || paidHours < 0))) {
         return NextResponse.json({ ok: false, message: "Enter valid scheduled and paid hours." }, { status: 400 });
       }
+      if (!validShiftTime(shiftStartTime) || !validShiftTime(shiftEndTime)) {
+        return NextResponse.json({ ok: false, message: "Enter valid scheduled shift times." }, { status: 400 });
+      }
+      if (!overnightShift && shiftStartTime >= shiftEndTime) {
+        return NextResponse.json(
+          { ok: false, message: "The shift end must be after its start, or enable overnight shift." },
+          { status: 400 }
+        );
+      }
 
       const values = {
         business_date: body.businessDate,
@@ -328,6 +393,9 @@ export async function POST(request: Request) {
         paid_hours: clockOutAt ? paidHours : null,
         scheduled_hours: scheduledHours,
         shop_id: session.shopId,
+        shift_end_time: shiftEndTime,
+        shift_start_time: shiftStartTime,
+        overnight_shift: overnightShift,
         source: "manual",
         updated_at: new Date().toISOString(),
         user_id: targetUserId
@@ -417,6 +485,8 @@ export async function POST(request: Request) {
       });
     }
 
+    await closeExpiredAttendanceRecords(supabase, session.shopId);
+
     const [{ data: existingOpen, error: existingError }, { data: snapshot, error: snapshotError }] =
       await Promise.all([
         supabase
@@ -450,7 +520,7 @@ export async function POST(request: Request) {
 
     const { data: payrollRate, error: rateError } = await supabase
       .from("payroll_rates")
-      .select("hourly_rate, default_daily_hours")
+      .select("hourly_rate, default_daily_hours, shift_start_time, shift_end_time, overnight_shift")
       .eq("shop_id", session.shopId)
       .eq("user_id", targetUserId)
       .lte("effective_from", openDay.businessDate)
@@ -473,6 +543,9 @@ export async function POST(request: Request) {
           (isManualClockIn ? "Clocked in by shop admin." : "Admin bypassed attendance capture."),
         scheduled_hours: Number(payrollRate?.default_daily_hours ?? 8),
         shop_id: session.shopId,
+        shift_end_time: payrollRate?.shift_end_time ?? DEFAULT_SHIFT_END_TIME,
+        shift_start_time: payrollRate?.shift_start_time ?? DEFAULT_SHIFT_START_TIME,
+        overnight_shift: Boolean(payrollRate?.overnight_shift),
         source: isManualClockIn ? "manual" : "admin_bypass",
         user_id: targetUserId
       })

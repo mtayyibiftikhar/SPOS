@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { hashAttendanceToken } from "@/lib/server/attendance-token";
+import { closeExpiredAttendanceRecords } from "@/lib/server/attendance-rollover";
 import { optimizePosImage } from "@/lib/server/optimize-pos-image";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { uploadPrivatePosAsset } from "@/lib/supabase/storage-assets";
+import { DEFAULT_SHIFT_END_TIME, DEFAULT_SHIFT_START_TIME } from "@/lib/attendance";
 import type { DemoAppState } from "@/types/pos";
 
 const MAX_SELFIE_INPUT_BYTES = 5 * 1024 * 1024;
@@ -146,6 +148,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: "A selfie image up to 5 MB is required." }, { status: 400 });
     }
 
+    await closeExpiredAttendanceRecords(resolved.supabase, shopId);
+
     const { data: existingOpen, error: existingError } = await resolved.supabase
       .from("attendance_records")
       .select("id")
@@ -177,7 +181,7 @@ export async function POST(request: Request) {
       : null;
     const { data: payrollRate } = await resolved.supabase
       .from("payroll_rates")
-      .select("hourly_rate, default_daily_hours")
+      .select("hourly_rate, default_daily_hours, shift_start_time, shift_end_time, overnight_shift")
       .eq("shop_id", shopId)
       .eq("user_id", userId)
       .lte("effective_from", businessDate)
@@ -197,6 +201,9 @@ export async function POST(request: Request) {
         note: hasValidLocation && accuracy > 0 ? `Location accuracy: ${Math.round(accuracy)}m` : null,
         scheduled_hours: Number(payrollRate?.default_daily_hours ?? 8),
         shop_id: shopId,
+        shift_end_time: payrollRate?.shift_end_time ?? DEFAULT_SHIFT_END_TIME,
+        shift_start_time: payrollRate?.shift_start_time ?? DEFAULT_SHIFT_START_TIME,
+        overnight_shift: Boolean(payrollRate?.overnight_shift),
         source: "qr",
         user_id: userId
       })

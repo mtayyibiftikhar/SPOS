@@ -925,7 +925,6 @@ export function BillingWorkspace() {
 
     if (heldBills.length >= MAX_HELD_BILLS) {
       setError(t("billing.holdLimit"));
-      setShowHeldBills(true);
       return;
     }
 
@@ -952,7 +951,6 @@ export function BillingWorkspace() {
     setProductSearch("");
     setWorkflowStep("build");
     setSetupFeedback(t("billing.holdSaved"));
-    setShowHeldBills(true);
   };
 
   const restoreHeldBill = (heldBillId: string) => {

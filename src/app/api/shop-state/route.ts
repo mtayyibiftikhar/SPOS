@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+import {
+  calculateScheduledAttendanceClosure,
+  DEFAULT_SHIFT_END_TIME,
+  DEFAULT_SHIFT_START_TIME
+} from "@/lib/attendance";
+import { closeExpiredAttendanceRecords } from "@/lib/server/attendance-rollover";
 import { applyCriticalShopMutation, type CriticalShopMutation } from "@/lib/server/shop-snapshot-mutations";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { loadBrandProfileSnapshot } from "@/lib/supabase/brand-assets";
@@ -39,7 +45,9 @@ async function closeOpenAttendanceForBusinessDay(
 ) {
   const { data: openRecords, error: recordsError } = await supabase
     .from("attendance_records")
-    .select("id, scheduled_hours, note")
+    .select(
+      "id, business_date, clock_in_at, scheduled_hours, shift_start_time, shift_end_time, overnight_shift, note"
+    )
     .eq("shop_id", shopId)
     .eq("business_date", businessDate)
     .is("clock_out_at", null);
@@ -47,16 +55,34 @@ async function closeOpenAttendanceForBusinessDay(
   if (recordsError) throw recordsError;
   if (!openRecords?.length) return;
 
-  const closedAt = new Date().toISOString();
+  const now = new Date();
+  const closures = openRecords.flatMap((record) => {
+    const closure = calculateScheduledAttendanceClosure(
+      {
+        businessDate: String(record.business_date),
+        clockInAt: String(record.clock_in_at),
+        overnightShift: Boolean(record.overnight_shift),
+        scheduledHours: Number(record.scheduled_hours ?? 8),
+        shiftEndTime: String(record.shift_end_time ?? DEFAULT_SHIFT_END_TIME),
+        shiftStartTime: String(record.shift_start_time ?? DEFAULT_SHIFT_START_TIME)
+      },
+      now
+    );
+
+    return closure ? [{ closure, record }] : [];
+  });
+
+  if (!closures.length) return;
+
   const updates = await Promise.all(
-    openRecords.map((record) =>
+    closures.map(({ closure, record }) =>
       supabase
         .from("attendance_records")
         .update({
-          clock_out_at: closedAt,
-          note: record.note || "Auto closed at business-day close using scheduled hours.",
-          paid_hours: Number(record.scheduled_hours ?? 8),
-          updated_at: closedAt
+          clock_out_at: closure.clockOutAt,
+          note: record.note || "Auto closed at the employee's scheduled shift end.",
+          paid_hours: closure.paidHours,
+          updated_at: now.toISOString()
         })
         .eq("id", record.id)
         .eq("shop_id", shopId)
@@ -69,7 +95,7 @@ async function closeOpenAttendanceForBusinessDay(
   const { error: auditError } = await supabase.from("audit_logs").insert({
     action: "attendance.day_close",
     actor_id: actorId,
-    detail: `${openRecords.length} open attendance record(s) auto closed for ${businessDate}.`,
+    detail: `${closures.length} eligible attendance record(s) auto closed for ${businessDate}.`,
     shop_id: shopId,
     target_id: businessDate
   });
@@ -107,6 +133,8 @@ async function loadOwnerControlledShopState(
   shopId: string,
   currentState: Partial<DemoAppState>
 ) {
+  await closeExpiredAttendanceRecords(supabase, shopId);
+
   const [
     { data: shop, error: shopError },
     { data: license, error: licenseError },
@@ -156,14 +184,16 @@ async function loadOwnerControlledShopState(
     supabase
       .from("attendance_records")
       .select(
-        "id, shop_id, user_id, business_date, clock_in_at, clock_out_at, scheduled_hours, paid_hours, hourly_rate, source, clock_in_latitude, clock_in_longitude, clock_out_latitude, clock_out_longitude, clock_in_selfie_url, clock_out_selfie_url, note, created_at, updated_at"
+        "id, shop_id, user_id, business_date, clock_in_at, clock_out_at, scheduled_hours, paid_hours, hourly_rate, shift_start_time, shift_end_time, overnight_shift, source, clock_in_latitude, clock_in_longitude, clock_out_latitude, clock_out_longitude, clock_in_selfie_url, clock_out_selfie_url, note, created_at, updated_at"
       )
       .eq("shop_id", shopId)
       .order("clock_in_at", { ascending: false })
       .limit(500),
     supabase
       .from("payroll_rates")
-      .select("id, shop_id, user_id, hourly_rate, default_daily_hours, created_at, updated_at")
+      .select(
+        "id, shop_id, user_id, hourly_rate, default_daily_hours, shift_start_time, shift_end_time, overnight_shift, created_at, updated_at"
+      )
       .eq("shop_id", shopId)
       .order("effective_from", { ascending: false })
   ]);
@@ -305,6 +335,9 @@ async function loadOwnerControlledShopState(
         clockInSelfieUrl: record.clock_in_selfie_url ?? undefined,
         clockOutSelfieUrl: record.clock_out_selfie_url ?? undefined,
         scheduledHours: Number(record.scheduled_hours ?? 8),
+        shiftStartTime: record.shift_start_time ?? DEFAULT_SHIFT_START_TIME,
+        shiftEndTime: record.shift_end_time ?? DEFAULT_SHIFT_END_TIME,
+        overnightShift: Boolean(record.overnight_shift),
         paidHours: record.paid_hours == null ? undefined : Number(record.paid_hours),
         hourlyRate: Number(record.hourly_rate ?? 0),
         note: record.note ?? undefined,
@@ -318,6 +351,9 @@ async function loadOwnerControlledShopState(
         userId: rate.user_id,
         hourlyRate: Number(rate.hourly_rate ?? 0),
         defaultDailyHours: Number(rate.default_daily_hours ?? 8),
+        shiftStartTime: rate.shift_start_time ?? DEFAULT_SHIFT_START_TIME,
+        shiftEndTime: rate.shift_end_time ?? DEFAULT_SHIFT_END_TIME,
+        overnightShift: Boolean(rate.overnight_shift),
         currency: currentState.shops?.find((entry) => entry.id === shopId)?.currency ?? "SAR",
         createdAt: rate.created_at,
         updatedAt: rate.updated_at

@@ -453,7 +453,7 @@ test("business day cannot close with an open shift and records totals after shif
   assert.ok(closed.state.businessDays?.[0].endedAt);
   assert.equal(closed.state.attendanceRecords?.[0].status, "auto_closed");
   assert.ok(closed.state.attendanceRecords?.[0].clockOutAt);
-  assert.equal(closed.state.attendanceRecords?.[0].paidHours, 8);
+  assert.equal(closed.state.attendanceRecords?.[0].paidHours, 5);
   assert.equal(closed.state.attendanceRecords?.[0].editedBy, ADMIN_ID);
 });
 

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   calculateAutoClosedAttendanceHours,
   calculateElapsedAttendanceHours,
+  calculateScheduledAttendanceClosure,
   findOpenAttendanceRecord
 } from "../../src/lib/attendance";
 import type { AttendanceRecord } from "../../src/types/pos";
@@ -80,5 +81,56 @@ test("the preferred business-day record wins when duplicate open records exist",
       "2026-07-19"
     )?.id,
     currentDayOpen.id
+  );
+});
+
+test("a late employee is auto-closed with only the scheduled time actually worked", () => {
+  const result = calculateScheduledAttendanceClosure(
+    createAttendanceRecord({
+      businessDate: "2026-07-20",
+      clockInAt: "2026-07-20T11:00:00.000Z",
+      shiftStartTime: "08:00",
+      shiftEndTime: "16:00"
+    }),
+    new Date("2026-07-21T03:00:00.000Z")
+  );
+
+  assert.deepEqual(result, {
+    clockOutAt: "2026-07-20T13:00:00.000Z",
+    paidHours: 2
+  });
+});
+
+test("a full forgotten day is capped at the employee daily limit", () => {
+  const result = calculateScheduledAttendanceClosure(
+    createAttendanceRecord({
+      businessDate: "2026-07-20",
+      clockInAt: "2026-07-20T05:00:00.000Z",
+      scheduledHours: 8,
+      shiftStartTime: "08:00",
+      shiftEndTime: "16:00"
+    }),
+    new Date("2026-07-21T03:00:00.000Z")
+  );
+
+  assert.equal(result?.paidHours, 8);
+});
+
+test("an overnight shift remains open until its next-day scheduled end", () => {
+  const record = createAttendanceRecord({
+    businessDate: "2026-07-20",
+    clockInAt: "2026-07-20T19:00:00.000Z",
+    overnightShift: true,
+    shiftStartTime: "22:00",
+    shiftEndTime: "06:00"
+  });
+
+  assert.equal(
+    calculateScheduledAttendanceClosure(record, new Date("2026-07-21T01:00:00.000Z")),
+    null
+  );
+  assert.deepEqual(
+    calculateScheduledAttendanceClosure(record, new Date("2026-07-21T04:00:00.000Z")),
+    { clockOutAt: "2026-07-21T03:00:00.000Z", paidHours: 8 }
   );
 });
