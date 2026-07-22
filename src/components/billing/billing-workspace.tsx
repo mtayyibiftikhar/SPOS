@@ -16,7 +16,9 @@ import {
   ReceiptText,
   Search,
   ShoppingBag,
-  Trash2
+  Trash2,
+  WalletCards,
+  X
 } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
 import { Button } from "@/components/ui/button";
@@ -27,7 +29,7 @@ import { Select } from "@/components/ui/select";
 import {
   calculateBillTotals,
   calculateDiscountAmount,
-  calculatePaidAndDue,
+  calculatePaymentAllocation,
   customerMatchesSearch,
   getLocalizedProductName,
   isWalkInCustomerName,
@@ -36,9 +38,11 @@ import {
 import { paymentMethodLabelKeys } from "@/lib/i18n";
 import { combinePhoneNumber, DEFAULT_PHONE_COUNTRY_CODE, sanitizePhoneDigits, splitPhoneNumber } from "@/lib/phone";
 import { cn, formatCurrency } from "@/lib/utils";
-import type { Customer, DiscountType, PaymentMethod, Product } from "@/types/pos";
+import type { CheckoutBillInput, Customer, DiscountType, PaymentMethod, Product } from "@/types/pos";
 
 type WorkflowStep = "build" | "customer" | "payment";
+type CheckoutPaymentMode = PaymentMethod | "split";
+type CustomerModalMode = "existing" | "new";
 
 type CartLine = {
   discountType: DiscountType;
@@ -58,6 +62,9 @@ type HeldBill = {
   itemCount: number;
   label: string;
   paymentMethod?: PaymentMethod;
+  paymentMode?: CheckoutPaymentMode;
+  splitCardAmount?: string;
+  splitCashAmount?: string;
   total: number;
 };
 
@@ -87,11 +94,12 @@ type StatusChipProps = {
 
 const paymentOptions: Array<{
   icon: typeof Banknote;
-  method: PaymentMethod;
+  mode: CheckoutPaymentMode;
 }> = [
-  { method: "cash", icon: Banknote },
-  { method: "card", icon: CreditCard },
-  { method: "account", icon: Clock3 }
+  { mode: "cash", icon: Banknote },
+  { mode: "card", icon: CreditCard },
+  { mode: "account", icon: Clock3 },
+  { mode: "split", icon: WalletCards }
 ];
 
 const UNCATEGORIZED_QUICK_CATEGORY_ID = "__quick_uncategorized__";
@@ -274,7 +282,14 @@ export function BillingWorkspace() {
   const [discountType, setDiscountType] = useState<DiscountType>("fixed");
   const [discountValue, setDiscountValue] = useState("0");
   const [openingCash, setOpeningCash] = useState("0");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
+  const [paymentMode, setPaymentMode] = useState<CheckoutPaymentMode>("cash");
+  const [splitCashAmount, setSplitCashAmount] = useState("");
+  const [splitCardAmount, setSplitCardAmount] = useState("");
+  const [showAccountCustomerModal, setShowAccountCustomerModal] = useState(false);
+  const [customerModalMode, setCustomerModalMode] = useState<CustomerModalMode>("existing");
+  const [accountCustomerSearch, setAccountCustomerSearch] = useState("");
+  const [accountCustomerDraft, setAccountCustomerDraft] = useState<CustomerForm>(createEmptyCustomerForm);
+  const [accountCustomerError, setAccountCustomerError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [setupFeedback, setSetupFeedback] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -406,6 +421,14 @@ export function BillingWorkspace() {
     return savedCustomers.filter((customer) => customerMatchesSearch(customer, query)).slice(0, 6);
   }, [customerSearch, savedCustomers]);
 
+  const matchedAccountCustomers = useMemo(() => {
+    const query = accountCustomerSearch.trim();
+
+    return savedCustomers
+      .filter((customer) => !query || customerMatchesSearch(customer, query))
+      .slice(0, 8);
+  }, [accountCustomerSearch, savedCustomers]);
+
   const searchResults = useMemo(() => {
     const query = productSearch.trim().toLowerCase();
 
@@ -498,7 +521,16 @@ export function BillingWorkspace() {
     taxRate: currentSettings?.tax.rate ?? 0
   });
 
-  const paymentSummary = calculatePaidAndDue(totals.total, paymentMethod);
+  const paymentSummary = calculatePaymentAllocation(
+    totals.total,
+    paymentMode === "split" ? "account" : paymentMode,
+    paymentMode === "split"
+      ? {
+          card: Number(splitCardAmount || 0),
+          cash: Number(splitCashAmount || 0)
+        }
+      : undefined
+  );
   const normalizedCustomerName = customerForm.name.trim();
   const normalizedCustomerPhone = combinePhoneNumber(customerForm.phoneCountryCode, customerForm.phoneNumber);
   const normalizedCustomerWhatsapp = customerForm.whatsappSameAsPhone
@@ -507,7 +539,10 @@ export function BillingWorkspace() {
   const accountCustomerReady = Boolean(
     !isWalkInCustomerName(normalizedCustomerName) && normalizedCustomerPhone
   );
-  const accountPaymentBlocked = paymentMethod === "account" && !accountCustomerReady;
+  const accountPaymentBlocked = paymentSummary.dueAmount > 0 && !accountCustomerReady;
+  const splitPaymentInvalid = paymentMode === "split" && !paymentSummary.isValid;
+  const paymentModeLabel =
+    paymentMode === "split" ? t("billing.paymentSplit") : t(paymentMethodLabelKeys[paymentMode]);
   const cartHasInvalidPrice = cartProducts.some((line) => line.unitPrice <= 0);
   const blockerMessage = !currentBusinessDay
     ? t("billing.dayRequired")
@@ -830,6 +865,65 @@ export function BillingWorkspace() {
     setCustomerSearch("");
   };
 
+  const openAccountCustomerModal = () => {
+    setAccountCustomerSearch("");
+    setAccountCustomerDraft(createEmptyCustomerForm());
+    setAccountCustomerError(null);
+    setCustomerModalMode(savedCustomers.length > 0 ? "existing" : "new");
+    setShowAccountCustomerModal(true);
+  };
+
+  const chooseAccountCustomer = (customer: Customer) => {
+    selectCustomer(customer);
+    setAccountCustomerError(null);
+    setShowAccountCustomerModal(false);
+  };
+
+  const useNewAccountCustomer = () => {
+    const name = accountCustomerDraft.name.trim();
+    const phone = combinePhoneNumber(
+      accountCustomerDraft.phoneCountryCode,
+      accountCustomerDraft.phoneNumber
+    );
+
+    if (!name || isWalkInCustomerName(name) || !phone) {
+      setAccountCustomerError(t("billing.customerNamePhoneRequired"));
+      return;
+    }
+
+    const normalizedPhoneDigits = sanitizePhoneDigits(phone);
+    const duplicateCustomer = savedCustomers.find(
+      (customer) => sanitizePhoneDigits(customer.phone ?? "") === normalizedPhoneDigits
+    );
+
+    if (duplicateCustomer) {
+      chooseAccountCustomer(duplicateCustomer);
+      return;
+    }
+
+    setCustomerForm({
+      ...accountCustomerDraft,
+      email: accountCustomerDraft.email.trim(),
+      name,
+      phoneNumber: sanitizePhoneDigits(accountCustomerDraft.phoneNumber),
+      whatsappCountryCode: accountCustomerDraft.phoneCountryCode,
+      whatsappNumber: sanitizePhoneDigits(accountCustomerDraft.phoneNumber),
+      whatsappSameAsPhone: true
+    });
+    setAccountCustomerError(null);
+    setError(null);
+    setShowAccountCustomerModal(false);
+  };
+
+  const choosePaymentMode = (mode: CheckoutPaymentMode) => {
+    setPaymentMode(mode);
+    setError(null);
+
+    if ((mode === "account" || mode === "split") && !accountCustomerReady) {
+      openAccountCustomerModal();
+    }
+  };
+
   const translateCreateBillError = (message?: string) => {
     switch (message) {
       case "Session unavailable.":
@@ -844,6 +938,8 @@ export function BillingWorkspace() {
         return t("billing.uniquePhoneError");
       case "Account / pay later requires a saved customer with a name and phone number.":
         return t("billing.accountCustomerRequired");
+      case "Payment amounts cannot exceed the bill total.":
+        return t("billing.paymentExceedsTotal");
       default:
         return message?.startsWith("Not enough stock") ? message : t("billing.createError");
     }
@@ -942,7 +1038,10 @@ export function BillingWorkspace() {
       id: crypto.randomUUID(),
       itemCount: cartItemCount,
       label: extraItemCount > 0 ? `${visibleItemNames} +${extraItemCount}` : visibleItemNames,
-      paymentMethod,
+      paymentMethod: paymentMode === "split" ? "account" : paymentMode,
+      paymentMode,
+      splitCardAmount,
+      splitCashAmount,
       total: totals.total
     };
 
@@ -972,7 +1071,9 @@ export function BillingWorkspace() {
     setCustomerForm(heldBill.customerForm ?? createEmptyCustomerForm());
     setDiscountType(heldBill.discountType ?? "fixed");
     setDiscountValue(heldBill.discountValue ?? "0");
-    setPaymentMethod(heldBill.paymentMethod ?? "cash");
+    setPaymentMode(heldBill.paymentMode ?? heldBill.paymentMethod ?? "cash");
+    setSplitCardAmount(heldBill.splitCardAmount ?? "");
+    setSplitCashAmount(heldBill.splitCashAmount ?? "");
     setHeldBills((current) => current.filter((entry) => entry.id !== heldBillId));
     setProductSearch("");
     setWorkflowStep("build");
@@ -1050,13 +1151,19 @@ export function BillingWorkspace() {
 
     if (accountPaymentBlocked) {
       setError(t("billing.accountCustomerRequired"));
+      openAccountCustomerModal();
+      return;
+    }
+
+    if (splitPaymentInvalid) {
+      setError(t("billing.paymentExceedsTotal"));
       return;
     }
 
     setIsSubmitting(true);
 
     const normalizedBillDiscountValue = Number(clampDiscountInput(discountType, discountValue, totals.subtotal));
-    const payload = {
+    const payload: CheckoutBillInput = {
       customer: {
         email: customerForm.email.trim(),
         id: customerForm.id,
@@ -1073,8 +1180,15 @@ export function BillingWorkspace() {
         quantity: line.quantity,
         unitPrice: line.unitPrice
       })),
-      paymentMethod
-    } as const;
+      paymentAmounts:
+        paymentMode === "split"
+          ? {
+              card: paymentSummary.cardAmount,
+              cash: paymentSummary.cashAmount
+            }
+          : undefined,
+      paymentMethod: paymentSummary.paymentMethod
+    };
 
     const result = await createBill(payload);
 
@@ -1089,7 +1203,9 @@ export function BillingWorkspace() {
     clearCustomer();
     setDiscountType("fixed");
     setDiscountValue("0");
-    setPaymentMethod("cash");
+    setPaymentMode("cash");
+    setSplitCardAmount("");
+    setSplitCashAmount("");
     setWorkflowStep("build");
     setIsSubmitting(false);
     window.location.assign(`/bills/${encodeURIComponent(result.billId)}?fresh=1`);
@@ -2102,199 +2218,373 @@ export function BillingWorkspace() {
   );
 
   const paymentView = (
-    <div className="mx-auto flex w-full max-w-[1920px] flex-col gap-3 xl:h-[90dvh] xl:overflow-hidden">
-      {renderStepHeader({
-        backAction: () => setWorkflowStep("customer"),
-        backLabel: t("billing.backToCustomer"),
-        step: "payment"
-      })}
+    <>
+      <div className="mx-auto flex w-full max-w-[1920px] flex-col gap-3 xl:h-[90dvh] xl:overflow-hidden">
+        {renderStepHeader({
+          backAction: () => setWorkflowStep("customer"),
+          backLabel: t("billing.backToCustomer"),
+          step: "payment"
+        })}
 
-      <div className="grid flex-1 min-h-0 gap-3 xl:grid-cols-[minmax(0,1.7fr)_360px]">
-        <Card className="grid min-h-[620px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:min-h-0">
-          <div className="border-b border-slate-200 px-4 py-4">
-            <SectionEyebrow>{t("billing.reviewAndPay")}</SectionEyebrow>
-            <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h1 className="font-display text-[1.6rem] font-semibold tracking-[-0.04em] text-slate-950">
-                  {t("billing.paymentStepTitle")}
-                </h1>
-                <p className="mt-1 text-sm text-slate-600">{t("billing.paymentStepDesc")}</p>
+        <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1.7fr)_390px]">
+          <Card className="grid min-h-[620px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:min-h-0">
+            <div className="border-b border-slate-200 px-4 py-4">
+              <SectionEyebrow>{t("billing.reviewAndPay")}</SectionEyebrow>
+              <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h1 className="font-display text-[1.6rem] font-semibold tracking-[-0.04em] text-slate-950">
+                    {t("billing.paymentStepTitle")}
+                  </h1>
+                  <p className="mt-1 text-sm text-slate-600">{t("billing.paymentStepDesc")}</p>
+                </div>
+
+                <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-right">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    {paymentModeLabel}
+                  </p>
+                  <p className="mt-1 text-lg font-semibold text-slate-950">
+                    {formatCurrency(totals.total, currency, locale)}
+                  </p>
+                </div>
               </div>
 
-              <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-right">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  {t(paymentMethodLabelKeys[paymentMethod])}
-                </p>
-                <p className="mt-1 text-lg font-semibold text-slate-950">
-                  {formatCurrency(totals.total, currency, locale)}
-                </p>
+              <div className="mt-4 grid gap-2 md:grid-cols-[minmax(0,1.2fr)_1fr_1fr]">
+                <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{t("common.customer")}</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-950">{customerDisplayName}</p>
+                  <p className="mt-1 text-xs text-slate-500">{normalizedCustomerPhone || t("billing.walkInAutoHint")}</p>
+                </div>
+                <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{t("common.paidAmount")}</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-950">
+                    {formatCurrency(paymentSummary.paidAmount, currency, locale)}
+                  </p>
+                </div>
+                <div className={cn(
+                  "rounded-[18px] border px-4 py-3",
+                  paymentSummary.dueAmount > 0 ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-slate-50"
+                )}>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{t("common.dueAmount")}</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-950">
+                    {formatCurrency(paymentSummary.dueAmount, currency, locale)}
+                  </p>
+                </div>
               </div>
             </div>
 
-            <div className="mt-4 grid gap-2 md:grid-cols-[minmax(0,1.2fr)_1fr_1fr]">
-              <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{t("common.customer")}</p>
-                <p className="mt-1 text-sm font-semibold text-slate-950">{customerDisplayName}</p>
-                <p className="mt-1 text-xs text-slate-500">{normalizedCustomerPhone || t("billing.walkInAutoHint")}</p>
+            <div className="min-h-0 overflow-y-auto px-4 py-4">{renderOrderSummaryList()}</div>
+          </Card>
+
+          <Card className="grid min-h-[620px] grid-rows-[auto_auto_1fr_auto] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:min-h-0">
+            <div className="border-b border-slate-200 px-4 py-4">
+              <SectionEyebrow>{t("common.paymentMethod")}</SectionEyebrow>
+              <h2 className="mt-1 font-display text-[1.4rem] font-semibold tracking-[-0.04em] text-slate-950">
+                {t("billing.checkoutTitle")}
+              </h2>
+            </div>
+
+            <div className="border-b border-slate-200 px-4 py-4">
+              <div className="grid grid-cols-2 gap-2">
+                {paymentOptions.map(({ icon: Icon, mode }) => {
+                  const active = paymentMode === mode;
+                  const label = mode === "split" ? t("billing.paymentSplit") : t(paymentMethodLabelKeys[mode]);
+
+                  return (
+                    <button
+                      key={mode}
+                      className={cn(
+                        "min-h-20 rounded-[20px] border px-3 py-3 text-center transition duration-200",
+                        active
+                          ? "border-slate-950 bg-slate-950 text-white shadow-[0_16px_30px_rgba(15,23,42,0.18)]"
+                          : "border-slate-200 bg-white text-slate-700 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50"
+                      )}
+                      onClick={() => choosePaymentMode(mode)}
+                      type="button"
+                    >
+                      <Icon className="mx-auto h-5 w-5" />
+                      <span className="mt-2 block text-[11px] font-semibold uppercase tracking-[0.14em]">
+                        {label}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
-              <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{t("common.paidAmount")}</p>
-                <p className="mt-1 text-sm font-semibold text-slate-950">
-                  {formatCurrency(paymentSummary.paidAmount, currency, locale)}
-                </p>
+            </div>
+
+            <div className="min-h-0 overflow-y-auto px-4 py-4">
+              {paymentMode === "split" ? (
+                <div className="mb-4 rounded-[22px] border border-emerald-200 bg-emerald-50/70 p-4">
+                  <p className="text-sm font-semibold text-emerald-950">{t("billing.paymentSplit")}</p>
+                  <p className="mt-1 text-xs leading-5 text-emerald-800">{t("billing.partialPaymentHint")}</p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <label className="text-xs font-semibold text-slate-700">
+                      {t("billing.cashAmount")}
+                      <Input
+                        className="mt-1.5 h-11 rounded-[15px] border-emerald-200 bg-white"
+                        inputMode="decimal"
+                        min="0"
+                        onChange={(event) => {
+                          setSplitCashAmount(sanitizePriceInput(event.target.value));
+                          setError(null);
+                        }}
+                        type="number"
+                        value={splitCashAmount}
+                      />
+                    </label>
+                    <label className="text-xs font-semibold text-slate-700">
+                      {t("billing.cardAmount")}
+                      <Input
+                        className="mt-1.5 h-11 rounded-[15px] border-emerald-200 bg-white"
+                        inputMode="decimal"
+                        min="0"
+                        onChange={(event) => {
+                          setSplitCardAmount(sanitizePriceInput(event.target.value));
+                          setError(null);
+                        }}
+                        type="number"
+                        value={splitCardAmount}
+                      />
+                    </label>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between rounded-[15px] bg-white px-3 py-2.5 text-sm">
+                    <span className="font-medium text-slate-600">{t("billing.accountRemainder")}</span>
+                    <span className="font-semibold text-amber-700">
+                      {formatCurrency(paymentSummary.dueAmount, currency, locale)}
+                    </span>
+                  </div>
+                  {splitPaymentInvalid ? (
+                    <p className="mt-2 text-xs font-semibold text-red-700">{t("billing.paymentExceedsTotal")}</p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <div className="space-y-2.5 rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4">
+                <SummaryRow label={t("common.subtotal")} value={formatCurrency(totals.subtotal, currency, locale)} />
+                {totals.itemDiscountAmount > 0 ? (
+                  <SummaryRow label={t("common.itemDiscounts")} value={formatCurrency(totals.itemDiscountAmount, currency, locale)} />
+                ) : null}
+                <SummaryRow label={t("common.discount")} value={formatCurrency(totals.discountAmount, currency, locale)} />
+                {taxEnabled ? (
+                  <SummaryRow label={taxLabel} value={formatCurrency(totals.taxAmount, currency, locale)} />
+                ) : null}
+                <SummaryRow label={t("common.paidAmount")} value={formatCurrency(paymentSummary.paidAmount, currency, locale)} />
+                <SummaryRow label={t("common.dueAmount")} value={formatCurrency(paymentSummary.dueAmount, currency, locale)} />
+                <SummaryRow label={t("common.total")} strong value={formatCurrency(totals.total, currency, locale)} />
               </div>
-              <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{t("common.dueAmount")}</p>
-                <p className="mt-1 text-sm font-semibold text-slate-950">
+
+              {paymentSummary.dueAmount > 0 ? (
+                <div className={cn(
+                  "mt-4 rounded-[22px] border p-4",
+                  accountCustomerReady ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"
+                )}>
+                  {accountCustomerReady ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
+                          {t("billing.accountCustomer")}
+                        </p>
+                        <p className="mt-1 truncate text-sm font-semibold text-slate-950">{customerDisplayName}</p>
+                        <p className="mt-1 text-xs text-slate-600">{normalizedCustomerPhone}</p>
+                      </div>
+                      <Button
+                        className="shrink-0 rounded-[14px] border border-emerald-200 bg-white px-3 text-emerald-800 hover:bg-emerald-100"
+                        onClick={openAccountCustomerModal}
+                        type="button"
+                      >
+                        {t("billing.changeCustomer")}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-sm font-semibold text-amber-950">{t("billing.accountCustomerRequired")}</p>
+                      <Button
+                        className="mt-3 w-full rounded-[15px] bg-amber-500 text-amber-950 hover:bg-amber-400"
+                        onClick={openAccountCustomerModal}
+                        type="button"
+                      >
+                        {t("billing.chooseCustomer")}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-[22px] border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                  {t("billing.paidSaleHint")}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3 border-t border-slate-200 px-4 py-4">
+              {error ? (
+                <div className="rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium leading-5 text-red-700" role="alert">
+                  {error}
+                </div>
+              ) : null}
+
+              <Button
+                className="h-12 w-full rounded-[18px] bg-emerald-600 text-base font-semibold text-white hover:bg-emerald-700"
+                disabled={isSubmitting}
+                onClick={submitBill}
+              >
+                <span className="inline-flex items-center gap-2">
+                  {isSubmitting ? t("billing.creatingBill") : t("billing.confirmAndCreate")}
+                  <ArrowRight className="h-4 w-4" />
+                </span>
+              </Button>
+            </div>
+          </Card>
+        </div>
+      </div>
+
+      {showAccountCustomerModal ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+          <Card
+            aria-modal="true"
+            className="max-h-[92dvh] w-full max-w-3xl overflow-hidden rounded-[30px] border-white/80 bg-white shadow-[0_32px_100px_rgba(15,23,42,0.3)]"
+            role="dialog"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-5 sm:px-6">
+              <div>
+                <SectionEyebrow>{t("billing.accountRemainder")}</SectionEyebrow>
+                <h2 className="mt-1 font-display text-2xl font-semibold tracking-[-0.04em] text-slate-950">
+                  {t("billing.chooseAccountCustomer")}
+                </h2>
+                <p className="mt-1 text-sm text-slate-600">
                   {formatCurrency(paymentSummary.dueAmount, currency, locale)}
                 </p>
               </div>
-            </div>
-          </div>
-
-          <div className="min-h-0 overflow-y-auto px-4 py-4">{renderOrderSummaryList()}</div>
-        </Card>
-
-        <Card className="grid min-h-[620px] grid-rows-[auto_auto_1fr_auto] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:min-h-0">
-          <div className="border-b border-slate-200 px-4 py-4">
-            <SectionEyebrow>{t("common.paymentMethod")}</SectionEyebrow>
-            <h2 className="mt-1 font-display text-[1.4rem] font-semibold tracking-[-0.04em] text-slate-950">
-              {t("billing.checkoutTitle")}
-            </h2>
-          </div>
-
-          <div className="border-b border-slate-200 px-4 py-4">
-            <div className="grid grid-cols-3 gap-2">
-              {paymentOptions.map(({ icon: Icon, method }) => {
-                const active = paymentMethod === method;
-
-                return (
-                  <button
-                    key={method}
-                    className={cn(
-                      "rounded-[20px] border px-3 py-3 text-center transition",
-                      active
-                        ? "border-slate-950 bg-slate-950 text-white shadow-[0_16px_30px_rgba(15,23,42,0.18)]"
-                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
-                    )}
-                    onClick={() => {
-                      setPaymentMethod(method);
-                      setError(null);
-                    }}
-                    type="button"
-                  >
-                    <Icon className="mx-auto h-5 w-5" />
-                    <span className="mt-2 block text-[11px] font-semibold uppercase tracking-[0.18em]">
-                      {t(paymentMethodLabelKeys[method])}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="min-h-0 overflow-y-auto px-4 py-4">
-            <div className="space-y-2.5 rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4">
-              <SummaryRow label={t("common.subtotal")} value={formatCurrency(totals.subtotal, currency, locale)} />
-              {totals.itemDiscountAmount > 0 ? (
-                <SummaryRow label={t("common.itemDiscounts")} value={formatCurrency(totals.itemDiscountAmount, currency, locale)} />
-              ) : null}
-              <SummaryRow label={t("common.discount")} value={formatCurrency(totals.discountAmount, currency, locale)} />
-              {taxEnabled ? (
-                <SummaryRow label={taxLabel} value={formatCurrency(totals.taxAmount, currency, locale)} />
-              ) : null}
-              <SummaryRow label={t("common.paidAmount")} value={formatCurrency(paymentSummary.paidAmount, currency, locale)} />
-              <SummaryRow label={t("common.dueAmount")} value={formatCurrency(paymentSummary.dueAmount, currency, locale)} />
-              <SummaryRow label={t("common.total")} strong value={formatCurrency(totals.total, currency, locale)} />
+              <button
+                aria-label={t("common.close")}
+                className="grid h-11 w-11 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-100 hover:text-slate-950"
+                onClick={() => setShowAccountCustomerModal(false)}
+                type="button"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
 
-            {paymentMethod === "account" && accountPaymentBlocked ? (
-              <div className="mt-4 rounded-[22px] border border-amber-200 bg-amber-50 p-4">
-                <p className="text-sm font-semibold text-amber-950">{t("billing.accountCustomerRequired")}</p>
-                <Select
-                  aria-label={t("billing.customerSearchCompact")}
-                  className="mt-3 h-11 rounded-[16px] border-amber-200 bg-white text-sm"
-                  onChange={(event) => {
-                    const selectedCustomer = savedCustomers.find((customer) => customer.id === event.target.value);
-
-                    if (selectedCustomer) {
-                      selectCustomer(selectedCustomer);
-                    }
+            <div className="grid grid-cols-2 gap-2 border-b border-slate-200 bg-slate-50 p-3">
+              {(["existing", "new"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  className={cn(
+                    "rounded-[16px] px-4 py-3 text-sm font-semibold transition",
+                    customerModalMode === mode
+                      ? "bg-slate-950 text-white shadow-lg"
+                      : "bg-white text-slate-600 hover:bg-emerald-50 hover:text-emerald-800"
+                  )}
+                  onClick={() => {
+                    setCustomerModalMode(mode);
+                    setAccountCustomerError(null);
                   }}
-                  value={customerForm.id ?? ""}
+                  type="button"
                 >
-                  <option value="">{t("billing.customerSearchCompact")}</option>
-                  {savedCustomers.map((customer) => (
-                    <option key={customer.id} value={customer.id}>
-                      {customer.name} - {customer.phone || customer.whatsapp || customer.email || t("common.notAvailable")}
-                    </option>
-                  ))}
-                </Select>
-                <div className="mt-3 grid gap-3">
-                  <Input
-                    aria-label={t("common.customerName")}
-                    className="h-11 rounded-[16px] border-amber-200 bg-white"
-                    placeholder={t("common.customerName")}
-                    value={customerForm.name}
-                    onChange={(event) =>
-                      setCustomerForm((current) => ({
-                        ...current,
-                        id: undefined,
-                        name: event.target.value
-                      }))
-                    }
-                  />
+                  {mode === "existing" ? t("billing.existingCustomer") : t("billing.newCustomer")}
+                </button>
+              ))}
+            </div>
+
+            <div className="max-h-[62dvh] overflow-y-auto p-5 sm:p-6">
+              {customerModalMode === "existing" ? (
+                <div>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                    <Input
+                      autoFocus
+                      className="h-12 rounded-[18px] border-slate-200 bg-slate-50 pl-12 text-base"
+                      onChange={(event) => setAccountCustomerSearch(event.target.value)}
+                      placeholder={t("billing.customerSearchCompact")}
+                      value={accountCustomerSearch}
+                    />
+                  </div>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    {matchedAccountCustomers.map((customer) => (
+                      <button
+                        key={customer.id}
+                        className="rounded-[20px] border border-slate-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50 hover:shadow-lg"
+                        onClick={() => chooseAccountCustomer(customer)}
+                        type="button"
+                      >
+                        <p className="font-semibold text-slate-950">{customer.name}</p>
+                        <p className="mt-1 text-sm text-slate-600">{customer.phone || customer.whatsapp || t("common.notAvailable")}</p>
+                        {customer.email ? <p className="mt-1 truncate text-xs text-slate-500">{customer.email}</p> : null}
+                        <span className="mt-3 inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                          {t("billing.useCustomer")}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {matchedAccountCustomers.length === 0 ? (
+                    <div className="mt-4 rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600">
+                      {t("billing.noCustomersFound")}
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="grid gap-4">
+                  <label className="text-sm font-semibold text-slate-800">
+                    {t("common.customerName")}
+                    <Input
+                      autoFocus
+                      className="mt-2 h-12 rounded-[17px] bg-slate-50"
+                      onChange={(event) =>
+                        setAccountCustomerDraft((current) => ({ ...current, name: event.target.value }))
+                      }
+                      value={accountCustomerDraft.name}
+                    />
+                  </label>
                   <PhoneNumberField
-                    countryCode={customerForm.phoneCountryCode}
+                    countryCode={accountCustomerDraft.phoneCountryCode}
                     label={t("common.phone")}
-                    number={customerForm.phoneNumber}
+                    number={accountCustomerDraft.phoneNumber}
                     onCountryCodeChange={(value) =>
-                      setCustomerForm((current) => ({
+                      setAccountCustomerDraft((current) => ({
                         ...current,
-                        id: undefined,
                         phoneCountryCode: value,
-                        whatsappCountryCode: current.whatsappSameAsPhone ? value : current.whatsappCountryCode
+                        whatsappCountryCode: value
                       }))
                     }
                     onNumberChange={(value) =>
-                      setCustomerForm((current) => ({
+                      setAccountCustomerDraft((current) => ({
                         ...current,
-                        id: undefined,
                         phoneNumber: sanitizePhoneDigits(value),
-                        whatsappNumber: current.whatsappSameAsPhone ? sanitizePhoneDigits(value) : current.whatsappNumber
+                        whatsappNumber: sanitizePhoneDigits(value)
                       }))
                     }
                   />
+                  <label className="text-sm font-semibold text-slate-800">
+                    {t("common.email")}
+                    <Input
+                      className="mt-2 h-12 rounded-[17px] bg-slate-50"
+                      onChange={(event) =>
+                        setAccountCustomerDraft((current) => ({ ...current, email: event.target.value }))
+                      }
+                      type="email"
+                      value={accountCustomerDraft.email}
+                    />
+                  </label>
+                  <Button
+                    className="h-12 rounded-[17px] bg-emerald-600 text-base font-semibold text-white hover:bg-emerald-700"
+                    onClick={useNewAccountCustomer}
+                    type="button"
+                  >
+                    {t("billing.useNewCustomer")}
+                  </Button>
                 </div>
-              </div>
-            ) : (
-              <div className="mt-4 rounded-[22px] border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                {paymentMethod === "account" ? t("billing.accountCustomerHint") : t("billing.paidSaleHint")}
-              </div>
-            )}
-          </div>
+              )}
 
-          <div className="space-y-3 border-t border-slate-200 px-4 py-4">
-            {error ? (
-              <div className="rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium leading-5 text-red-700" role="alert">
-                {error}
-              </div>
-            ) : null}
-
-            <Button
-              className="h-12 w-full rounded-[18px] bg-emerald-600 text-base font-semibold text-white hover:bg-emerald-700"
-              disabled={isSubmitting}
-              onClick={submitBill}
-            >
-              <span className="inline-flex items-center gap-2">
-                {isSubmitting ? t("billing.creatingBill") : t("billing.confirmAndCreate")}
-                <ArrowRight className="h-4 w-4" />
-              </span>
-            </Button>
-          </div>
-        </Card>
-      </div>
-    </div>
+              {accountCustomerError ? (
+                <div className="mt-4 rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700" role="alert">
+                  {accountCustomerError}
+                </div>
+              ) : null}
+            </div>
+          </Card>
+        </div>
+      ) : null}
+    </>
   );
 
   if (workflowStep === "customer") {

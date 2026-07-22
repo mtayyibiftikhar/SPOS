@@ -679,6 +679,10 @@ export interface CheckoutBillInput {
   discountType: DiscountType;
   discountValue: number;
   paymentMethod: PaymentMethod;
+  paymentAmounts?: {
+    cash: number;
+    card: number;
+  };
 }
 
 export interface DemoAppState {

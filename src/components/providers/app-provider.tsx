@@ -19,6 +19,7 @@ import type {
   Locale,
   License,
   LicenseStatus,
+  Payment,
   Product,
   ProductCategory,
   ProductKeyStatus,
@@ -53,7 +54,7 @@ import {
 import {
   calculateBillTotals,
   calculateDiscountAmount,
-  calculatePaidAndDue,
+  calculatePaymentAllocation,
   findExistingCustomer,
   findCustomerPhoneConflict,
   getBillStatus,
@@ -8186,15 +8187,6 @@ export function AppProvider({
             return current;
           }
 
-          if (payload.paymentMethod === "account" && (!accountCustomerName || !accountCustomerPhone)) {
-            result = {
-              ok: false,
-              message: "Account / pay later requires a saved customer with a name and phone number."
-            };
-
-            return current;
-          }
-
           const billDiscountBase = Math.round(
             validItems.reduce((sum, item) => {
               const grossLineTotal = Math.round(item.unitPrice * item.quantity * 100) / 100;
@@ -8226,7 +8218,31 @@ export function AppProvider({
             taxRate: taxSettings?.rate ?? 0,
             taxMode: taxSettings?.mode ?? "inclusive"
           });
-          const { paidAmount, dueAmount } = calculatePaidAndDue(totals.total, payload.paymentMethod);
+          const paymentAllocation = calculatePaymentAllocation(
+            totals.total,
+            payload.paymentMethod,
+            payload.paymentAmounts
+          );
+
+          if (!paymentAllocation.isValid) {
+            result = {
+              ok: false,
+              message: "Payment amounts cannot exceed the bill total."
+            };
+
+            return current;
+          }
+
+          const { paidAmount, dueAmount } = paymentAllocation;
+
+          if (dueAmount > 0 && (!accountCustomerName || !accountCustomerPhone)) {
+            result = {
+              ok: false,
+              message: "Account / pay later requires a saved customer with a name and phone number."
+            };
+
+            return current;
+          }
 
           let customerRecord: Customer | undefined;
           let nextCustomers = current.customers;
@@ -8274,7 +8290,7 @@ export function AppProvider({
               getBusinessDateInTimezone(shop?.timezone ?? "Asia/Riyadh", new Date(createdAt)),
             shiftId: activeShift.id,
             number: billNumber,
-            status: getBillStatus(payload.paymentMethod, dueAmount),
+            status: getBillStatus(paymentAllocation.paymentMethod, dueAmount),
             customerName: normalizedCustomer.name,
             customerPhone: normalizedCustomer.phone,
             customerEmail: normalizedCustomer.email,
@@ -8291,7 +8307,7 @@ export function AppProvider({
             total: totals.total,
             paidAmount,
             dueAmount,
-            paymentMethod: payload.paymentMethod,
+            paymentMethod: paymentAllocation.paymentMethod,
             cashierId: session.id,
             createdAt
           };
@@ -8321,18 +8337,30 @@ export function AppProvider({
             };
           });
 
-          const paymentRecord =
-            paidAmount > 0
+          const paymentRecords: Payment[] = [
+            ...(paymentAllocation.cashAmount > 0
               ? [
                   {
                     id: createId("payment"),
                     billId,
-                    method: payload.paymentMethod,
-                    amount: paidAmount,
+                    method: "cash" as const,
+                    amount: paymentAllocation.cashAmount,
                     createdAt
                   }
                 ]
-              : [];
+              : []),
+            ...(paymentAllocation.cardAmount > 0
+              ? [
+                  {
+                    id: createId("payment"),
+                    billId,
+                    method: "card" as const,
+                    amount: paymentAllocation.cardAmount,
+                    createdAt
+                  }
+                ]
+              : [])
+          ];
 
           result = {
             ok: true,
@@ -8350,11 +8378,12 @@ export function AppProvider({
             },
             bills: [bill, ...current.bills],
             billItems: [...billItems, ...current.billItems],
-            payments: [...paymentRecord, ...current.payments],
+            payments: [...paymentRecords, ...current.payments],
             ledgerEntries: [
               ...buildSaleLedgerEntries({
                 bill,
                 billItems,
+                payments: paymentRecords,
                 createdBy: session.id,
                 idFactory: () => createId("ledger")
               }),

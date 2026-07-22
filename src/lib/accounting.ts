@@ -6,6 +6,7 @@ import type {
   CustomerAccountPayment,
   DemoAppState,
   Expense,
+  Payment,
   PaymentMethod,
   Refund,
   RefundItem
@@ -88,34 +89,84 @@ function getRefundCost(items: RefundItem[], billItems?: BillItem[]) {
 export function buildSaleLedgerEntries({
   bill,
   billItems,
+  payments,
   createdBy,
   idFactory
 }: {
   bill: Bill;
   billItems: BillItem[];
+  payments?: Payment[];
   createdBy: string;
   idFactory?: LedgerIdFactory;
 }) {
-  const paymentAccount = getPaymentAccount(bill.paymentMethod);
   const revenue = roundMoney(Math.max(0, bill.total - bill.taxAmount));
   const costOfGoods = getBillCostOfGoods(billItems);
-  const rows: EntryInput[] = [
-    {
+  const paymentRows: EntryInput[] = [];
+  const recordedPayments = (payments ?? []).filter(
+    (payment) => payment.billId === bill.id && payment.amount > 0
+  );
+
+  if (recordedPayments.length > 0) {
+    recordedPayments.forEach((payment) => {
+      const paymentAccount = getPaymentAccount(payment.method);
+      paymentRows.push({
+        shopId: bill.shopId,
+        businessDate: bill.businessDate ?? bill.createdAt.slice(0, 10),
+        shiftId: bill.shiftId,
+        accountCode: paymentAccount.code,
+        accountName: paymentAccount.name,
+        debit: payment.amount,
+        credit: 0,
+        memo: `${paymentAccount.name} received for ${bill.number}`,
+        referenceType: "bill",
+        referenceId: bill.id,
+        billId: bill.id,
+        customerId: bill.customerId,
+        createdBy,
+        createdAt: payment.createdAt
+      });
+    });
+  } else if (bill.paidAmount > 0) {
+    const paymentAccount = getPaymentAccount(bill.paymentMethod === "account" ? "cash" : bill.paymentMethod);
+    paymentRows.push({
       shopId: bill.shopId,
       businessDate: bill.businessDate ?? bill.createdAt.slice(0, 10),
       shiftId: bill.shiftId,
       accountCode: paymentAccount.code,
       accountName: paymentAccount.name,
-      debit: bill.total,
+      debit: bill.paidAmount,
       credit: 0,
-      memo: `Sale ${bill.number}`,
+      memo: `${paymentAccount.name} received for ${bill.number}`,
       referenceType: "bill",
       referenceId: bill.id,
       billId: bill.id,
       customerId: bill.customerId,
       createdBy,
       createdAt: bill.createdAt
-    },
+    });
+  }
+
+  if (bill.dueAmount > 0) {
+    paymentRows.push({
+      shopId: bill.shopId,
+      businessDate: bill.businessDate ?? bill.createdAt.slice(0, 10),
+      shiftId: bill.shiftId,
+      accountCode: accounts.receivable.code,
+      accountName: accounts.receivable.name,
+      debit: bill.dueAmount,
+      credit: 0,
+      memo: `Amount due for ${bill.number}`,
+      referenceType: "bill",
+      referenceId: bill.id,
+      billId: bill.id,
+      customerId: bill.customerId,
+      createdBy,
+      createdAt: bill.createdAt
+    });
+  }
+
+  const rows: EntryInput[] = [
+    ...paymentRows,
     {
       shopId: bill.shopId,
       businessDate: bill.businessDate ?? bill.createdAt.slice(0, 10),
@@ -438,7 +489,8 @@ export function rebuildAccountingLedger(state: DemoAppState) {
 
   state.bills.forEach((bill) => {
     const billItems = state.billItems.filter((item) => item.billId === bill.id);
-    ledgerEntries.push(...buildSaleLedgerEntries({ bill, billItems, createdBy: bill.cashierId }));
+    const payments = state.payments.filter((payment) => payment.billId === bill.id);
+    ledgerEntries.push(...buildSaleLedgerEntries({ bill, billItems, payments, createdBy: bill.cashierId }));
   });
 
   state.customerAccountPayments.forEach((payment) => {

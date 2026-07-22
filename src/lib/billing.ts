@@ -163,18 +163,49 @@ export function findCustomerPhoneConflict(
   );
 }
 
-export function calculatePaidAndDue(total: number, paymentMethod: PaymentMethod) {
-  if (paymentMethod === "account") {
+export function calculatePaymentAllocation(
+  total: number,
+  paymentMethod: PaymentMethod,
+  paymentAmounts?: { cash?: number; card?: number }
+) {
+  const safeTotal = roundMoney(Math.max(0, total));
+
+  if (!paymentAmounts) {
+    const paidAmount = paymentMethod === "account" ? 0 : safeTotal;
+
     return {
-      paidAmount: 0,
-      dueAmount: total
+      cashAmount: paymentMethod === "cash" ? paidAmount : 0,
+      cardAmount: paymentMethod === "card" ? paidAmount : 0,
+      paidAmount,
+      dueAmount: roundMoney(safeTotal - paidAmount),
+      paymentMethod,
+      isValid: true
     };
   }
 
+  const rawCash = Number(paymentAmounts.cash ?? 0);
+  const rawCard = Number(paymentAmounts.card ?? 0);
+  const cashAmount = roundMoney(Math.max(0, Number.isFinite(rawCash) ? rawCash : 0));
+  const cardAmount = roundMoney(Math.max(0, Number.isFinite(rawCard) ? rawCard : 0));
+  const paidAmount = roundMoney(cashAmount + cardAmount);
+  const dueAmount = roundMoney(Math.max(0, safeTotal - paidAmount));
+  const resolvedPaymentMethod: PaymentMethod =
+    dueAmount > 0 ? "account" : cardAmount > 0 && cashAmount <= 0 ? "card" : "cash";
+
   return {
-    paidAmount: total,
-    dueAmount: 0
+    cashAmount,
+    cardAmount,
+    paidAmount,
+    dueAmount,
+    paymentMethod: resolvedPaymentMethod,
+    isValid: paidAmount <= safeTotal
   };
+}
+
+export function calculatePaidAndDue(total: number, paymentMethod: PaymentMethod) {
+  const { paidAmount, dueAmount } = calculatePaymentAllocation(total, paymentMethod);
+
+  return { paidAmount, dueAmount };
 }
 
 export function getBillStatus(paymentMethod: PaymentMethod, dueAmount: number): Bill["status"] {

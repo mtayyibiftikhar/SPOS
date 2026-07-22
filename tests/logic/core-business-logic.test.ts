@@ -4,6 +4,7 @@ import {
   calculateBillTotals,
   calculateDiscountAmount,
   calculatePaidAndDue,
+  calculatePaymentAllocation,
   customerMatchesSearch,
   isWalkInCustomerName,
   normalizeDiscountValue
@@ -164,6 +165,24 @@ test("account payments remain due while cash and card are fully paid", () => {
   assert.deepEqual(calculatePaidAndDue(75, "account"), { paidAmount: 0, dueAmount: 75 });
   assert.deepEqual(calculatePaidAndDue(75, "cash"), { paidAmount: 75, dueAmount: 0 });
   assert.deepEqual(calculatePaidAndDue(75, "card"), { paidAmount: 75, dueAmount: 0 });
+});
+
+test("split payments post only the unpaid remainder to the customer account", () => {
+  assert.deepEqual(calculatePaymentAllocation(100, "account", { cash: 30, card: 20 }), {
+    cashAmount: 30,
+    cardAmount: 20,
+    paidAmount: 50,
+    dueAmount: 50,
+    paymentMethod: "account",
+    isValid: true
+  });
+});
+
+test("split payments reject cash and card amounts above the bill total", () => {
+  const allocation = calculatePaymentAllocation(100, "account", { cash: 70, card: 40 });
+
+  assert.equal(allocation.isValid, false);
+  assert.equal(allocation.dueAmount, 0);
 });
 
 test("shift expected cash uses only its bills, movements, and cash refunds", () => {

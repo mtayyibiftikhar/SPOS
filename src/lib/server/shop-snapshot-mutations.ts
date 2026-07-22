@@ -6,7 +6,7 @@ import {
 import {
   calculateBillTotals,
   calculateDiscountAmount,
-  calculatePaidAndDue,
+  calculatePaymentAllocation,
   findCustomerPhoneConflict,
   findExistingCustomer,
   getBillStatus,
@@ -34,6 +34,7 @@ import type {
   Customer,
   CustomerAccountPayment,
   DemoAppState,
+  Payment,
   Product,
   Refund,
   RefundItem,
@@ -426,26 +427,6 @@ function createBillMutation(
     return { result: { ok: false, message: "Another customer already uses this phone number." }, state };
   }
 
-  if (
-    payload.paymentMethod === "account" &&
-    !normalizedCustomerData.name.trim()
-  ) {
-    return {
-      result: { ok: false, message: "Account / pay later requires a saved customer with a name and phone number." },
-      state
-    };
-  }
-
-  if (
-    payload.paymentMethod === "account" &&
-    !normalizedCustomerData.phone?.trim()
-  ) {
-    return {
-      result: { ok: false, message: "Account / pay later requires a saved customer with a name and phone number." },
-      state
-    };
-  }
-
   const discountBase = Math.round(
     validItems.reduce((sum, item) => {
       const gross = Math.round(item.unitPrice * item.quantity * 100) / 100;
@@ -468,7 +449,22 @@ function createBillMutation(
     taxMode: tax?.mode ?? "inclusive",
     taxRate: tax?.rate ?? 0
   });
-  const { paidAmount, dueAmount } = calculatePaidAndDue(totals.total, payload.paymentMethod);
+  const paymentAllocation = calculatePaymentAllocation(
+    totals.total,
+    payload.paymentMethod,
+    payload.paymentAmounts
+  );
+  if (!paymentAllocation.isValid) {
+    return { result: { ok: false, message: "Payment amounts cannot exceed the bill total." }, state };
+  }
+
+  const { paidAmount, dueAmount } = paymentAllocation;
+  if (dueAmount > 0 && (!normalizedCustomerData.name.trim() || !normalizedCustomerData.phone?.trim())) {
+    return {
+      result: { ok: false, message: "Account / pay later requires a saved customer with a name and phone number." },
+      state
+    };
+  }
   const createdAt = new Date().toISOString();
   let customer: Customer | undefined = existingCustomer ?? undefined;
   let nextCustomers = customers;
@@ -503,7 +499,7 @@ function createBillMutation(
       getBusinessDateInTimezone(shop?.timezone ?? "Asia/Riyadh", new Date(createdAt)),
     shiftId: activeShift.id,
     number: `REC-${String(sequence).padStart(6, "0")}`,
-    status: getBillStatus(payload.paymentMethod, dueAmount),
+    status: getBillStatus(paymentAllocation.paymentMethod, dueAmount),
     customerName: customer?.name ?? normalizedCustomerData.name,
     customerPhone: customer?.phone ?? normalizedCustomerData.phone,
     customerEmail: customer?.email ?? normalizedCustomerData.email,
@@ -520,7 +516,7 @@ function createBillMutation(
     total: totals.total,
     paidAmount,
     dueAmount,
-    paymentMethod: payload.paymentMethod,
+    paymentMethod: paymentAllocation.paymentMethod,
     cashierId: context.userId,
     createdAt
   };
@@ -566,6 +562,14 @@ function createBillMutation(
       createdAt
     };
   });
+  const paymentRecords: Payment[] = [
+    ...(paymentAllocation.cashAmount > 0
+      ? [{ id: createId("payment"), billId, method: "cash" as const, amount: paymentAllocation.cashAmount, createdAt }]
+      : []),
+    ...(paymentAllocation.cardAmount > 0
+      ? [{ id: createId("payment"), billId, method: "card" as const, amount: paymentAllocation.cardAmount, createdAt }]
+      : [])
+  ];
 
   return {
     result: { ok: true, billId },
@@ -575,11 +579,15 @@ function createBillMutation(
       products: nextProducts,
       bills: [bill, ...bills],
       billItems: [...billItems, ...(state.billItems ?? [])],
-      payments: paidAmount > 0
-        ? [{ id: createId("payment"), billId, method: payload.paymentMethod, amount: paidAmount, createdAt }, ...(state.payments ?? [])]
-        : state.payments ?? [],
+      payments: [...paymentRecords, ...(state.payments ?? [])],
       ledgerEntries: [
-        ...buildSaleLedgerEntries({ bill, billItems, createdBy: context.userId, idFactory: () => createId("ledger") }),
+        ...buildSaleLedgerEntries({
+          bill,
+          billItems,
+          payments: paymentRecords,
+          createdBy: context.userId,
+          idFactory: () => createId("ledger")
+        }),
         ...(state.ledgerEntries ?? [])
       ],
       inventoryAdjustments: [...inventoryAdjustments, ...(state.inventoryAdjustments ?? [])],
