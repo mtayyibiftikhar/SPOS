@@ -2886,8 +2886,12 @@ export function AppProvider({
 
       if (payload.state) {
         const remoteState = payload.state;
-        const baseState = cloudBaseStateByShop.current[shopId] ?? remoteState;
         const localState = buildShopCloudSyncState(state, shopId);
+        // On the first mutation after hydration there may not be a recorded
+        // baseline yet. Use the pre-mutation local snapshot as the baseline so
+        // newly-created remote records (such as the sale we are opening) are
+        // treated as additions instead of being removed by the three-way merge.
+        const baseState = cloudBaseStateByShop.current[shopId] ?? localState;
         const mergedState = mergeConcurrentShopCloudState(baseState, localState, remoteState, shopId);
 
         cloudRevisionByShop.current[shopId] = Math.max(0, Number(payload.revision ?? 0));
