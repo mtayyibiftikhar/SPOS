@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -1675,16 +1676,18 @@ export function BillingWorkspace() {
           <div className="border-t border-slate-200 px-4 py-3">
             <div className="grid gap-3 xl:grid-cols-[150px_minmax(0,1fr)_260px] 2xl:grid-cols-[170px_minmax(0,1fr)_300px] xl:items-stretch">
               <Button
+                asChild
                 className="group h-[68px] justify-start rounded-[20px] border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-950 shadow-[0_12px_28px_rgba(15,23,42,0.06)] hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50/70 hover:shadow-[0_16px_34px_rgba(5,150,105,0.13)]"
-                onClick={() => router.push("/bills")}
                 variant="secondary"
               >
-                <span className="inline-flex items-center gap-3">
-                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-[14px] bg-slate-950 text-white shadow-[0_10px_20px_rgba(15,23,42,0.16)] transition group-hover:bg-emerald-600">
-                    <ReceiptText className="h-4 w-4" />
+                <Link href="/bills">
+                  <span className="inline-flex items-center gap-3">
+                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-[14px] bg-slate-950 text-white shadow-[0_10px_20px_rgba(15,23,42,0.16)] transition group-hover:bg-emerald-600">
+                      <ReceiptText className="h-4 w-4" />
+                    </span>
+                    <span>{t("nav.bills")}</span>
                   </span>
-                  <span>{t("nav.bills")}</span>
-                </span>
+                </Link>
               </Button>
 
               <div className="flex min-h-[68px] items-center rounded-[20px] border border-emerald-200 bg-emerald-50 px-4 shadow-inner shadow-emerald-100">
