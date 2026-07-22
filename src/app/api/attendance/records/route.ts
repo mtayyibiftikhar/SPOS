@@ -8,6 +8,7 @@ import {
   DEFAULT_SHIFT_START_TIME
 } from "@/lib/attendance";
 import { closeExpiredAttendanceRecords } from "@/lib/server/attendance-rollover";
+import { isMissingAttendanceScheduleColumns } from "@/lib/server/attendance-schema";
 import type { AttendanceRecord, DemoAppState } from "@/types/pos";
 
 type AttendanceAction =
@@ -70,8 +71,88 @@ function validShiftTime(value: string | undefined) {
   return Boolean(value && /^([01]\d|2[0-3]):[0-5]\d$/.test(value));
 }
 
-const attendanceSelect =
-  "id, shop_id, user_id, business_date, clock_in_at, clock_out_at, scheduled_hours, paid_hours, hourly_rate, shift_start_time, shift_end_time, overnight_shift, source, clock_in_latitude, clock_in_longitude, clock_out_latitude, clock_out_longitude, clock_in_selfie_url, clock_out_selfie_url, note, created_at";
+type SupabaseAdminClient = ReturnType<typeof createSupabaseAdminClient>;
+
+function withoutScheduleColumns(values: Record<string, unknown>) {
+  const { overnight_shift: _overnight, shift_end_time: _shiftEnd, shift_start_time: _shiftStart, ...legacy } = values;
+
+  return legacy;
+}
+
+async function loadAttendanceRecords(supabase: SupabaseAdminClient, shopId: string) {
+  return supabase
+    .from("attendance_records")
+    .select("*")
+    .eq("shop_id", shopId)
+    .order("business_date", { ascending: false })
+    .order("clock_in_at", { ascending: false })
+    .limit(1000);
+}
+
+async function loadOpenAttendanceRecord(supabase: SupabaseAdminClient, shopId: string, userId: string) {
+  return supabase
+    .from("attendance_records")
+    .select("*")
+    .eq("shop_id", shopId)
+    .eq("user_id", userId)
+    .is("clock_out_at", null)
+    .order("clock_in_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+}
+
+async function loadPayrollRate(
+  supabase: SupabaseAdminClient,
+  shopId: string,
+  userId: string,
+  effectiveDate: string
+) {
+  return supabase
+    .from("payroll_rates")
+    .select("*")
+    .eq("shop_id", shopId)
+    .eq("user_id", userId)
+    .lte("effective_from", effectiveDate)
+    .order("effective_from", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+}
+
+async function saveAttendanceRecord(
+  supabase: SupabaseAdminClient,
+  values: Record<string, unknown>,
+  id?: string
+) {
+  const save = (payload: Record<string, unknown>) => {
+    const query = id
+      ? supabase.from("attendance_records").update(payload).eq("id", id).eq("shop_id", values.shop_id)
+      : supabase.from("attendance_records").insert(payload);
+
+    return query.select("*").single();
+  };
+  let result = await save(values);
+
+  if (isMissingAttendanceScheduleColumns(result.error)) {
+    result = await save(withoutScheduleColumns(values));
+  }
+
+  return result;
+}
+
+async function updateAttendanceRecord(
+  supabase: SupabaseAdminClient,
+  shopId: string,
+  id: string,
+  values: Record<string, unknown>
+) {
+  return supabase
+    .from("attendance_records")
+    .update(values)
+    .eq("id", id)
+    .eq("shop_id", shopId)
+    .select("*")
+    .single();
+}
 
 function normalizeAttendanceRecord(record: Record<string, unknown>): AttendanceRecord {
   const clockInAt = String(record.clock_in_at);
@@ -126,13 +207,7 @@ export async function GET(request: Request) {
     const now = new Date();
     const supabase = createSupabaseAdminClient();
     await closeExpiredAttendanceRecords(supabase, session.shopId, now);
-    const { data, error } = await supabase
-      .from("attendance_records")
-      .select(attendanceSelect)
-      .eq("shop_id", session.shopId)
-      .order("business_date", { ascending: false })
-      .order("clock_in_at", { ascending: false })
-      .limit(1000);
+    const { data, error } = await loadAttendanceRecords(supabase, session.shopId);
 
     if (error) throw error;
 
@@ -293,28 +368,31 @@ export async function POST(request: Request) {
         state.businessDays?.find((day) => day.shopId === session.shopId && !day.endedAt)?.businessDate ??
         currentRiyadhDate();
       const now = new Date().toISOString();
-      const { data: savedRate, error: rateError } = await supabase
-        .from("payroll_rates")
-        .upsert(
-          {
-            default_daily_hours: Math.round(defaultDailyHours * 100) / 100,
-            effective_from: effectiveFrom,
-            hourly_rate: Math.round(hourlyRate * 100) / 100,
-            overnight_shift: overnightShift,
-            shop_id: session.shopId,
-            shift_end_time: shiftEndTime,
-            shift_start_time: shiftStartTime,
-            updated_at: now,
-            user_id: targetUserId
-          },
-          { onConflict: "shop_id,user_id,effective_from" }
-        )
-        .select(
-          "id, shop_id, user_id, hourly_rate, default_daily_hours, shift_start_time, shift_end_time, overnight_shift, created_at, updated_at"
-        )
-        .single();
+      const values = {
+        default_daily_hours: Math.round(defaultDailyHours * 100) / 100,
+        effective_from: effectiveFrom,
+        hourly_rate: Math.round(hourlyRate * 100) / 100,
+        overnight_shift: overnightShift,
+        shop_id: session.shopId,
+        shift_end_time: shiftEndTime,
+        shift_start_time: shiftStartTime,
+        updated_at: now,
+        user_id: targetUserId
+      };
+      const saveRate = (payload: Record<string, unknown>) =>
+        supabase
+          .from("payroll_rates")
+          .upsert(payload, { onConflict: "shop_id,user_id,effective_from" })
+          .select("*")
+          .single();
+      let { data: savedRate, error: rateError } = await saveRate(values);
+
+      if (isMissingAttendanceScheduleColumns(rateError)) {
+        ({ data: savedRate, error: rateError } = await saveRate(withoutScheduleColumns(values)));
+      }
 
       if (rateError) throw rateError;
+      if (!savedRate) throw new Error("Unable to save payroll rate.");
 
       await supabase.from("audit_logs").insert({
         action: "attendance.payroll_rate.update",
@@ -333,8 +411,8 @@ export async function POST(request: Request) {
           userId: savedRate.user_id,
           hourlyRate: Number(savedRate.hourly_rate),
           defaultDailyHours: Number(savedRate.default_daily_hours),
-          shiftStartTime: savedRate.shift_start_time,
-          shiftEndTime: savedRate.shift_end_time,
+          shiftStartTime: savedRate.shift_start_time ?? DEFAULT_SHIFT_START_TIME,
+          shiftEndTime: savedRate.shift_end_time ?? DEFAULT_SHIFT_END_TIME,
           overnightShift: Boolean(savedRate.overnight_shift),
           currency: "SAR",
           createdAt: savedRate.created_at,
@@ -400,10 +478,7 @@ export async function POST(request: Request) {
         updated_at: new Date().toISOString(),
         user_id: targetUserId
       };
-      const query = body.id
-        ? supabase.from("attendance_records").update(values).eq("id", body.id).eq("shop_id", session.shopId)
-        : supabase.from("attendance_records").insert(values);
-      const { data: savedRecord, error: saveError } = await query.select(attendanceSelect).single();
+      const { data: savedRecord, error: saveError } = await saveAttendanceRecord(supabase, values, body.id);
 
       if (saveError) throw saveError;
 
@@ -441,15 +516,11 @@ export async function POST(request: Request) {
         }
       }
 
-      const { data: openRecord, error: openError } = await supabase
-        .from("attendance_records")
-        .select(attendanceSelect)
-        .eq("shop_id", session.shopId)
-        .eq("user_id", targetUserId)
-        .is("clock_out_at", null)
-        .order("clock_in_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const { data: openRecord, error: openError } = await loadOpenAttendanceRecord(
+        supabase,
+        session.shopId,
+        targetUserId
+      );
 
       if (openError) throw openError;
       if (!openRecord) {
@@ -460,13 +531,12 @@ export async function POST(request: Request) {
       const elapsedHours = Math.max(0, (Date.parse(clockOutAt) - Date.parse(openRecord.clock_in_at)) / 3_600_000);
       const paidHours = Math.round(elapsedHours * 100) / 100;
       const note = body.note?.trim() || openRecord.note || null;
-      const { data: updated, error: updateError } = await supabase
-        .from("attendance_records")
-        .update({ clock_out_at: clockOutAt, paid_hours: paidHours, note, updated_at: clockOutAt })
-        .eq("id", openRecord.id)
-        .eq("shop_id", session.shopId)
-        .select(attendanceSelect)
-        .single();
+      const { data: updated, error: updateError } = await updateAttendanceRecord(
+        supabase,
+        session.shopId,
+        openRecord.id,
+        { clock_out_at: clockOutAt, paid_hours: paidHours, note, updated_at: clockOutAt }
+      );
 
       if (updateError) throw updateError;
 
@@ -489,15 +559,7 @@ export async function POST(request: Request) {
 
     const [{ data: existingOpen, error: existingError }, { data: snapshot, error: snapshotError }] =
       await Promise.all([
-        supabase
-          .from("attendance_records")
-          .select(attendanceSelect)
-          .eq("shop_id", session.shopId)
-          .eq("user_id", targetUserId)
-          .is("clock_out_at", null)
-          .order("clock_in_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+        loadOpenAttendanceRecord(supabase, session.shopId, targetUserId),
         supabase.from("shop_cloud_snapshots").select("state").eq("shop_id", session.shopId).maybeSingle()
       ]);
 
@@ -518,23 +580,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: "Open the business day before clocking in." }, { status: 409 });
     }
 
-    const { data: payrollRate, error: rateError } = await supabase
-      .from("payroll_rates")
-      .select("hourly_rate, default_daily_hours, shift_start_time, shift_end_time, overnight_shift")
-      .eq("shop_id", session.shopId)
-      .eq("user_id", targetUserId)
-      .lte("effective_from", openDay.businessDate)
-      .order("effective_from", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data: payrollRate, error: rateError } = await loadPayrollRate(
+      supabase,
+      session.shopId,
+      targetUserId,
+      openDay.businessDate
+    );
 
     if (rateError) throw rateError;
 
     const now = new Date().toISOString();
     const isManualClockIn = body.source === "manual";
-    const { data: inserted, error: insertError } = await supabase
-      .from("attendance_records")
-      .insert({
+    const { data: inserted, error: insertError } = await saveAttendanceRecord(supabase, {
         business_date: openDay.businessDate,
         clock_in_at: now,
         hourly_rate: Number(payrollRate?.hourly_rate ?? 0),
@@ -548,9 +605,7 @@ export async function POST(request: Request) {
         overnight_shift: Boolean(payrollRate?.overnight_shift),
         source: isManualClockIn ? "manual" : "admin_bypass",
         user_id: targetUserId
-      })
-      .select(attendanceSelect)
-      .single();
+      });
 
     if (insertError) throw insertError;
 

@@ -4,21 +4,20 @@ import type { AttendanceRecord } from "@/types/pos";
 
 type SupabaseAdminClient = ReturnType<typeof createSupabaseAdminClient>;
 
-const rolloverSelect =
-  "id, business_date, clock_in_at, scheduled_hours, shift_start_time, shift_end_time, overnight_shift, note";
-
 export async function closeExpiredAttendanceRecords(
   supabase: SupabaseAdminClient,
   shopId: string,
   now = new Date()
 ) {
-  const { data: openRecords, error } = await supabase
+  const result = await supabase
     .from("attendance_records")
-    .select(rolloverSelect)
+    .select("*")
     .eq("shop_id", shopId)
     .is("clock_out_at", null);
 
-  if (error) throw error;
+  if (result.error) throw result.error;
+
+  const openRecords = result.data;
 
   const closures = (openRecords ?? []).flatMap((record) => {
     const result = calculateScheduledAttendanceClosure(

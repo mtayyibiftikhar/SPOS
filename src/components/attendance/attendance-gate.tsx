@@ -117,6 +117,18 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      if (!statusResponse.ok) {
+        throw new Error(status.message ?? "Unable to check attendance status.");
+      }
+
+      if (!allowQrLink) {
+        if (active) {
+          setScanUrl("");
+          setFeedback(null);
+        }
+        return;
+      }
+
       const response = await fetch("/api/attendance/session", {
         body: JSON.stringify({ businessDate: currentBusinessDay.businessDate }),
         headers: { "content-type": "application/json" },
@@ -144,7 +156,7 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
     };
-  }, [attendanceEnabled, currentBusinessDay?.businessDate, currentShopId, openAttendance?.id, session?.id]);
+  }, [allowQrLink, attendanceEnabled, currentBusinessDay?.businessDate, currentShopId, openAttendance?.id, session?.id]);
 
   useEffect(() => {
     if (!scanUrl || !currentBusinessDay || openAttendance || remoteClockedIn) return;
@@ -234,7 +246,7 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (!scanUrl) {
+    if (allowQrLink && !scanUrl) {
       setFeedback({ tone: "error", message: "Secure clock-in is still loading. Try again in a moment." });
       return;
     }
@@ -243,18 +255,25 @@ export function AttendanceGate({ children }: { children: React.ReactNode }) {
     setFeedback(null);
 
     try {
-      const scan = new URL(scanUrl);
       const body = new FormData();
       if (location) {
         body.set("accuracy", String(location.accuracy ?? 0));
         body.set("latitude", String(location.latitude));
         body.set("longitude", String(location.longitude));
       }
-      body.set("businessDate", scan.searchParams.get("businessDate") ?? "");
       if (selfieFile) body.set("selfie", selfieFile);
-      body.set("shopId", scan.searchParams.get("shopId") ?? "");
-      body.set("token", scan.searchParams.get("token") ?? "");
-      body.set("userId", scan.searchParams.get("userId") ?? "");
+
+      if (allowQrLink) {
+        const scan = new URL(scanUrl);
+        body.set("businessDate", scan.searchParams.get("businessDate") ?? "");
+        body.set("shopId", scan.searchParams.get("shopId") ?? "");
+        body.set("token", scan.searchParams.get("token") ?? "");
+        body.set("userId", scan.searchParams.get("userId") ?? "");
+      } else {
+        body.set("businessDate", currentBusinessDay.businessDate);
+        body.set("direct", "1");
+      }
+
       const response = await fetch("/api/attendance/scan", { body, method: "POST" });
       const result = await readJsonResponse(response);
 

@@ -45,9 +45,7 @@ async function closeOpenAttendanceForBusinessDay(
 ) {
   const { data: openRecords, error: recordsError } = await supabase
     .from("attendance_records")
-    .select(
-      "id, business_date, clock_in_at, scheduled_hours, shift_start_time, shift_end_time, overnight_shift, note"
-    )
+    .select("*")
     .eq("shop_id", shopId)
     .eq("business_date", businessDate)
     .is("clock_out_at", null);
@@ -183,17 +181,13 @@ async function loadOwnerControlledShopState(
       .limit(75),
     supabase
       .from("attendance_records")
-      .select(
-        "id, shop_id, user_id, business_date, clock_in_at, clock_out_at, scheduled_hours, paid_hours, hourly_rate, shift_start_time, shift_end_time, overnight_shift, source, clock_in_latitude, clock_in_longitude, clock_out_latitude, clock_out_longitude, clock_in_selfie_url, clock_out_selfie_url, note, created_at, updated_at"
-      )
+      .select("*")
       .eq("shop_id", shopId)
       .order("clock_in_at", { ascending: false })
       .limit(500),
     supabase
       .from("payroll_rates")
-      .select(
-        "id, shop_id, user_id, hourly_rate, default_daily_hours, shift_start_time, shift_end_time, overnight_shift, created_at, updated_at"
-      )
+      .select("*")
       .eq("shop_id", shopId)
       .order("effective_from", { ascending: false })
   ]);
