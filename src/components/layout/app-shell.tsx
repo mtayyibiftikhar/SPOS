@@ -35,7 +35,7 @@ function getBlockedStatus(license: ReturnType<typeof usePosApp>["currentLicense"
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { currentLicense, currentSettings, currentShop, endSupportSession, locale, logout, saveFeedback, session, state } = usePosApp();
+  const { currentLicense, currentSettings, currentShop, endSupportSession, locale, logout, saveFeedback, session, state, t } = usePosApp();
   const isBillingRoute = pathname === "/billing";
   const blockedStatus = session?.workspace === "shop" ? getBlockedStatus(currentLicense) : null;
   const isLocked = blockedStatus === "locked";
@@ -159,7 +159,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
             <CheckCircle2 className="h-4 w-4" />
           </span>
-          <span>Saved</span>
+          <span>{t("common.savedSuccessfully")}</span>
         </div>
       ) : null}
     </div>

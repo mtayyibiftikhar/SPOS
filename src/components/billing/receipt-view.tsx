@@ -19,7 +19,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
-import { Select } from "@/components/ui/select";
 import { customerMatchesSearch, isWalkInCustomerName } from "@/lib/billing";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
 import { buildPublicReceiptUrl } from "@/lib/public-receipts";
@@ -440,8 +439,8 @@ export function ReceiptView({ billId }: { billId: string }) {
     (customer) => customer.shopId === bill.shopId && !isWalkInCustomerName(customer.name)
   );
   const matchedContactCustomers = contactCustomerSearch.trim()
-    ? savedCustomers.filter((customer) => customerMatchesSearch(customer, contactCustomerSearch)).slice(0, 8)
-    : savedCustomers.slice(0, 8);
+    ? savedCustomers.filter((customer) => customerMatchesSearch(customer, contactCustomerSearch)).slice(0, 20)
+    : [];
   const selectShareCustomer = (customer: Customer) => {
     setContactForm({
       id: customer.id,
@@ -576,7 +575,7 @@ export function ReceiptView({ billId }: { billId: string }) {
                 <span className="font-medium text-ink">{t("common.dueAmount")}:</span>{" "}
                 {formatCurrency(bill.dueAmount, shop?.currency ?? "SAR", locale)}
               </p>
-              {receiptSettings?.showVatNumber && posSettings?.vatNumber ? (
+              {posSettings?.vatNumber ? (
                 <p>
                   <span className="font-medium text-ink">{t("common.vatNumber")}:</span>{" "}
                   {posSettings.vatNumber}
@@ -684,12 +683,12 @@ export function ReceiptView({ billId }: { billId: string }) {
             </div>
           </div>
 
-          {receiptSettings?.footerText || (receiptSettings?.showVatNumber && posSettings?.vatNumber) || receiptQrImageUrl ? (
+          {receiptSettings?.footerText || posSettings?.vatNumber || receiptQrImageUrl ? (
             <div className="border-t border-dashed border-line pt-5">
               <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_160px] sm:items-center">
                 <div className="text-center text-sm text-slate-600 sm:text-left">
                   {receiptSettings?.footerText ? <p>{receiptSettings.footerText}</p> : null}
-                  {receiptSettings?.showVatNumber && posSettings?.vatNumber ? (
+                  {posSettings?.vatNumber ? (
                     <p className="mt-3">
                       <span className="font-medium text-ink">{t("common.vatNumber")}:</span>{" "}
                       {posSettings.vatNumber}
@@ -894,25 +893,50 @@ export function ReceiptView({ billId }: { billId: string }) {
                 value={contactCustomerSearch}
                 onChange={(event) => setContactCustomerSearch(event.target.value)}
               />
-              <Select
-                aria-label={t("billing.customerSearchCompact")}
-                className="mt-3 bg-white"
-                onChange={(event) => {
-                  const selectedCustomer = savedCustomers.find((customer) => customer.id === event.target.value);
-
-                  if (selectedCustomer) {
-                    selectShareCustomer(selectedCustomer);
-                  }
-                }}
-                value={contactForm.id ?? ""}
-              >
-                <option value="">{t("billing.customerSearchCompact")}</option>
-                {matchedContactCustomers.map((customer) => (
-                  <option key={customer.id} value={customer.id}>
-                    {customer.name} - {customer.phone || customer.whatsapp || customer.email || t("common.notAvailable")}
-                  </option>
-                ))}
-              </Select>
+              {contactCustomerSearch.trim() ? (
+                <div
+                  aria-label={t("billing.customerSearchCompact")}
+                  className="mt-3 max-h-56 space-y-2 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2"
+                  role="listbox"
+                >
+                  {matchedContactCustomers.length ? (
+                    matchedContactCustomers.map((customer) => (
+                      <button
+                        aria-selected={contactForm.id === customer.id}
+                        className="flex w-full items-center justify-between gap-4 rounded-xl border border-transparent px-4 py-3 text-left transition hover:border-emerald-200 hover:bg-emerald-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                        key={customer.id}
+                        onClick={() => selectShareCustomer(customer)}
+                        role="option"
+                        type="button"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate font-semibold text-ink">{customer.name}</span>
+                          <span className="mt-1 block truncate text-xs text-slate-500">
+                            {customer.phone || customer.whatsapp || customer.email || t("common.notAvailable")}
+                          </span>
+                        </span>
+                        <span className="shrink-0 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                          {contactForm.id === customer.id ? t("common.selected") : t("common.select")}
+                        </span>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="px-4 py-5 text-center text-sm text-slate-500">{t("billing.noSavedCustomers")}</p>
+                  )}
+                </div>
+              ) : contactForm.id ? (
+                <div className="mt-3 flex items-center justify-between gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <span className="min-w-0">
+                    <span className="block truncate font-semibold text-emerald-950">{contactForm.name}</span>
+                    <span className="mt-1 block truncate text-xs text-emerald-700">
+                      {contactForm.phone || contactForm.whatsapp || contactForm.email || t("common.notAvailable")}
+                    </span>
+                  </span>
+                  <span className="shrink-0 rounded-full bg-white px-3 py-1 text-xs font-semibold text-emerald-800 shadow-sm">
+                    {t("common.selected")}
+                  </span>
+                </div>
+              ) : null}
             </div>
 
             <div className="mt-4 grid gap-4 sm:grid-cols-2">

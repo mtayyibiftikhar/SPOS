@@ -14,7 +14,6 @@ export default function ReceiptSettingsPage() {
   const [showTax, setShowTax] = useState(currentSettings?.receipt.showTax ?? true);
   const [showCustomer, setShowCustomer] = useState(currentSettings?.receipt.showCustomer ?? true);
   const [showCashier, setShowCashier] = useState(currentSettings?.receipt.showCashier ?? true);
-  const [showVatNumber, setShowVatNumber] = useState(currentSettings?.receipt.showVatNumber ?? true);
   const [showSecondaryLanguage, setShowSecondaryLanguage] = useState(currentSettings?.receipt.showSecondaryLanguage ?? false);
   const [secondaryLanguage, setSecondaryLanguage] = useState<ReceiptSecondaryLanguage>(
     currentSettings?.receipt.secondaryLanguage ?? "ar"
@@ -39,7 +38,7 @@ export default function ReceiptSettingsPage() {
             showTax,
             showCustomer,
             showCashier,
-            showVatNumber,
+            showVatNumber: true,
             showSecondaryLanguage,
             secondaryLanguage,
             receiptSize
@@ -82,10 +81,6 @@ export default function ReceiptSettingsPage() {
           <label className="flex items-center gap-3">
             <input checked={showCashier} className="h-4 w-4" onChange={(event) => setShowCashier(event.target.checked)} type="checkbox" />
             {t("common.showCashier")}
-          </label>
-          <label className="flex items-center gap-3">
-            <input checked={showVatNumber} className="h-4 w-4" onChange={(event) => setShowVatNumber(event.target.checked)} type="checkbox" />
-            {t("common.showVatNumber")}
           </label>
           <label className="flex items-center gap-3">
             <input

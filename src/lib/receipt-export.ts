@@ -476,7 +476,7 @@ export function buildReceiptPdfDocument({
   );
   appendPair(elements, "Status", billStatusLabels[bill.status], { size: 9.5, spacingAfter: 8 });
 
-  if (receiptSettings?.showVatNumber && posSettings?.vatNumber) {
+  if (posSettings?.vatNumber) {
     appendPair(
       elements,
       "VAT No.",

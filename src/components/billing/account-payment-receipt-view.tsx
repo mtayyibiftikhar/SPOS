@@ -50,6 +50,7 @@ export function AccountPaymentReceiptView({ paymentId }: { paymentId: string }) 
           rows: [
             { label: "Customer", value: customer?.name ?? "Customer" },
             { label: "Phone", value: customer?.phone ?? "Not available" },
+            ...(settings?.vatNumber ? [{ label: "VAT number", value: settings.vatNumber }] : []),
             { label: "Received", value: formatDateTime(payment.createdAt, locale) },
             { label: "Method", value: payment.method === "cash" ? "Cash" : "Card" },
             { label: "Received by", value: operator?.name ?? "POS user" },
@@ -81,6 +82,7 @@ export function AccountPaymentReceiptView({ paymentId }: { paymentId: string }) 
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-emerald-700">Account payment receipt</p>
           <h1 className="mt-2 text-3xl font-semibold text-slate-950">{shopName}</h1>
           <p className="mt-2 text-sm text-slate-600">{settings?.address ?? currentShop?.address}</p>
+          {settings?.vatNumber ? <p className="mt-1 text-sm font-medium text-slate-700">VAT No. {settings.vatNumber}</p> : null}
         </div>
 
         <div className="grid gap-6 p-7 md:grid-cols-2">
