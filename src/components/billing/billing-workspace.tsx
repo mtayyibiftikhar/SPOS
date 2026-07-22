@@ -1093,10 +1093,10 @@ export function BillingWorkspace() {
     setWorkflowStep("build");
     setIsSubmitting(false);
     // A completed cloud sale must always leave the checkout workspace. Using a
-    // document navigation also guarantees the receipt loads from the committed
-    // cloud snapshot before its print/share countdown begins.
+    // Keep the authoritative bill in the hydrated provider while the receipt
+    // route opens; a full reload can briefly discard it before persistence.
     await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-    window.location.assign(`/bills/${encodeURIComponent(result.billId)}?fresh=1`);
+    router.push(`/bills/${encodeURIComponent(result.billId)}?fresh=1`);
   };
 
   const renderCartRows = () => {

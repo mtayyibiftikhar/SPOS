@@ -32,6 +32,7 @@ type DigitalReceipt = {
   settings: ShopSettingsBundle | null;
   shop: Shop | null;
   updatedAt: string | null;
+  vatNumber: string | null;
 };
 
 async function loadDigitalReceipt(token: string): Promise<DigitalReceipt | null> {
@@ -85,6 +86,11 @@ async function loadDigitalReceipt(token: string): Promise<DigitalReceipt | null>
   const settings = row.state.settingsByShop?.[bill.shopId] ?? null;
   const refunds = row.state.refunds?.filter((refund) => refund.originalBillId === bill.id) ?? [];
   const refundIds = new Set(refunds.map((refund) => refund.id));
+  const { data: liveSettings } = await supabase
+    .from("pos_settings")
+    .select("vat_number")
+    .eq("shop_id", bill.shopId)
+    .maybeSingle();
 
   return {
     bill,
@@ -94,7 +100,8 @@ async function loadDigitalReceipt(token: string): Promise<DigitalReceipt | null>
     refundItems: row.state.refundItems?.filter((item) => refundIds.has(item.refundId)) ?? [],
     settings,
     shop: row.state.shops?.find((entry) => entry.id === bill.shopId) ?? null,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
+    vatNumber: liveSettings?.vat_number?.trim() || settings?.pos.vatNumber?.trim() || null
   };
 }
 
@@ -116,7 +123,7 @@ export default async function PublicReceiptPage({ params }: PublicReceiptPagePro
     notFound();
   }
 
-  const { bill, cashier, items, refunds, refundItems, settings, shop, updatedAt } = receipt;
+  const { bill, cashier, items, refunds, refundItems, settings, shop, updatedAt, vatNumber } = receipt;
   const currency = shop?.currency ?? settings?.pos.currency ?? "SAR";
   const shopName = settings?.pos.shopName ?? shop?.name ?? "Simple POS";
   const logoUrl = settings?.pos.logoUrl;
@@ -156,8 +163,8 @@ export default async function PublicReceiptPage({ params }: PublicReceiptPagePro
             </h1>
             {settings?.pos.address ? <p className="mt-3 text-sm text-slate-600">{settings.pos.address}</p> : null}
             {settings?.pos.phone ? <p className="mt-1 text-sm text-slate-600">{settings.pos.phone}</p> : null}
-            {settings?.pos.vatNumber ? (
-              <p className="mt-1 text-sm font-medium text-slate-700">VAT No. {settings.pos.vatNumber}</p>
+            {vatNumber ? (
+              <p className="mt-1 text-sm font-medium text-slate-700">VAT No. {vatNumber}</p>
             ) : null}
           </header>
 

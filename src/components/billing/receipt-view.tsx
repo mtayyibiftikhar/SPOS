@@ -33,12 +33,13 @@ import type { Customer } from "@/types/pos";
 export function ReceiptView({ billId }: { billId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { locale, state, t, updateBillCustomerContact } = usePosApp();
+  const { isHydrated, locale, state, t, updateBillCustomerContact } = usePosApp();
   const [busyAction, setBusyAction] = useState<"download" | "share" | "email" | "whatsapp" | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [pendingShareAction, setPendingShareAction] = useState<"email" | "whatsapp" | null>(null);
   const [isSavingContact, setIsSavingContact] = useState(false);
   const [returnCountdown, setReturnCountdown] = useState<number | null>(null);
+  const [receiptLookupTimedOut, setReceiptLookupTimedOut] = useState(false);
   const [contactCustomerSearch, setContactCustomerSearch] = useState("");
   const [contactForm, setContactForm] = useState({
     id: undefined as string | undefined,
@@ -65,6 +66,17 @@ export function ReceiptView({ billId }: { billId: string }) {
         refundItems: state.refundItems
       })
     : null;
+
+  useEffect(() => {
+    if (!isHydrated || bill) {
+      setReceiptLookupTimedOut(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => setReceiptLookupTimedOut(true), 8000);
+
+    return () => window.clearTimeout(timer);
+  }, [bill, billId, isHydrated]);
 
   useEffect(() => {
     if (!bill) {
@@ -126,6 +138,23 @@ export function ReceiptView({ billId }: { billId: string }) {
       window.clearTimeout(timer);
     };
   }, [bill, isFreshReceipt, router]);
+
+  if (!isHydrated || (!bill && !receiptLookupTimedOut)) {
+    return (
+      <div className="space-y-6">
+        <div className="print:hidden">
+          <PageHeader
+            title={t("receipt.loadingTitle")}
+            subtitle={t("receipt.loadingSubtitle")}
+            eyebrow={t("nav.bills")}
+          />
+        </div>
+        <Card className="flex min-h-52 items-center justify-center p-8 text-center">
+          <p className="text-sm font-medium text-slate-600">{t("receipt.loadingHint")}</p>
+        </Card>
+      </div>
+    );
+  }
 
   if (!bill) {
     return (
