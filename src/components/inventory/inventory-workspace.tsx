@@ -7,6 +7,7 @@ import {
   Barcode,
   Check,
   ClipboardList,
+  Database,
   Edit3,
   FileText,
   History,
@@ -21,6 +22,7 @@ import {
   Warehouse,
   X
 } from "lucide-react";
+import { InventoryDataWorkspace } from "@/components/inventory/inventory-data-workspace";
 import { useRouter, useSearchParams } from "next/navigation";
 import { usePosApp } from "@/components/providers/app-provider";
 import { Badge } from "@/components/ui/badge";
@@ -33,7 +35,7 @@ import { createStructuredReportPdfBlob, downloadBlob } from "@/lib/report-export
 import { cn, formatCurrency, formatDateTime } from "@/lib/utils";
 import type { Product, PurchaseOrder, PurchaseOrderItem, PurchasePaymentStatus, Supplier, SupplierPaymentMethod } from "@/types/pos";
 
-type InventoryView = "overview" | "add" | "adjust" | "order" | "suppliers";
+type InventoryView = "overview" | "add" | "adjust" | "order" | "suppliers" | "data";
 type AdjustMode = "item" | "supplier" | "category";
 type PurchaseOrderStep = "items" | "supplier";
 type PurchaseOrderTab = "create" | "history" | "reorder";
@@ -177,7 +179,8 @@ export function InventoryWorkspace() {
     requestedView === "add" ||
     requestedView === "adjust" ||
     requestedView === "order" ||
-    requestedView === "suppliers"
+    requestedView === "suppliers" ||
+    requestedView === "data"
       ? requestedView
       : "overview";
   const currency = currentShop?.currency ?? "SAR";
@@ -1104,12 +1107,13 @@ export function InventoryWorkspace() {
     { href: "/inventory?view=add", active: activeView === "add", icon: PackageCheck, label: "Add inventory" },
     { href: "/inventory?view=adjust", active: activeView === "adjust", icon: Edit3, label: "Adjustment" },
     { href: "/inventory?view=order", active: activeView === "order", icon: ShoppingBasket, label: "Order inventory" },
-    { href: "/inventory?view=suppliers", active: activeView === "suppliers", icon: Truck, label: "Suppliers" }
+    { href: "/inventory?view=suppliers", active: activeView === "suppliers", icon: Truck, label: "Suppliers" },
+    { href: "/inventory?view=data", active: activeView === "data", icon: Database, label: "Inventory data" }
   ];
 
   return (
     <div className="space-y-5">
-      <nav className="grid max-w-6xl grid-cols-2 gap-2 rounded-[24px] border border-slate-200 bg-white/88 p-2 shadow-[0_18px_45px_rgba(15,23,42,0.05)] backdrop-blur md:grid-cols-5">
+      <nav className="grid max-w-6xl grid-cols-2 gap-2 rounded-[24px] border border-slate-200 bg-white/88 p-2 shadow-[0_18px_45px_rgba(15,23,42,0.05)] backdrop-blur md:grid-cols-3 xl:grid-cols-6">
         {navItems.map((item) => {
           const Icon = item.icon;
 
@@ -2040,6 +2044,8 @@ export function InventoryWorkspace() {
           ) : null}
         </div>
       ) : null}
+
+      {activeView === "data" ? <InventoryDataWorkspace /> : null}
     </div>
   );
 }

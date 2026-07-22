@@ -41,7 +41,7 @@ import { cn, formatCurrency } from "@/lib/utils";
 import type { CheckoutBillInput, Customer, DiscountType, PaymentMethod, Product } from "@/types/pos";
 
 type WorkflowStep = "build" | "customer" | "payment";
-type CheckoutPaymentMode = PaymentMethod | "split";
+type CheckoutPaymentMode = PaymentMethod | "partial";
 type CustomerModalMode = "existing" | "new";
 
 type CartLine = {
@@ -62,7 +62,10 @@ type HeldBill = {
   itemCount: number;
   label: string;
   paymentMethod?: PaymentMethod;
-  paymentMode?: CheckoutPaymentMode;
+  paymentMode?: CheckoutPaymentMode | "split";
+  partialPaidAmount?: string;
+  partialPaidMethod?: "cash" | "card";
+  // Legacy fields keep held bills from the previous split-payment UI restorable.
   splitCardAmount?: string;
   splitCashAmount?: string;
   total: number;
@@ -99,7 +102,7 @@ const paymentOptions: Array<{
   { mode: "cash", icon: Banknote },
   { mode: "card", icon: CreditCard },
   { mode: "account", icon: Clock3 },
-  { mode: "split", icon: WalletCards }
+  { mode: "partial", icon: WalletCards }
 ];
 
 const UNCATEGORIZED_QUICK_CATEGORY_ID = "__quick_uncategorized__";
@@ -283,8 +286,8 @@ export function BillingWorkspace() {
   const [discountValue, setDiscountValue] = useState("0");
   const [openingCash, setOpeningCash] = useState("0");
   const [paymentMode, setPaymentMode] = useState<CheckoutPaymentMode>("cash");
-  const [splitCashAmount, setSplitCashAmount] = useState("");
-  const [splitCardAmount, setSplitCardAmount] = useState("");
+  const [partialPaidAmount, setPartialPaidAmount] = useState("");
+  const [partialPaidMethod, setPartialPaidMethod] = useState<"cash" | "card">("cash");
   const [showAccountCustomerModal, setShowAccountCustomerModal] = useState(false);
   const [customerModalMode, setCustomerModalMode] = useState<CustomerModalMode>("existing");
   const [accountCustomerSearch, setAccountCustomerSearch] = useState("");
@@ -324,7 +327,8 @@ export function BillingWorkspace() {
   const promotionAppliesToBill = promotionEnabled && promotionScope === "bill";
   const permanentItemDiscounts = currentSettings?.tax.permanentItemDiscounts ?? {};
   const checkoutBlocked = !currentBusinessDay || !currentShift;
-  const customerSearchHasValue = customerSearch.trim().length > 0;
+  const customerSearchIsReady = customerSearch.trim().length >= 2;
+  const accountCustomerSearchIsReady = accountCustomerSearch.trim().length >= 2;
   const productSearchHasValue = productSearch.trim().length > 0;
   const quickSearchTerm = deferredQuickSearch.trim().toLowerCase();
   const heldBillsStorageKey = currentShopId ? `${HELD_BILLS_STORAGE_PREFIX}:${currentShopId}` : null;
@@ -414,7 +418,7 @@ export function BillingWorkspace() {
   const matchedCustomers = useMemo(() => {
     const query = customerSearch.trim();
 
-    if (!query) {
+    if (query.length < 2) {
       return [];
     }
 
@@ -424,9 +428,11 @@ export function BillingWorkspace() {
   const matchedAccountCustomers = useMemo(() => {
     const query = accountCustomerSearch.trim();
 
-    return savedCustomers
-      .filter((customer) => !query || customerMatchesSearch(customer, query))
-      .slice(0, 8);
+    if (query.length < 2) {
+      return [];
+    }
+
+    return savedCustomers.filter((customer) => customerMatchesSearch(customer, query)).slice(0, 8);
   }, [accountCustomerSearch, savedCustomers]);
 
   const searchResults = useMemo(() => {
@@ -521,13 +527,14 @@ export function BillingWorkspace() {
     taxRate: currentSettings?.tax.rate ?? 0
   });
 
+  const partialAmount = Number(partialPaidAmount || 0);
   const paymentSummary = calculatePaymentAllocation(
     totals.total,
-    paymentMode === "split" ? "account" : paymentMode,
-    paymentMode === "split"
+    paymentMode === "partial" ? "account" : paymentMode,
+    paymentMode === "partial"
       ? {
-          card: Number(splitCardAmount || 0),
-          cash: Number(splitCashAmount || 0)
+          card: partialPaidMethod === "card" ? partialAmount : 0,
+          cash: partialPaidMethod === "cash" ? partialAmount : 0
         }
       : undefined
   );
@@ -540,9 +547,11 @@ export function BillingWorkspace() {
     !isWalkInCustomerName(normalizedCustomerName) && normalizedCustomerPhone
   );
   const accountPaymentBlocked = paymentSummary.dueAmount > 0 && !accountCustomerReady;
-  const splitPaymentInvalid = paymentMode === "split" && !paymentSummary.isValid;
+  const partialPaymentInvalid =
+    paymentMode === "partial" &&
+    (!paymentSummary.isValid || partialAmount <= 0 || partialAmount >= totals.total);
   const paymentModeLabel =
-    paymentMode === "split" ? t("billing.paymentSplit") : t(paymentMethodLabelKeys[paymentMode]);
+    paymentMode === "partial" ? t("billing.paymentPartial") : t(paymentMethodLabelKeys[paymentMode]);
   const cartHasInvalidPrice = cartProducts.some((line) => line.unitPrice <= 0);
   const blockerMessage = !currentBusinessDay
     ? t("billing.dayRequired")
@@ -919,7 +928,7 @@ export function BillingWorkspace() {
     setPaymentMode(mode);
     setError(null);
 
-    if ((mode === "account" || mode === "split") && !accountCustomerReady) {
+    if ((mode === "account" || mode === "partial") && !accountCustomerReady) {
       openAccountCustomerModal();
     }
   };
@@ -1038,10 +1047,10 @@ export function BillingWorkspace() {
       id: crypto.randomUUID(),
       itemCount: cartItemCount,
       label: extraItemCount > 0 ? `${visibleItemNames} +${extraItemCount}` : visibleItemNames,
-      paymentMethod: paymentMode === "split" ? "account" : paymentMode,
+      paymentMethod: paymentMode === "partial" ? "account" : paymentMode,
       paymentMode,
-      splitCardAmount,
-      splitCashAmount,
+      partialPaidAmount,
+      partialPaidMethod,
       total: totals.total
     };
 
@@ -1071,9 +1080,20 @@ export function BillingWorkspace() {
     setCustomerForm(heldBill.customerForm ?? createEmptyCustomerForm());
     setDiscountType(heldBill.discountType ?? "fixed");
     setDiscountValue(heldBill.discountValue ?? "0");
-    setPaymentMode(heldBill.paymentMode ?? heldBill.paymentMethod ?? "cash");
-    setSplitCardAmount(heldBill.splitCardAmount ?? "");
-    setSplitCashAmount(heldBill.splitCashAmount ?? "");
+    const legacyCashAmount = Number(heldBill.splitCashAmount || 0);
+    const legacyCardAmount = Number(heldBill.splitCardAmount || 0);
+    const restoredPaymentMode = heldBill.paymentMode === "split"
+      ? "partial"
+      : heldBill.paymentMode ?? heldBill.paymentMethod ?? "cash";
+
+    setPaymentMode(restoredPaymentMode);
+    setPartialPaidAmount(
+      heldBill.partialPaidAmount ??
+        (legacyCashAmount + legacyCardAmount > 0 ? String(legacyCashAmount + legacyCardAmount) : "")
+    );
+    setPartialPaidMethod(
+      heldBill.partialPaidMethod ?? (legacyCardAmount > 0 && legacyCashAmount <= 0 ? "card" : "cash")
+    );
     setHeldBills((current) => current.filter((entry) => entry.id !== heldBillId));
     setProductSearch("");
     setWorkflowStep("build");
@@ -1155,8 +1175,8 @@ export function BillingWorkspace() {
       return;
     }
 
-    if (splitPaymentInvalid) {
-      setError(t("billing.paymentExceedsTotal"));
+    if (partialPaymentInvalid) {
+      setError(t("billing.partialPaymentInvalid"));
       return;
     }
 
@@ -1181,7 +1201,7 @@ export function BillingWorkspace() {
         unitPrice: line.unitPrice
       })),
       paymentAmounts:
-        paymentMode === "split"
+        paymentMode === "partial"
           ? {
               card: paymentSummary.cardAmount,
               cash: paymentSummary.cashAmount
@@ -1204,8 +1224,8 @@ export function BillingWorkspace() {
     setDiscountType("fixed");
     setDiscountValue("0");
     setPaymentMode("cash");
-    setSplitCardAmount("");
-    setSplitCashAmount("");
+    setPartialPaidAmount("");
+    setPartialPaidMethod("cash");
     setWorkflowStep("build");
     setIsSubmitting(false);
     window.location.assign(`/bills/${encodeURIComponent(result.billId)}?fresh=1`);
@@ -1969,27 +1989,11 @@ export function BillingWorkspace() {
                 />
               </div>
 
-              <Select
-                aria-label={t("billing.customerSearchCompact")}
-                className="mt-3 h-11 rounded-[16px] border-slate-200 bg-white text-sm"
-                onChange={(event) => {
-                  const selectedCustomer = savedCustomers.find((customer) => customer.id === event.target.value);
+              {customerSearch.trim().length > 0 && !customerSearchIsReady ? (
+                <p className="mt-2 px-2 text-xs font-medium text-slate-500">{t("billing.customerSearchHint")}</p>
+              ) : null}
 
-                  if (selectedCustomer) {
-                    selectCustomer(selectedCustomer);
-                  }
-                }}
-                value={customerForm.id ?? ""}
-              >
-                <option value="">{t("billing.customerSearchCompact")}</option>
-                {savedCustomers.map((customer) => (
-                  <option key={customer.id} value={customer.id}>
-                    {customer.name} - {customer.phone || customer.whatsapp || customer.email || t("common.notAvailable")}
-                  </option>
-                ))}
-              </Select>
-
-              {customerSearchHasValue ? (
+              {customerSearchIsReady ? (
                 <div
                   aria-live="polite"
                   className="mt-2 max-h-52 overflow-y-auto rounded-[20px] border border-slate-200 bg-white p-2 shadow-[0_16px_38px_rgba(15,23,42,0.1)]"
@@ -2287,7 +2291,7 @@ export function BillingWorkspace() {
               <div className="grid grid-cols-2 gap-2">
                 {paymentOptions.map(({ icon: Icon, mode }) => {
                   const active = paymentMode === mode;
-                  const label = mode === "split" ? t("billing.paymentSplit") : t(paymentMethodLabelKeys[mode]);
+                  const label = mode === "partial" ? t("billing.paymentPartial") : t(paymentMethodLabelKeys[mode]);
 
                   return (
                     <button
@@ -2312,39 +2316,51 @@ export function BillingWorkspace() {
             </div>
 
             <div className="min-h-0 overflow-y-auto px-4 py-4">
-              {paymentMode === "split" ? (
+              {paymentMode === "partial" ? (
                 <div className="mb-4 rounded-[22px] border border-emerald-200 bg-emerald-50/70 p-4">
-                  <p className="text-sm font-semibold text-emerald-950">{t("billing.paymentSplit")}</p>
+                  <p className="text-sm font-semibold text-emerald-950">{t("billing.paymentPartial")}</p>
                   <p className="mt-1 text-xs leading-5 text-emerald-800">{t("billing.partialPaymentHint")}</p>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <label className="text-xs font-semibold text-slate-700">
-                      {t("billing.cashAmount")}
-                      <Input
-                        className="mt-1.5 h-11 rounded-[15px] border-emerald-200 bg-white"
-                        inputMode="decimal"
-                        min="0"
-                        onChange={(event) => {
-                          setSplitCashAmount(sanitizePriceInput(event.target.value));
-                          setError(null);
-                        }}
-                        type="number"
-                        value={splitCashAmount}
-                      />
-                    </label>
-                    <label className="text-xs font-semibold text-slate-700">
-                      {t("billing.cardAmount")}
-                      <Input
-                        className="mt-1.5 h-11 rounded-[15px] border-emerald-200 bg-white"
-                        inputMode="decimal"
-                        min="0"
-                        onChange={(event) => {
-                          setSplitCardAmount(sanitizePriceInput(event.target.value));
-                          setError(null);
-                        }}
-                        type="number"
-                        value={splitCardAmount}
-                      />
-                    </label>
+                  <label className="mt-3 block text-xs font-semibold text-slate-700">
+                    {t("billing.partialPaidAmount")}
+                    <Input
+                      className="mt-1.5 h-11 rounded-[15px] border-emerald-200 bg-white"
+                      inputMode="decimal"
+                      max={totals.total}
+                      min="0"
+                      onChange={(event) => {
+                        setPartialPaidAmount(sanitizePriceInput(event.target.value));
+                        setError(null);
+                      }}
+                      type="number"
+                      value={partialPaidAmount}
+                    />
+                  </label>
+                  <div className="mt-3">
+                    <p className="text-xs font-semibold text-slate-700">{t("billing.partialPaidBy")}</p>
+                    <div className="mt-1.5 grid grid-cols-2 gap-2">
+                      {(["cash", "card"] as const).map((method) => {
+                        const active = partialPaidMethod === method;
+
+                        return (
+                          <button
+                            className={cn(
+                              "h-11 rounded-[15px] border text-sm font-semibold transition",
+                              active
+                                ? "border-slate-950 bg-slate-950 text-white"
+                                : "border-emerald-200 bg-white text-slate-700 hover:border-emerald-400 hover:bg-emerald-100"
+                            )}
+                            key={method}
+                            onClick={() => {
+                              setPartialPaidMethod(method);
+                              setError(null);
+                            }}
+                            type="button"
+                          >
+                            {t(paymentMethodLabelKeys[method])}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                   <div className="mt-3 flex items-center justify-between rounded-[15px] bg-white px-3 py-2.5 text-sm">
                     <span className="font-medium text-slate-600">{t("billing.accountRemainder")}</span>
@@ -2352,8 +2368,8 @@ export function BillingWorkspace() {
                       {formatCurrency(paymentSummary.dueAmount, currency, locale)}
                     </span>
                   </div>
-                  {splitPaymentInvalid ? (
-                    <p className="mt-2 text-xs font-semibold text-red-700">{t("billing.paymentExceedsTotal")}</p>
+                  {partialPaymentInvalid ? (
+                    <p className="mt-2 text-xs font-semibold text-red-700">{t("billing.partialPaymentInvalid")}</p>
                   ) : null}
                 </div>
               ) : null}
@@ -2498,25 +2514,31 @@ export function BillingWorkspace() {
                     />
                   </div>
 
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    {matchedAccountCustomers.map((customer) => (
-                      <button
-                        key={customer.id}
-                        className="rounded-[20px] border border-slate-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50 hover:shadow-lg"
-                        onClick={() => chooseAccountCustomer(customer)}
-                        type="button"
-                      >
-                        <p className="font-semibold text-slate-950">{customer.name}</p>
-                        <p className="mt-1 text-sm text-slate-600">{customer.phone || customer.whatsapp || t("common.notAvailable")}</p>
-                        {customer.email ? <p className="mt-1 truncate text-xs text-slate-500">{customer.email}</p> : null}
-                        <span className="mt-3 inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
-                          {t("billing.useCustomer")}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+                  {!accountCustomerSearchIsReady ? (
+                    <div className="mt-4 rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm font-medium text-slate-600">
+                      {t("billing.customerSearchHint")}
+                    </div>
+                  ) : (
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      {matchedAccountCustomers.map((customer) => (
+                        <button
+                          key={customer.id}
+                          className="rounded-[20px] border border-slate-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50 hover:shadow-lg"
+                          onClick={() => chooseAccountCustomer(customer)}
+                          type="button"
+                        >
+                          <p className="font-semibold text-slate-950">{customer.name}</p>
+                          <p className="mt-1 text-sm text-slate-600">{customer.phone || customer.whatsapp || t("common.notAvailable")}</p>
+                          {customer.email ? <p className="mt-1 truncate text-xs text-slate-500">{customer.email}</p> : null}
+                          <span className="mt-3 inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                            {t("billing.useCustomer")}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
-                  {matchedAccountCustomers.length === 0 ? (
+                  {accountCustomerSearchIsReady && matchedAccountCustomers.length === 0 ? (
                     <div className="mt-4 rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600">
                       {t("billing.noCustomersFound")}
                     </div>

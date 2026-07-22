@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Barcode,
   Check,
+  Database,
   Edit3,
   Grid2X2,
   ImageIcon,
@@ -22,6 +23,7 @@ import {
   UploadCloud,
   X
 } from "lucide-react";
+import { ProductDataWorkspace } from "@/components/products/product-data-workspace";
 import { findBarcodeConflict, generateUniqueBarcode, normalizeBarcode } from "@/lib/catalog";
 import { productKindLabelKeys } from "@/lib/i18n";
 import { deleteImageAssetFromCloud, resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
@@ -35,7 +37,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn, formatCurrency } from "@/lib/utils";
 import type { Product } from "@/types/pos";
 
-type ProductView = "overview" | "editor" | "categories" | "catalog" | "quick";
+type ProductView = "overview" | "editor" | "categories" | "catalog" | "quick" | "data";
 type CategoryMode = "list" | "create" | "edit";
 type BarcodePrintScope = "all" | "quick" | "selected" | "current";
 
@@ -270,7 +272,8 @@ export function ProductWorkspace() {
     requestedView === "editor" ||
     requestedView === "categories" ||
     requestedView === "catalog" ||
-    requestedView === "quick"
+    requestedView === "quick" ||
+    requestedView === "data"
       ? requestedView
       : "overview";
   const buildEmptyProductForm = () => createProductFormState(undefined, generateUniqueBarcode(shopProducts, currentShopId));
@@ -764,7 +767,8 @@ export function ProductWorkspace() {
     { href: "/products?view=editor", active: activeView === "editor", icon: Package, label: "Product editor" },
     { href: "/products?view=categories", active: activeView === "categories", icon: Tags, label: "Categories" },
     { href: "/products?view=catalog", active: activeView === "catalog", icon: ListChecks, label: "Product list" },
-    { href: "/products?view=quick", active: activeView === "quick", icon: Sparkles, label: "Quick billing" }
+    { href: "/products?view=quick", active: activeView === "quick", icon: Sparkles, label: "Quick billing" },
+    { href: "/products?view=data", active: activeView === "data", icon: Database, label: "Product data" }
   ];
 
   const renderProductImageField = () => (
@@ -901,7 +905,7 @@ export function ProductWorkspace() {
 
   return (
     <div className="space-y-5">
-      <nav className="grid max-w-6xl grid-cols-2 gap-2 rounded-[24px] border border-slate-200 bg-white/88 p-2 shadow-[0_18px_45px_rgba(15,23,42,0.05)] backdrop-blur md:grid-cols-5">
+      <nav className="grid max-w-6xl grid-cols-2 gap-2 rounded-[24px] border border-slate-200 bg-white/88 p-2 shadow-[0_18px_45px_rgba(15,23,42,0.05)] backdrop-blur md:grid-cols-3 xl:grid-cols-6">
         {navItems.map((item) => {
           const Icon = item.icon;
 
@@ -1477,6 +1481,8 @@ export function ProductWorkspace() {
           </div>
         </Card>
       ) : null}
+
+      {activeView === "data" ? <ProductDataWorkspace /> : null}
 
       {inlineCategoryOpen ? (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm">

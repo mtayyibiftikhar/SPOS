@@ -167,19 +167,19 @@ test("account payments remain due while cash and card are fully paid", () => {
   assert.deepEqual(calculatePaidAndDue(75, "card"), { paidAmount: 75, dueAmount: 0 });
 });
 
-test("split payments post only the unpaid remainder to the customer account", () => {
-  assert.deepEqual(calculatePaymentAllocation(100, "account", { cash: 30, card: 20 }), {
+test("partial payments post only the unpaid remainder to the customer account", () => {
+  assert.deepEqual(calculatePaymentAllocation(100, "account", { cash: 30, card: 0 }), {
     cashAmount: 30,
-    cardAmount: 20,
-    paidAmount: 50,
-    dueAmount: 50,
+    cardAmount: 0,
+    paidAmount: 30,
+    dueAmount: 70,
     paymentMethod: "account",
     isValid: true
   });
 });
 
-test("split payments reject cash and card amounts above the bill total", () => {
-  const allocation = calculatePaymentAllocation(100, "account", { cash: 70, card: 40 });
+test("partial payments reject an immediate amount above the bill total", () => {
+  const allocation = calculatePaymentAllocation(100, "account", { cash: 110, card: 0 });
 
   assert.equal(allocation.isValid, false);
   assert.equal(allocation.dueAmount, 0);
