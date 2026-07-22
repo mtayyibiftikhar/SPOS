@@ -101,7 +101,7 @@ async function loadDigitalReceipt(token: string): Promise<DigitalReceipt | null>
     settings,
     shop: row.state.shops?.find((entry) => entry.id === bill.shopId) ?? null,
     updatedAt: row.updated_at,
-    vatNumber: liveSettings?.vat_number?.trim() || settings?.pos.vatNumber?.trim() || null
+    vatNumber: settings?.pos.vatNumber?.trim() || liveSettings?.vat_number?.trim() || null
   };
 }
 

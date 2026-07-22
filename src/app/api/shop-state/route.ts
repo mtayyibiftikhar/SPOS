@@ -418,14 +418,42 @@ function mergeOwnerControlledShopState(
   ownerState: Partial<DemoAppState>,
   brand: Partial<DemoAppState["brand"]> | null
 ) {
+  const settingsByShop = {
+    ...(ownerState.settingsByShop ?? {})
+  };
+
+  for (const [shopId, currentSettings] of Object.entries(currentState.settingsByShop ?? {})) {
+    const ownerSettings = settingsByShop[shopId];
+
+    settingsByShop[shopId] = ownerSettings
+      ? {
+          ...ownerSettings,
+          ...currentSettings,
+          pos: {
+            ...ownerSettings.pos,
+            ...currentSettings.pos
+          },
+          printer: {
+            ...ownerSettings.printer,
+            ...currentSettings.printer
+          },
+          receipt: {
+            ...ownerSettings.receipt,
+            ...currentSettings.receipt
+          },
+          tax: {
+            ...ownerSettings.tax,
+            ...currentSettings.tax
+          }
+        }
+      : currentSettings;
+  }
+
   return {
     ...currentState,
     ...ownerState,
     brand: brand ? ({ ...(currentState.brand ?? {}), ...brand } as DemoAppState["brand"]) : currentState.brand,
-    settingsByShop: {
-      ...(currentState.settingsByShop ?? {}),
-      ...(ownerState.settingsByShop ?? {})
-    }
+    settingsByShop
   } satisfies Partial<DemoAppState>;
 }
 
