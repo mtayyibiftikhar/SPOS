@@ -6,6 +6,8 @@ import type {
   AttendanceLocation,
   AttendanceRecord,
   AttendanceSource,
+  Bill,
+  BillItem,
   BusinessDay,
   CreateRefundInput,
   CheckoutBillInput,
@@ -76,6 +78,7 @@ import {
 } from "@/lib/attendance";
 import { clearShopDataScope, ownerClearShopDataScopeLabels, type OwnerClearShopDataScope } from "@/lib/shop-data-reset";
 import { createPublicReceiptToken } from "@/lib/public-receipts";
+import { saveFreshReceiptHandoff } from "@/lib/receipt-handoff";
 import { createId, getDirection, hashSecret } from "@/lib/utils";
 
 const STORAGE_KEY = "simple-pos-state-v3";
@@ -2886,6 +2889,18 @@ export function AppProvider({
 
       if (payload.state) {
         const remoteState = payload.state;
+        const createdBillId = mutation.type === "create_bill" ? payload.result?.billId : undefined;
+        const createdBill = createdBillId
+          ? remoteState.bills?.find((entry) => entry.id === createdBillId)
+          : undefined;
+
+        if (createdBill) {
+          saveFreshReceiptHandoff(
+            createdBill,
+            remoteState.billItems?.filter((entry) => entry.billId === createdBill.id) ?? []
+          );
+        }
+
         const localState = buildShopCloudSyncState(state, shopId);
         // On the first mutation after hydration there may not be a recorded
         // baseline yet. Use the pre-mutation local snapshot as the baseline so
@@ -8049,6 +8064,7 @@ export function AppProvider({
           ok: false,
           message: "Unable to create bill."
         };
+        let createdReceipt: { bill: Bill; items: BillItem[] } | null = null;
 
         flushSync(() => setState((current) => {
           const accessBlock = getShopAccessBlock(current, currentShopId);
@@ -8322,6 +8338,7 @@ export function AppProvider({
             ok: true,
             billId
           };
+          createdReceipt = { bill, items: billItems };
           const stockMovementProducts = validItems.filter((item) => item.product.kind === "product");
 
           return {
@@ -8378,6 +8395,12 @@ export function AppProvider({
             })
           };
         }));
+
+        const receiptToSave = createdReceipt as { bill: Bill; items: BillItem[] } | null;
+
+        if (receiptToSave) {
+          saveFreshReceiptHandoff(receiptToSave.bill, receiptToSave.items);
+        }
 
         return result;
       },

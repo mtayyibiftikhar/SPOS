@@ -27,6 +27,7 @@ import { calculateBillRefundState } from "@/lib/refunds";
 import { hasNativeDownloadSupport, printElementWithNative, saveBlobWithNative } from "@/lib/native-bridge";
 import { getReceiptItemNameLines, getReceiptItemNameText } from "@/lib/receipt-language";
 import { buildPolishedReceiptMessage } from "@/lib/receipt-sharing";
+import { loadFreshReceiptHandoff, type FreshReceiptHandoff } from "@/lib/receipt-handoff";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import type { Customer } from "@/types/pos";
 
@@ -41,6 +42,7 @@ export function ReceiptView({ billId }: { billId: string }) {
   const [returnCountdown, setReturnCountdown] = useState<number | null>(null);
   const [receiptLookupTimedOut, setReceiptLookupTimedOut] = useState(false);
   const [contactCustomerSearch, setContactCustomerSearch] = useState("");
+  const [receiptHandoff, setReceiptHandoff] = useState<FreshReceiptHandoff | null>(null);
   const [contactForm, setContactForm] = useState({
     id: undefined as string | undefined,
     name: "",
@@ -51,13 +53,16 @@ export function ReceiptView({ billId }: { billId: string }) {
   const hasAutoPrinted = useRef(false);
   const isFreshReceipt = searchParams.get("fresh") === "1";
   const fromAccounts = searchParams.get("from") === "accounts";
-  const bill = state.bills.find((entry) => entry.id === billId);
+  const stateBill = state.bills.find((entry) => entry.id === billId);
+  const bill = stateBill ?? receiptHandoff?.bill;
   const shop = bill ? state.shops.find((entry) => entry.id === bill.shopId) ?? null : null;
   const cashier = bill ? state.users.find((entry) => entry.id === bill.cashierId) ?? null : null;
   const posSettings = bill ? state.settingsByShop[bill.shopId]?.pos : undefined;
   const receiptSettings = bill ? state.settingsByShop[bill.shopId]?.receipt : undefined;
   const printerSettings = bill ? state.settingsByShop[bill.shopId]?.printer : undefined;
-  const items = bill ? state.billItems.filter((item) => item.billId === bill.id) : [];
+  const items = stateBill
+    ? state.billItems.filter((item) => item.billId === stateBill.id)
+    : receiptHandoff?.items ?? [];
   const refundState = bill
     ? calculateBillRefundState({
         billId: bill.id,
@@ -66,6 +71,10 @@ export function ReceiptView({ billId }: { billId: string }) {
         refundItems: state.refundItems
       })
     : null;
+
+  useEffect(() => {
+    setReceiptHandoff(loadFreshReceiptHandoff(billId));
+  }, [billId]);
 
   useEffect(() => {
     if (!isHydrated || bill) {
