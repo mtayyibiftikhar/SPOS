@@ -181,7 +181,7 @@ export async function POST(request: Request) {
       return {
         shop_id: shopIdMap.get(shop.id)!,
         shop_name: pos?.shopName || shop.name,
-        logo_url: pos?.logoUrl ?? null,
+        logo_url: pos?.logoUrl?.trim() || null,
         address: pos?.address ?? shop.address ?? "",
         phone: pos?.phone ?? shop.phone ?? "",
         email: pos?.email ?? shop.email ?? null,

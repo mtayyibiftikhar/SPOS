@@ -114,6 +114,7 @@ export async function POST(request: Request) {
   try {
     let folder: string;
     let supabase = createSupabaseAdminClient();
+    let authorizedShopId: string | null = null;
 
     if (ownerScopes.has(scope)) {
       const authorization = await getAuthorizedOwnerSession(request, ["super_admin"]);
@@ -135,7 +136,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: false, message: "Shop upload is not authorized." }, { status: 401 });
       }
 
-      folder = folderForScope(scope, authorization.shopId);
+      const shopId = authorization.shopId;
+      authorizedShopId = shopId;
+      folder = folderForScope(scope, shopId);
     }
 
     const optimized = await optimizePosImage(
@@ -149,6 +152,18 @@ export async function POST(request: Request) {
       fileName,
       folder
     });
+
+    if (scope === "shop-logo" && authorizedShopId) {
+      const { error } = await supabase
+        .from("pos_shops")
+        .update({ logo_url: uploaded.url })
+        .eq("id", authorizedShopId);
+
+      if (error) {
+        await deletePrivatePosAsset(supabase, uploaded.path);
+        throw error;
+      }
+    }
 
     return NextResponse.json({ ok: true, ...uploaded });
   } catch (error) {
@@ -179,6 +194,18 @@ export async function DELETE(request: Request) {
 
       if (!authorization.ok || authorization.shopId !== storageShopId) {
         return NextResponse.json({ ok: false, message: "Shop image delete is not authorized." }, { status: 401 });
+      }
+
+      if (storagePath.includes("/shop-logo/")) {
+        const { error } = await authorization.supabase
+          .from("pos_shops")
+          .update({ logo_url: null })
+          .eq("id", storageShopId)
+          .eq("logo_url", urlOrPath);
+
+        if (error) {
+          throw error;
+        }
       }
 
       const deleted = await deletePrivatePosAsset(authorization.supabase, storagePath);

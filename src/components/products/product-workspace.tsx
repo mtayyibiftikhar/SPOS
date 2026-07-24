@@ -397,6 +397,8 @@ export function ProductWorkspace() {
 
     const assignedBarcodes = getFormAssignedBarcodes(productForm);
     const primaryBarcode = assignedBarcodes[0] ?? generateUniqueBarcode(shopProducts, currentShopId);
+    const previousImageUrl = selectedProduct?.imageUrl?.trim() ?? "";
+    const nextImageUrl = productForm.imageUrl.trim();
 
     startTransition(() => {
       const result = saveProduct({
@@ -410,7 +412,7 @@ export function ProductWorkspace() {
           ar: productForm.nameAr.trim(),
           ur: productForm.nameUr.trim()
         },
-        imageUrl: productForm.imageUrl.trim() || undefined,
+        imageUrl: nextImageUrl || undefined,
         salePrice: Number(productForm.salePrice),
         costPrice: Number(productForm.costPrice),
         stockQuantity: productForm.kind === "service" ? 0 : Number(productForm.stockQuantity || 0),
@@ -429,6 +431,9 @@ export function ProductWorkspace() {
         tone: "success",
         message: productForm.id ? t("products.updateSuccess") : t("products.saveSuccess")
       });
+      if (previousImageUrl && previousImageUrl !== nextImageUrl) {
+        void deleteShopImageAsset(previousImageUrl).catch(() => undefined);
+      }
       resetProductForm();
     });
   };
@@ -438,17 +443,22 @@ export function ProductWorkspace() {
       return;
     }
 
+    const previousImageUrl = form.id
+      ? shopCategories.find((category) => category.id === form.id)?.imageUrl?.trim() ?? ""
+      : "";
+    const nextImageUrl = form.imageUrl.trim();
+
     startTransition(() => {
       const result: { ok: boolean; message?: string; categoryId?: string } = form.id
         ? updateCategory(form.id, {
             name: form.name.trim(),
             description: form.description.trim(),
-            imageUrl: form.imageUrl.trim() || undefined
+            imageUrl: nextImageUrl || undefined
           })
         : addCategory({
             name: form.name.trim(),
             description: form.description.trim(),
-            imageUrl: form.imageUrl.trim() || undefined
+            imageUrl: nextImageUrl || undefined
           });
 
       if (!result.ok) {
@@ -464,6 +474,9 @@ export function ProductWorkspace() {
         tone: "success",
         message: form.id ? t("products.categoryUpdateSuccess") : t("products.categorySaveSuccess")
       });
+      if (previousImageUrl && previousImageUrl !== nextImageUrl) {
+        void deleteShopImageAsset(previousImageUrl).catch(() => undefined);
+      }
       setCategoryForm(emptyCategoryForm);
       setCategoryMode("list");
       if (!options?.stayOpen) {
@@ -536,6 +549,7 @@ export function ProductWorkspace() {
 
     try {
       const previousImageUrl = productForm.imageUrl.trim();
+      const persistedImageUrl = selectedProduct?.imageUrl?.trim() ?? "";
       const result = await resizeImageFileToDataUrl(file, {
         maxBytes: 300 * 1024,
         maxWidth: 640,
@@ -555,13 +569,13 @@ export function ProductWorkspace() {
       });
 
       setProductForm((current) => ({ ...current, imageUrl: upload.url }));
-      if (previousImageUrl && previousImageUrl !== upload.url) {
+      if (previousImageUrl && previousImageUrl !== persistedImageUrl && previousImageUrl !== upload.url) {
         void deleteShopImageAsset(previousImageUrl).catch(() => undefined);
       }
       setCatalogFeedback({
         tone: "success",
         message: upload.storedInCloud
-          ? "Image saved securely in Supabase Storage."
+          ? "Image uploaded securely. Save the product to keep it."
           : `${t("products.imageUploadSuccess")} Cloud upload fallback was used.`
       });
     } catch (error) {
@@ -574,10 +588,19 @@ export function ProductWorkspace() {
 
   const removeProductImage = async () => {
     const imageUrl = productForm.imageUrl.trim();
+    const persistedImageUrl = selectedProduct?.imageUrl?.trim() ?? "";
 
     setProductForm((current) => ({ ...current, imageUrl: "" }));
 
     if (!imageUrl) {
+      return;
+    }
+
+    if (imageUrl === persistedImageUrl) {
+      setCatalogFeedback({
+        tone: "success",
+        message: "Image removal is ready. Save the product to apply it."
+      });
       return;
     }
 
@@ -603,6 +626,9 @@ export function ProductWorkspace() {
 
     try {
       const previousImageUrl = categoryForm.imageUrl.trim();
+      const persistedImageUrl = categoryForm.id
+        ? shopCategories.find((category) => category.id === categoryForm.id)?.imageUrl?.trim() ?? ""
+        : "";
       const result = await resizeImageFileToDataUrl(file, {
         maxBytes: 300 * 1024,
         maxWidth: 640,
@@ -622,13 +648,13 @@ export function ProductWorkspace() {
       });
 
       setCategoryForm((current) => ({ ...current, imageUrl: upload.url }));
-      if (previousImageUrl && previousImageUrl !== upload.url) {
+      if (previousImageUrl && previousImageUrl !== persistedImageUrl && previousImageUrl !== upload.url) {
         void deleteShopImageAsset(previousImageUrl).catch(() => undefined);
       }
       setCategoryFeedback({
         tone: "success",
         message: upload.storedInCloud
-          ? "Image saved securely in Supabase Storage."
+          ? "Image uploaded securely. Save the category to keep it."
           : `${t("products.imageUploadSuccess")} Cloud upload fallback was used.`
       });
     } catch (error) {
@@ -641,10 +667,21 @@ export function ProductWorkspace() {
 
   const removeCategoryImage = async () => {
     const imageUrl = categoryForm.imageUrl.trim();
+    const persistedImageUrl = categoryForm.id
+      ? shopCategories.find((category) => category.id === categoryForm.id)?.imageUrl?.trim() ?? ""
+      : "";
 
     setCategoryForm((current) => ({ ...current, imageUrl: "" }));
 
     if (!imageUrl) {
+      return;
+    }
+
+    if (imageUrl === persistedImageUrl) {
+      setCategoryFeedback({
+        tone: "success",
+        message: "Image removal is ready. Save the category to apply it."
+      });
       return;
     }
 

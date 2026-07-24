@@ -957,6 +957,36 @@ function mergeSettingsByShop(storedSettings: DemoAppState["settingsByShop"] | un
   }, {});
 }
 
+function mergeSettingsPatchByShop(
+  currentSettings: DemoAppState["settingsByShop"],
+  patchSettings: DemoAppState["settingsByShop"] | undefined
+) {
+  if (!patchSettings) {
+    return currentSettings;
+  }
+
+  return Object.keys(patchSettings).reduce<DemoAppState["settingsByShop"]>(
+    (merged, shopId) => {
+      const patchBundle = patchSettings[shopId];
+      const currentBundle = merged[shopId];
+
+      if (!currentBundle) {
+        merged[shopId] = patchBundle;
+        return merged;
+      }
+
+      merged[shopId] = {
+        pos: { ...currentBundle.pos, ...patchBundle.pos },
+        printer: { ...currentBundle.printer, ...patchBundle.printer },
+        receipt: { ...currentBundle.receipt, ...patchBundle.receipt },
+        tax: { ...currentBundle.tax, ...patchBundle.tax }
+      };
+      return merged;
+    },
+    { ...currentSettings }
+  );
+}
+
 function normalizeStoredProducts(products: DemoAppState["products"]) {
   const usedIds = new Set<string>();
 
@@ -1188,10 +1218,10 @@ function mergeOwnerPortalState(current: DemoAppState, ownerSnapshot?: Partial<De
     productKeys: mergeRowsById(current.productKeys, ownerSnapshot.productKeys ?? []),
     categories: mergeRowsById(current.categories, ownerSnapshot.categories ?? []),
     expenseCategories: mergeRowsById(current.expenseCategories, ownerSnapshot.expenseCategories ?? []),
-    settingsByShop: {
-      ...current.settingsByShop,
-      ...(ownerSnapshot.settingsByShop ?? {})
-    },
+    settingsByShop: mergeSettingsPatchByShop(
+      current.settingsByShop,
+      ownerSnapshot.settingsByShop
+    ),
     receiptSequencesByShop: {
       ...current.receiptSequencesByShop,
       ...(ownerSnapshot.receiptSequencesByShop ?? {})
@@ -1395,10 +1425,7 @@ function mergeCloudActivationStatePatch(current: DemoAppState, patch: CloudActiv
     deviceActivations: mergeRowsById(current.deviceActivations, patch.deviceActivations ?? []),
     users: mergeRowsById(current.users, patch.users ?? []),
     categories: mergeRowsById(current.categories, patch.categories ?? []),
-    settingsByShop: {
-      ...current.settingsByShop,
-      ...(patch.settingsByShop ?? {})
-    }
+    settingsByShop: mergeSettingsPatchByShop(current.settingsByShop, patch.settingsByShop)
   } satisfies DemoAppState;
 }
 
@@ -1610,10 +1637,7 @@ function mergeShopCloudStatePatch(current: DemoAppState, patch: ShopCloudStatePa
       ...current.accountPaymentSequencesByShop,
       ...(patch.accountPaymentSequencesByShop ?? {})
     },
-    settingsByShop: {
-      ...current.settingsByShop,
-      ...(patch.settingsByShop ?? {})
-    },
+    settingsByShop: mergeSettingsPatchByShop(current.settingsByShop, patch.settingsByShop),
     dictionaryEntries: patch.dictionaryEntries ?? current.dictionaryEntries,
     supportTickets: replaceRowsForShop(current.supportTickets, patch.supportTickets, shopId),
     supportSessions: replaceRowsForShop(current.supportSessions, patch.supportSessions, shopId),

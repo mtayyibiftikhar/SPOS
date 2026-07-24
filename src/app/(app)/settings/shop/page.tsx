@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePosApp } from "@/components/providers/app-provider";
 import { Card } from "@/components/ui/card";
 import { SettingsFormShell } from "@/components/settings/settings-form-shell";
@@ -19,6 +19,10 @@ export default function ShopSettingsPage() {
   const [logoUrl, setLogoUrl] = useState(currentSettings?.pos.logoUrl ?? "");
   const [vatNumber, setVatNumber] = useState(currentSettings?.pos.vatNumber ?? "");
   const [logoFeedback, setLogoFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
+
+  useEffect(() => {
+    setLogoUrl(currentSettings?.pos.logoUrl ?? "");
+  }, [currentSettings?.pos.logoUrl]);
 
   if (!currentSettings) {
     return null;
@@ -67,6 +71,7 @@ export default function ShopSettingsPage() {
       });
 
       setLogoUrl(upload.url);
+      updateSettings("pos", { logoUrl: upload.url });
       if (previousLogoUrl && previousLogoUrl !== upload.url) {
         void deleteShopLogoAsset(previousLogoUrl).catch(() => undefined);
       }
@@ -88,6 +93,7 @@ export default function ShopSettingsPage() {
     const currentLogoUrl = logoUrl.trim();
 
     setLogoUrl("");
+    updateSettings("pos", { logoUrl: "" });
 
     if (!currentLogoUrl) {
       return;
@@ -98,7 +104,7 @@ export default function ShopSettingsPage() {
 
       setLogoFeedback({
         tone: "success",
-        message: result.deleted ? "Logo removed from Supabase Storage. Save changes to publish." : "Logo removed. Save changes to publish."
+        message: result.deleted ? "Logo removed from Supabase Storage." : "Logo removed."
       });
     } catch (error) {
       setLogoFeedback({
@@ -124,7 +130,7 @@ export default function ShopSettingsPage() {
             email: email.trim() || undefined,
             website: website.trim() || undefined,
             currency,
-            logoUrl: logoUrl.trim() || undefined,
+            logoUrl: logoUrl.trim(),
             vatNumber: vatNumber.trim() || undefined
           });
         }}
