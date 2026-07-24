@@ -215,8 +215,35 @@ export async function POST(request: Request) {
       target_id: productKeyRow.id
     });
 
+    const shopSelect =
+      "id, name, slug, setup_email, email, website, phone, address, currency, timezone, plan_name, license_status, created_at";
+    const legacyShopSelect =
+      "id, name, slug, email, website, phone, address, currency, timezone, plan_name, license_status, created_at";
+    const shopWithSetupEmail = await supabase
+      .from("shops")
+      .select(shopSelect)
+      .eq("id", productKeyRow.shop_id)
+      .maybeSingle();
+    const setupEmailColumnMissing =
+      shopWithSetupEmail.error?.code === "PGRST204" ||
+      /setup_email/i.test(shopWithSetupEmail.error?.message ?? "");
+    const legacyShop = setupEmailColumnMissing
+      ? await supabase.from("shops").select(legacyShopSelect).eq("id", productKeyRow.shop_id).maybeSingle()
+      : null;
+
+    if (shopWithSetupEmail.error && !setupEmailColumnMissing) {
+      throw shopWithSetupEmail.error;
+    }
+
+    if (legacyShop?.error) {
+      throw legacyShop.error;
+    }
+
+    const shop = (shopWithSetupEmail.data ?? legacyShop?.data ?? null) as
+      | (NonNullable<typeof shopWithSetupEmail.data> & { setup_email?: string | null })
+      | null;
+
     const [
-      { data: shop },
       { data: refreshedLicense },
       { data: settings },
       { data: categories },
@@ -224,11 +251,6 @@ export async function POST(request: Request) {
       { data: profiles },
       brandProfile
     ] = await Promise.all([
-      supabase
-        .from("shops")
-        .select("id, name, slug, email, website, phone, address, currency, timezone, plan_name, license_status, created_at")
-        .eq("id", productKeyRow.shop_id)
-        .maybeSingle(),
       supabase
         .from("licenses")
         .select("id, shop_id, status, expires_at, last_payment_at, auto_lock_days_after_expiry, locked_at, lock_reason")
@@ -266,6 +288,7 @@ export async function POST(request: Request) {
                 id: shop.id,
                 name: shop.name,
                 slug: shop.slug,
+                setupEmail: shop.setup_email ?? shop.email ?? undefined,
                 email: shop.email ?? undefined,
                 website: shop.website ?? undefined,
                 phone: shop.phone ?? "",

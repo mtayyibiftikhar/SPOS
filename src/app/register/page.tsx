@@ -220,13 +220,12 @@ export default function RegisterPage() {
       return;
     }
 
-    if (cachedDetails) {
-      setActiveStep((current) => (current === "setup" ? "admin" : current));
-    }
+    const setupEmail =
+      shop.setupEmail?.trim() || shop.email?.trim() || settings?.pos.email?.trim() || "";
 
     setForm((current) => ({
       ...current,
-      setupEmail: current.setupEmail || shop.setupEmail || settings?.pos.email || shop.email || "",
+      setupEmail: current.setupEmail || setupEmail,
       shopName: current.shopName || settings?.pos.shopName || shop.name,
       address: current.address || settings?.pos.address || shop.address,
       phone: current.phone || settings?.pos.phone || shop.phone,
@@ -238,7 +237,8 @@ export default function RegisterPage() {
       taxName: current.taxName || settings?.tax.name || "VAT",
       taxRate: current.taxRate || settings?.tax.rate || 15,
       taxMode: settings?.tax.mode ?? current.taxMode,
-      receiptFooterText: current.receiptFooterText || settings?.receipt.footerText || `Thank you for visiting ${shop.name}.`
+      receiptFooterText: current.receiptFooterText || settings?.receipt.footerText || `Thank you for visiting ${shop.name}.`,
+      adminEmail: current.adminEmail || setupEmail
     }));
   }, [form.productKey, state.productKeys, state.settingsByShop, state.shops]);
 

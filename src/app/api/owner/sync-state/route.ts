@@ -35,7 +35,7 @@ function isUuid(value: string) {
 function isMissingOwnerBillingColumnsError(error: { code?: string; message?: string }) {
   return (
     error.code === "PGRST204" ||
-    /billing_cycle|package_price|total_paid|last_owner_payment_at|country|city|auto_payment_enabled|cancelled_at/i.test(error.message ?? "")
+    /billing_cycle|package_price|total_paid|last_owner_payment_at|country|city|auto_payment_enabled|cancelled_at|setup_email/i.test(error.message ?? "")
   );
 }
 
@@ -76,6 +76,7 @@ export async function POST(request: Request) {
           id: cloudShopId,
           name: shop.name,
           slug: shop.slug || `${slugify(shop.name)}-${cloudShopId.slice(0, 6)}`,
+          setup_email: shop.setupEmail?.trim() || shop.email?.trim() || null,
           email: shop.email ?? null,
           website: shop.website ?? null,
           phone: shop.phone ?? "",
@@ -103,9 +104,22 @@ export async function POST(request: Request) {
           throw error;
         }
 
-        const fallbackRows = shopRows.map(
-          ({ billing_cycle, package_price, total_paid, last_owner_payment_at, country, city, auto_payment_enabled, cancelled_at, ...row }) => row
-        );
+        const fallbackRows = shopRows.map((shopRow) => {
+          const {
+            billing_cycle,
+            package_price,
+            total_paid,
+            last_owner_payment_at,
+            country,
+            city,
+            auto_payment_enabled,
+            cancelled_at,
+            setup_email,
+            ...row
+          } = shopRow;
+
+          return row;
+        });
         const { error: fallbackError } = await supabase.from("shops").upsert(fallbackRows, { onConflict: "id" });
 
         if (fallbackError) {
