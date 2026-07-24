@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
+import { Textarea } from "@/components/ui/textarea";
 import { customerMatchesSearch, isWalkInCustomerName } from "@/lib/billing";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
 import { buildPublicReceiptUrl } from "@/lib/public-receipts";
@@ -47,7 +48,9 @@ export function ReceiptView({ billId }: { billId: string }) {
     name: "",
     phone: "",
     email: "",
-    whatsapp: ""
+    whatsapp: "",
+    vatNumber: "",
+    address: ""
   });
   const hasAutoPrinted = useRef(false);
   const isFreshReceipt = searchParams.get("fresh") === "1";
@@ -96,9 +99,19 @@ export function ReceiptView({ billId }: { billId: string }) {
       name: isWalkInCustomerName(bill.customerName) ? "" : bill.customerName ?? "",
       phone: bill.customerPhone ?? "",
       email: bill.customerEmail ?? "",
-      whatsapp: bill.customerWhatsapp ?? ""
+      whatsapp: bill.customerWhatsapp ?? "",
+      vatNumber: bill.customerVatNumber ?? "",
+      address: bill.customerAddress ?? ""
     });
-  }, [bill?.customerEmail, bill?.customerName, bill?.customerPhone, bill?.customerWhatsapp, bill?.id]);
+  }, [
+    bill?.customerAddress,
+    bill?.customerEmail,
+    bill?.customerName,
+    bill?.customerPhone,
+    bill?.customerVatNumber,
+    bill?.customerWhatsapp,
+    bill?.id
+  ]);
 
   useEffect(() => {
     if (
@@ -114,7 +127,14 @@ export function ReceiptView({ billId }: { billId: string }) {
     setFeedback(t("receipt.autoPrintNotice"));
 
     const timer = window.setTimeout(() => {
-      void printElementWithNative("#receipt-print-area", t("receipt.title", { number: bill.number }))
+      void printElementWithNative(
+        "#receipt-print-area",
+        t("receipt.title", { number: bill.number }),
+        {
+          deviceName: printerSettings.printerDeviceName,
+          silent: true
+        }
+      )
         .then((printed) => {
           if (!printed) {
             window.print();
@@ -124,7 +144,13 @@ export function ReceiptView({ billId }: { billId: string }) {
     }, 320);
 
     return () => window.clearTimeout(timer);
-  }, [bill, isFreshReceipt, printerSettings?.autoPrintAfterSale, t]);
+  }, [
+    bill,
+    isFreshReceipt,
+    printerSettings?.autoPrintAfterSale,
+    printerSettings?.printerDeviceName,
+    t
+  ]);
 
   useEffect(() => {
     if (!bill || !isFreshReceipt) {
@@ -292,7 +318,9 @@ export function ReceiptView({ billId }: { billId: string }) {
   const handlePrint = async () => {
     setFeedback(null);
 
-    const printed = await printElementWithNative("#receipt-print-area", receiptTitle).catch(() => false);
+    const printed = await printElementWithNative("#receipt-print-area", receiptTitle, {
+      deviceName: printerSettings?.printerDeviceName
+    }).catch(() => false);
 
     if (!printed) {
       window.print();
@@ -343,7 +371,9 @@ export function ReceiptView({ billId }: { billId: string }) {
       name: isWalkInCustomerName(bill.customerName) ? "" : bill.customerName ?? "",
       phone: bill.customerPhone ?? "",
       email: bill.customerEmail ?? "",
-      whatsapp: bill.customerWhatsapp ?? bill.customerPhone ?? ""
+      whatsapp: bill.customerWhatsapp ?? bill.customerPhone ?? "",
+      vatNumber: bill.customerVatNumber ?? "",
+      address: bill.customerAddress ?? ""
     });
     setContactCustomerSearch("");
     setPendingShareAction(action);
@@ -355,9 +385,11 @@ export function ReceiptView({ billId }: { billId: string }) {
       billId: bill.id,
       customerId: contactForm.id,
       customerName: contactForm.name,
+      customerAddress: contactForm.address,
       customerPhone: contactForm.phone,
       customerEmail: contactForm.email,
-      customerWhatsapp: contactForm.whatsapp
+      customerWhatsapp: contactForm.whatsapp,
+      customerVatNumber: contactForm.vatNumber
     });
 
     if (!result.ok) {
@@ -447,7 +479,9 @@ export function ReceiptView({ billId }: { billId: string }) {
       name: customer.name,
       phone: customer.phone ?? "",
       email: customer.email ?? "",
-      whatsapp: customer.whatsapp ?? customer.phone ?? ""
+      whatsapp: customer.whatsapp ?? customer.phone ?? "",
+      vatNumber: customer.vatNumber ?? "",
+      address: customer.address ?? ""
     });
     setContactCustomerSearch("");
     setFeedback(null);
@@ -591,6 +625,8 @@ export function ReceiptView({ billId }: { billId: string }) {
               {bill.customerPhone ? <p>{bill.customerPhone}</p> : null}
               {bill.customerEmail ? <p>{bill.customerEmail}</p> : null}
               {bill.customerWhatsapp ? <p>{t("common.whatsapp")}: {bill.customerWhatsapp}</p> : null}
+              {bill.customerVatNumber ? <p>{t("common.vatNumber")}: {bill.customerVatNumber}</p> : null}
+              {bill.customerAddress ? <p>{t("common.address")}: {bill.customerAddress}</p> : null}
             </div>
           ) : null}
 
@@ -987,6 +1023,31 @@ export function ReceiptView({ billId }: { billId: string }) {
                     setContactForm((current) => ({
                       ...current,
                       whatsapp: event.target.value
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-ink">{t("common.vatNumber")}</label>
+                <Input
+                  value={contactForm.vatNumber}
+                  onChange={(event) =>
+                    setContactForm((current) => ({
+                      ...current,
+                      vatNumber: event.target.value
+                    }))
+                  }
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="mb-2 block text-sm font-medium text-ink">{t("common.address")}</label>
+                <Textarea
+                  className="min-h-24"
+                  value={contactForm.address}
+                  onChange={(event) =>
+                    setContactForm((current) => ({
+                      ...current,
+                      address: event.target.value
                     }))
                   }
                 />

@@ -26,6 +26,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PhoneNumberField } from "@/components/ui/phone-number-field";
 import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
   calculateBillTotals,
   calculateDiscountAmount,
@@ -72,11 +73,13 @@ type HeldBill = {
 };
 
 type CustomerForm = {
+  address: string;
   id?: string;
   email: string;
   name: string;
   phoneCountryCode: string;
   phoneNumber: string;
+  vatNumber: string;
   whatsappCountryCode: string;
   whatsappNumber: string;
   whatsappSameAsPhone: boolean;
@@ -111,10 +114,12 @@ const MAX_HELD_BILLS = 2;
 
 function createEmptyCustomerForm(): CustomerForm {
   return {
+    address: "",
     email: "",
     name: "",
     phoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
     phoneNumber: "",
+    vatNumber: "",
     whatsappCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
     whatsappNumber: "",
     whatsappSameAsPhone: true
@@ -126,11 +131,13 @@ function toCustomerForm(customer: Customer): CustomerForm {
   const whatsapp = splitPhoneNumber(customer.whatsapp ?? customer.phone);
 
   return {
+    address: customer.address ?? "",
     id: customer.id,
     email: customer.email ?? "",
     name: customer.name,
     phoneCountryCode: phone.countryCode,
     phoneNumber: phone.localNumber,
+    vatNumber: customer.vatNumber ?? "",
     whatsappCountryCode: whatsapp.countryCode,
     whatsappNumber: whatsapp.localNumber,
     whatsappSameAsPhone: (customer.whatsapp ?? customer.phone ?? "") === (customer.phone ?? "")
@@ -1185,10 +1192,12 @@ export function BillingWorkspace() {
     const normalizedBillDiscountValue = Number(clampDiscountInput(discountType, discountValue, totals.subtotal));
     const payload: CheckoutBillInput = {
       customer: {
+        address: customerForm.address.trim(),
         email: customerForm.email.trim(),
         id: customerForm.id,
         name: normalizedCustomerName,
         phone: normalizedCustomerPhone,
+        vatNumber: customerForm.vatNumber.trim(),
         whatsapp: normalizedCustomerWhatsapp
       },
       discountType,
@@ -2090,6 +2099,34 @@ export function BillingWorkspace() {
                     setCustomerForm((current) => ({
                       ...current,
                       email: event.target.value
+                    }))
+                  }
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700">{t("common.vatNumber")}</label>
+                <Input
+                  className="rounded-[16px] border-slate-200 bg-slate-50"
+                  value={customerForm.vatNumber}
+                  onChange={(event) =>
+                    setCustomerForm((current) => ({
+                      ...current,
+                      vatNumber: event.target.value
+                    }))
+                  }
+                />
+              </div>
+
+              <div className="lg:col-span-2">
+                <label className="mb-2 block text-sm font-medium text-slate-700">{t("common.address")}</label>
+                <Textarea
+                  className="min-h-20 rounded-[16px] border-slate-200 bg-slate-50"
+                  value={customerForm.address}
+                  onChange={(event) =>
+                    setCustomerForm((current) => ({
+                      ...current,
+                      address: event.target.value
                     }))
                   }
                 />

@@ -288,11 +288,13 @@ export interface DeletedProduct {
 }
 
 export interface Customer {
+  address?: string;
   id: string;
   shopId: string;
   name: string;
   phone?: string;
   email?: string;
+  vatNumber?: string;
   whatsapp?: string;
   createdAt: string;
 }
@@ -328,6 +330,8 @@ export interface Bill {
   customerName?: string;
   customerPhone?: string;
   customerEmail?: string;
+  customerAddress?: string;
+  customerVatNumber?: string;
   customerWhatsapp?: string;
   subtotal: number;
   itemDiscountAmount?: number;
@@ -536,6 +540,8 @@ export interface POSSettings {
 export interface PrinterSettings {
   receiptSize: ReceiptSize;
   autoPrintAfterSale: boolean;
+  printerDeviceName?: string;
+  printerDisplayName?: string;
 }
 
 export interface ReceiptSettings {
@@ -658,10 +664,12 @@ export interface SessionUser {
 }
 
 export interface CheckoutCustomerInput {
+  address?: string;
   id?: string;
   name?: string;
   phone?: string;
   email?: string;
+  vatNumber?: string;
   whatsapp?: string;
 }
 

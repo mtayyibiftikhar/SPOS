@@ -42,11 +42,13 @@ import { formatCurrency, formatDateTime } from "@/lib/utils";
 type CustomerView = "overview" | "directory" | "account" | "history";
 
 type CustomerFormState = {
+  address: string;
   email: string;
   id?: string;
   name: string;
   phoneCountryCode: string;
   phoneNumber: string;
+  vatNumber: string;
   whatsappCountryCode: string;
   whatsappNumber: string;
 };
@@ -63,7 +65,9 @@ const CUSTOMER_IMPORT_HEADERS = [
   "phone_number",
   "whatsapp_country_code",
   "whatsapp_number",
-  "email"
+  "email",
+  "vat_number",
+  "address"
 ] as const;
 
 type CustomerImportResult = {
@@ -77,20 +81,24 @@ type CustomerImportResult = {
 
 function createEmptyCustomerForm(): CustomerFormState {
   return {
+    address: "",
     email: "",
     name: "",
     phoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
     phoneNumber: "",
+    vatNumber: "",
     whatsappCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
     whatsappNumber: ""
   };
 }
 
 function createCustomerForm(customer?: {
+  address?: string;
   email?: string;
   id?: string;
   name: string;
   phone?: string;
+  vatNumber?: string;
   whatsapp?: string;
 }): CustomerFormState {
   if (!customer) {
@@ -101,11 +109,13 @@ function createCustomerForm(customer?: {
   const whatsapp = splitPhoneNumber(customer.whatsapp);
 
   return {
+    address: customer.address ?? "",
     email: customer.email ?? "",
     id: customer.id,
     name: customer.name,
     phoneCountryCode: phone.countryCode,
     phoneNumber: phone.localNumber,
+    vatNumber: customer.vatNumber ?? "",
     whatsappCountryCode: whatsapp.countryCode,
     whatsappNumber: whatsapp.localNumber
   };
@@ -615,10 +625,12 @@ export function CustomerWorkspace() {
     setCustomerFeedback(null);
 
     const result = saveCustomer({
+      address: customerForm.address,
       email: customerForm.email,
       id: isCreating ? undefined : customerForm.id,
       name: customerForm.name,
       phone: combinePhoneNumber(customerForm.phoneCountryCode, customerForm.phoneNumber) || undefined,
+      vatNumber: customerForm.vatNumber,
       whatsapp: combinePhoneNumber(customerForm.whatsappCountryCode, customerForm.whatsappNumber) || undefined
     });
 
@@ -736,7 +748,9 @@ export function CustomerWorkspace() {
           phone.localNumber,
           whatsapp.countryCode,
           whatsapp.localNumber,
-          customer.email ?? ""
+          customer.email ?? "",
+          customer.vatNumber ?? "",
+          customer.address ?? ""
         ];
       })
     ];
@@ -762,7 +776,9 @@ export function CustomerWorkspace() {
         "501234567",
         "+966",
         "501234567",
-        "customer@example.com"
+        "customer@example.com",
+        "310123456700003",
+        "Riyadh, Saudi Arabia"
       ].map(toCsvCell).join(",")
     ].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -820,7 +836,9 @@ export function CustomerWorkspace() {
         phoneNumber,
         whatsappCountryCode,
         whatsappNumber,
-        email
+        email,
+        vatNumber,
+        address
       ] = splitCsvLine(line);
       const name = (customerName || `${firstName ?? ""} ${lastName ?? ""}`).trim().replace(/\s+/g, " ");
       const phone = normalizeImportPhone(countryCode, phoneNumber);
@@ -846,9 +864,11 @@ export function CustomerWorkspace() {
       }
 
       const result = saveCustomer({
+        address,
         name,
         phone,
         email,
+        vatNumber,
         whatsapp
       });
 
@@ -1135,6 +1155,24 @@ export function CustomerWorkspace() {
             className="rounded-[16px] border-slate-200 bg-slate-50"
             value={customerForm.email}
             onChange={(event) => setCustomerForm((current) => ({ ...current, email: event.target.value }))}
+          />
+        </div>
+
+        <div>
+          <label className="mb-2 block text-sm font-medium text-ink">{t("common.vatNumber")}</label>
+          <Input
+            className="rounded-[16px] border-slate-200 bg-slate-50"
+            value={customerForm.vatNumber}
+            onChange={(event) => setCustomerForm((current) => ({ ...current, vatNumber: event.target.value }))}
+          />
+        </div>
+
+        <div className="md:col-span-2">
+          <label className="mb-2 block text-sm font-medium text-ink">{t("common.address")}</label>
+          <Textarea
+            className="min-h-24 rounded-[16px] border-slate-200 bg-slate-50"
+            value={customerForm.address}
+            onChange={(event) => setCustomerForm((current) => ({ ...current, address: event.target.value }))}
           />
         </div>
       </div>

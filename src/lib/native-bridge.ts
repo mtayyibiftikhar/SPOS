@@ -7,17 +7,29 @@ type NativeFilePayload = {
 };
 
 type NativePrintHtmlPayload = {
+  deviceName?: string;
   fileName: string;
   html: string;
+  silent?: boolean;
 };
 
 type NativeResult = {
   ok?: boolean;
   message?: string;
+  printers?: NativePrinter[];
+};
+
+export type NativePrinter = {
+  description?: string;
+  displayName?: string;
+  isDefault?: boolean;
+  name: string;
+  status?: number;
 };
 
 type DesktopNativeBridge = {
   downloadFile?: (payload: NativeFilePayload) => Promise<NativeResult>;
+  getPrinters?: () => Promise<NativeResult>;
   platform?: string;
   printReceiptHtml?: (payload: NativePrintHtmlPayload) => Promise<NativeResult>;
 };
@@ -46,6 +58,7 @@ function getNativeBridge() {
   if (window.sposNative) {
     return {
       downloadFile: window.sposNative.downloadFile,
+      getPrinters: window.sposNative.getPrinters,
       printReceiptHtml: window.sposNative.printReceiptHtml
     };
   }
@@ -77,6 +90,22 @@ async function blobToBase64(blob: Blob) {
 
 export function hasNativeDownloadSupport() {
   return Boolean(getNativeBridge()?.downloadFile);
+}
+
+export function hasNativePrinterSupport() {
+  return Boolean(getNativeBridge()?.getPrinters);
+}
+
+export async function getInstalledPrinters() {
+  const bridge = getNativeBridge();
+
+  if (!bridge?.getPrinters) {
+    return [] as NativePrinter[];
+  }
+
+  const result = await bridge.getPrinters();
+
+  return result?.ok === false ? [] : result?.printers ?? [];
 }
 
 export async function saveBlobWithNative(blob: Blob, fileName: string) {
@@ -134,7 +163,14 @@ export function buildPrintableHtmlFromElement(element: HTMLElement, title: strin
 </html>`;
 }
 
-export async function printElementWithNative(selector: string, title: string) {
+export async function printElementWithNative(
+  selector: string,
+  title: string,
+  options?: {
+    deviceName?: string;
+    silent?: boolean;
+  }
+) {
   const bridge = getNativeBridge();
 
   if (!bridge?.printReceiptHtml || typeof document === "undefined") {
@@ -148,8 +184,10 @@ export async function printElementWithNative(selector: string, title: string) {
   }
 
   const result = await bridge.printReceiptHtml({
+    deviceName: options?.deviceName,
     fileName: `${title.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "") || "receipt"}.html`,
-    html: buildPrintableHtmlFromElement(element, title)
+    html: buildPrintableHtmlFromElement(element, title),
+    silent: options?.silent
   });
 
   return result?.ok !== false;

@@ -412,9 +412,11 @@ function createBillMutation(
   const existingCustomer = findExistingCustomer(customers, context.shopId, payload.customer);
   const normalizedCustomerData = {
     name: payload.customer.name?.trim() || existingCustomer?.name || normalizedCustomer.name,
+    address: normalizedCustomer.address || existingCustomer?.address,
     phone: normalizedCustomer.phone || existingCustomer?.phone,
     email: normalizedCustomer.email || existingCustomer?.email,
-    whatsapp: normalizedCustomer.whatsapp || existingCustomer?.whatsapp
+    whatsapp: normalizedCustomer.whatsapp || existingCustomer?.whatsapp,
+    vatNumber: normalizedCustomer.vatNumber || existingCustomer?.vatNumber
   };
   const phoneConflict = findCustomerPhoneConflict(
     customers,
@@ -501,9 +503,11 @@ function createBillMutation(
     number: `REC-${String(sequence).padStart(6, "0")}`,
     status: getBillStatus(paymentAllocation.paymentMethod, dueAmount),
     customerName: customer?.name ?? normalizedCustomerData.name,
+    customerAddress: customer?.address ?? normalizedCustomerData.address,
     customerPhone: customer?.phone ?? normalizedCustomerData.phone,
     customerEmail: customer?.email ?? normalizedCustomerData.email,
     customerWhatsapp: customer?.whatsapp ?? normalizedCustomerData.whatsapp,
+    customerVatNumber: customer?.vatNumber ?? normalizedCustomerData.vatNumber,
     subtotal: totals.subtotal,
     itemDiscountAmount: totals.itemDiscountAmount,
     discountType: payload.discountType,

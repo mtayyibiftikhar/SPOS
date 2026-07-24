@@ -39,7 +39,7 @@ function getPdfFilter(fileName) {
     : [{ name: "All files", extensions: ["*"] }];
 }
 
-function printHtmlDocument({ html, fileName }, parentWindow) {
+function printHtmlDocument({ html, fileName, deviceName, silent }, parentWindow) {
   return new Promise((resolve) => {
     const printWindow = new BrowserWindow({
       height: 900,
@@ -65,13 +65,18 @@ function printHtmlDocument({ html, fileName }, parentWindow) {
     printWindow.webContents.once("did-finish-load", () => {
       printWindow.webContents.print(
         {
+          deviceName: deviceName || undefined,
           printBackground: true,
-          silent: false
+          silent: Boolean(silent)
         },
         (success, failureReason) => {
           finish({
             ok: success,
-            message: success ? "Print dialog opened." : failureReason || "Unable to print receipt."
+            message: success
+              ? silent
+                ? "Receipt sent to printer."
+                : "Print dialog opened."
+              : failureReason || "Unable to print receipt."
           });
         }
       );
@@ -166,6 +171,28 @@ ipcMain.handle("spos:print-receipt-html", async (event, payload) => {
     return {
       ok: false,
       message: error instanceof Error ? error.message : "Unable to print receipt."
+    };
+  }
+});
+
+ipcMain.handle("spos:get-printers", async (event) => {
+  try {
+    const printers = await event.sender.getPrintersAsync();
+
+    return {
+      ok: true,
+      printers: printers.map((printer) => ({
+        description: printer.description,
+        displayName: printer.displayName,
+        isDefault: Boolean(printer.isDefault),
+        name: printer.name,
+        status: printer.status
+      }))
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "Unable to read installed printers."
     };
   }
 });

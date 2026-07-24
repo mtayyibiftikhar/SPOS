@@ -217,6 +217,10 @@ export default async function PublicReceiptPage({ params }: PublicReceiptPagePro
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Customer</p>
               <p className="mt-2 text-base font-semibold">{bill.customerName?.trim() || "Walk-in Customer"}</p>
               {bill.customerPhone ? <p className="mt-1 text-sm text-slate-600">{bill.customerPhone}</p> : null}
+              {bill.customerEmail ? <p className="mt-1 text-sm text-slate-600">{bill.customerEmail}</p> : null}
+              {bill.customerWhatsapp ? <p className="mt-1 text-sm text-slate-600">WhatsApp: {bill.customerWhatsapp}</p> : null}
+              {bill.customerVatNumber ? <p className="mt-1 text-sm font-medium text-slate-700">VAT No. {bill.customerVatNumber}</p> : null}
+              {bill.customerAddress ? <p className="mt-1 text-sm text-slate-600">{bill.customerAddress}</p> : null}
             </div>
             <div className="rounded-3xl border border-slate-200 bg-white p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Payment</p>

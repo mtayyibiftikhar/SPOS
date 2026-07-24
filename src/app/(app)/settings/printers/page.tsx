@@ -1,12 +1,17 @@
 "use client";
 
-import { useState } from "react";
-import { Printer, ReceiptText } from "lucide-react";
+import { useEffect, useState } from "react";
+import { MonitorCog, Printer, ReceiptText, RefreshCw } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
 import { SettingsFormShell } from "@/components/settings/settings-form-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
+import {
+  getInstalledPrinters,
+  hasNativePrinterSupport,
+  type NativePrinter
+} from "@/lib/native-bridge";
 
 export default function PrinterSettingsPage() {
   const { currentSettings, t, updateSettings } = usePosApp();
@@ -14,6 +19,43 @@ export default function PrinterSettingsPage() {
   const [autoPrintAfterSale, setAutoPrintAfterSale] = useState(
     currentSettings?.printer.autoPrintAfterSale ?? false
   );
+  const [printerDeviceName, setPrinterDeviceName] = useState(
+    currentSettings?.printer.printerDeviceName ?? ""
+  );
+  const [printerDisplayName, setPrinterDisplayName] = useState(
+    currentSettings?.printer.printerDisplayName ?? ""
+  );
+  const [nativePrinterSupport, setNativePrinterSupport] = useState(false);
+  const [printers, setPrinters] = useState<NativePrinter[]>([]);
+  const [printersLoading, setPrintersLoading] = useState(false);
+  const [printerError, setPrinterError] = useState("");
+
+  async function loadPrinters() {
+    setPrintersLoading(true);
+    setPrinterError("");
+
+    try {
+      const installedPrinters = await getInstalledPrinters();
+      setPrinters(installedPrinters);
+
+      if (installedPrinters.length === 0) {
+        setPrinterError("No installed Windows printers were found.");
+      }
+    } catch {
+      setPrinterError("Unable to read installed Windows printers.");
+    } finally {
+      setPrintersLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    const isNative = hasNativePrinterSupport();
+    setNativePrinterSupport(isNative);
+
+    if (isNative) {
+      void loadPrinters();
+    }
+  }, []);
 
   if (!currentSettings) {
     return null;
@@ -28,7 +70,12 @@ export default function PrinterSettingsPage() {
         className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]"
         onSubmit={(event) => {
           event.preventDefault();
-          updateSettings("printer", { receiptSize, autoPrintAfterSale });
+          updateSettings("printer", {
+            autoPrintAfterSale,
+            printerDeviceName: printerDeviceName || undefined,
+            printerDisplayName: printerDisplayName || undefined,
+            receiptSize
+          });
         }}
       >
         <Card className="space-y-5 p-5">
@@ -53,6 +100,72 @@ export default function PrinterSettingsPage() {
               />
               {t("common.autoPrintAfterSale")}
             </label>
+          </div>
+          <div className="space-y-3 rounded-3xl border border-line bg-white p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-slate-950 text-white">
+                  <MonitorCog className="h-5 w-5" />
+                </span>
+                <div>
+                  <p className="font-semibold text-ink">Windows printer</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">
+                    {nativePrinterSupport
+                      ? "Choose the printer used for automatic receipts."
+                      : "Printer selection is available in the SPOS Windows app."}
+                  </p>
+                </div>
+              </div>
+              {nativePrinterSupport ? (
+                <button
+                  aria-label="Refresh installed printers"
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-line text-slate-600 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50"
+                  disabled={printersLoading}
+                  onClick={() => void loadPrinters()}
+                  type="button"
+                >
+                  <RefreshCw className={`h-4 w-4 ${printersLoading ? "animate-spin" : ""}`} />
+                </button>
+              ) : null}
+            </div>
+            <Select
+              disabled={!nativePrinterSupport || printersLoading}
+              value={printerDeviceName}
+              onChange={(event) => {
+                const nextDeviceName = event.target.value;
+                const selectedPrinter = printers.find(
+                  (printer) => printer.name === nextDeviceName
+                );
+                setPrinterDeviceName(nextDeviceName);
+                setPrinterDisplayName(
+                  selectedPrinter?.displayName || selectedPrinter?.name || ""
+                );
+              }}
+            >
+              <option value="">
+                {nativePrinterSupport ? "Windows default printer" : "Use system print dialog"}
+              </option>
+              {printerDeviceName && !printers.some((printer) => printer.name === printerDeviceName) ? (
+                <option value={printerDeviceName}>
+                  {printerDisplayName || printerDeviceName} (not currently available)
+                </option>
+              ) : null}
+              {printers.map((printer) => (
+                <option key={printer.name} value={printer.name}>
+                  {printer.displayName || printer.name}
+                  {printer.isDefault ? " (Default)" : ""}
+                </option>
+              ))}
+            </Select>
+            {printerError ? (
+              <p className="text-sm font-medium text-amber-700">{printerError}</p>
+            ) : (
+              <p className="text-xs leading-5 text-slate-500">
+                {nativePrinterSupport
+                  ? "With auto print enabled, completed sales print silently to this printer. Manual Print still opens the Windows print dialog."
+                  : "Browsers cannot securely list or silently control installed printers. Browser printing will continue through the system print dialog."}
+              </p>
+            )}
           </div>
           <Button type="submit">{t("common.saveChanges")}</Button>
         </Card>

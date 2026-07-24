@@ -293,9 +293,11 @@ export function normalizeCustomer(customer: CheckoutCustomerInput) {
   return {
     id: customer.id,
     name: customer.name?.trim() || "Walk-in Customer",
+    address: customer.address?.trim() || undefined,
     phone: customer.phone?.trim() || undefined,
     email: customer.email?.trim() || undefined,
-    whatsapp: customer.whatsapp?.trim() || undefined
+    whatsapp: customer.whatsapp?.trim() || undefined,
+    vatNumber: customer.vatNumber?.trim() || undefined
   };
 }
 

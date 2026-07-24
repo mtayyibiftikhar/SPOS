@@ -490,7 +490,9 @@ export function buildReceiptPdfDocument({
       normalizeCanvasText(bill.customerName || "Walk-in Customer"),
       normalizeCanvasText(bill.customerPhone ? `Phone ${bill.customerPhone}` : undefined),
       normalizeCanvasText(bill.customerEmail ? `Email ${bill.customerEmail}` : undefined),
-      normalizeCanvasText(bill.customerWhatsapp ? `WhatsApp ${bill.customerWhatsapp}` : undefined)
+      normalizeCanvasText(bill.customerWhatsapp ? `WhatsApp ${bill.customerWhatsapp}` : undefined),
+      normalizeCanvasText(bill.customerVatNumber ? `VAT No. ${bill.customerVatNumber}` : undefined),
+      normalizeCanvasText(bill.customerAddress ? `Address ${bill.customerAddress}` : undefined)
     ].filter(Boolean);
 
     if (customerLines.length > 0) {

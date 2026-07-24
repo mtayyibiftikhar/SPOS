@@ -17,6 +17,7 @@ export function AccountPaymentReceiptView({ paymentId }: { paymentId: string }) 
   const customer = payment ? state.customers.find((entry) => entry.id === payment.customerId) : null;
   const operator = payment ? state.users.find((entry) => entry.id === payment.createdBy) : null;
   const settings = currentShopId ? state.settingsByShop[currentShopId]?.pos : undefined;
+  const printerSettings = currentShopId ? state.settingsByShop[currentShopId]?.printer : undefined;
   const currency = currentShop?.currency ?? "SAR";
   const shopName = settings?.shopName ?? currentShop?.name ?? "Simple POS";
   const allocations = payment?.allocations ?? [];
@@ -32,7 +33,9 @@ export function AccountPaymentReceiptView({ paymentId }: { paymentId: string }) 
   }
 
   const handlePrint = async () => {
-    const printed = await printElementWithNative("#account-payment-receipt", payment.number);
+    const printed = await printElementWithNative("#account-payment-receipt", payment.number, {
+      deviceName: printerSettings?.printerDeviceName
+    });
     if (!printed) window.print();
   };
 
@@ -50,7 +53,9 @@ export function AccountPaymentReceiptView({ paymentId }: { paymentId: string }) 
           rows: [
             { label: "Customer", value: customer?.name ?? "Customer" },
             { label: "Phone", value: customer?.phone ?? "Not available" },
-            ...(settings?.vatNumber ? [{ label: "VAT number", value: settings.vatNumber }] : []),
+            ...(customer?.vatNumber ? [{ label: "Customer VAT number", value: customer.vatNumber }] : []),
+            ...(customer?.address ? [{ label: "Customer address", value: customer.address }] : []),
+            ...(settings?.vatNumber ? [{ label: "Store VAT number", value: settings.vatNumber }] : []),
             { label: "Received", value: formatDateTime(payment.createdAt, locale) },
             { label: "Method", value: payment.method === "cash" ? "Cash" : "Card" },
             { label: "Received by", value: operator?.name ?? "POS user" },
@@ -92,6 +97,8 @@ export function AccountPaymentReceiptView({ paymentId }: { paymentId: string }) 
             <div className="mt-5 space-y-3 text-sm">
               <p className="flex justify-between gap-4"><span className="text-slate-500">Customer</span><strong>{customer?.name ?? "Customer"}</strong></p>
               <p className="flex justify-between gap-4"><span className="text-slate-500">Phone</span><strong>{customer?.phone ?? "Not available"}</strong></p>
+              {customer?.vatNumber ? <p className="flex justify-between gap-4"><span className="text-slate-500">Customer VAT No.</span><strong>{customer.vatNumber}</strong></p> : null}
+              {customer?.address ? <p className="flex justify-between gap-4"><span className="text-slate-500">Customer address</span><strong className="text-right">{customer.address}</strong></p> : null}
               <p className="flex justify-between gap-4"><span className="text-slate-500">Date / time</span><strong>{formatDateTime(payment.createdAt, locale)}</strong></p>
               <p className="flex justify-between gap-4"><span className="text-slate-500">Payment method</span><strong>{payment.method === "cash" ? "Cash" : "Card"}</strong></p>
               <p className="flex justify-between gap-4"><span className="text-slate-500">Received by</span><strong>{operator?.name ?? "POS user"}</strong></p>

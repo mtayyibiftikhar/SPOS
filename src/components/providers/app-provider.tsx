@@ -733,8 +733,10 @@ interface AppContextValue {
   saveCustomer: (payload: {
     id?: string;
     name: string;
+    address?: string;
     phone?: string;
     email?: string;
+    vatNumber?: string;
     whatsapp?: string;
   }) => { ok: boolean; message?: string; customerId?: string };
   deleteCustomer: (customerId: string) => { ok: boolean; message?: string };
@@ -810,10 +812,12 @@ interface AppContextValue {
   createBill: (payload: CheckoutBillInput) => Promise<{ ok: boolean; billId?: string; message?: string }>;
   updateBillCustomerContact: (payload: {
     billId: string;
+    customerAddress?: string;
     customerId?: string;
     customerName?: string;
     customerPhone?: string;
     customerEmail?: string;
+    customerVatNumber?: string;
     customerWhatsapp?: string;
   }) => { ok: boolean; message?: string };
   createRefund: (payload: CreateRefundInput) => Promise<{ ok: boolean; refundId?: string; message?: string }>;
@@ -5170,7 +5174,7 @@ export function AppProvider({
         void message;
         void preferredChannel;
       },
-      saveCustomer: ({ id, name, phone, email, whatsapp }) => {
+      saveCustomer: ({ id, name, address, phone, email, vatNumber, whatsapp }) => {
         if (!currentShopId || !session) {
           return {
             ok: false,
@@ -5185,8 +5189,10 @@ export function AppProvider({
 
         flushSync(() => setState((current) => {
           const normalizedName = name.trim();
+          const normalizedAddress = address?.trim() || undefined;
           const normalizedPhone = phone?.trim() || undefined;
           const normalizedEmail = email?.trim() || undefined;
+          const normalizedVatNumber = vatNumber?.trim() || undefined;
           const normalizedWhatsapp = whatsapp?.trim() || undefined;
 
           if (!normalizedName) {
@@ -5240,8 +5246,10 @@ export function AppProvider({
                   ? {
                       ...customer,
                       name: normalizedName,
+                      address: normalizedAddress,
                       phone: normalizedPhone,
                       email: normalizedEmail,
+                      vatNumber: normalizedVatNumber,
                       whatsapp: normalizedWhatsapp
                     }
                   : customer
@@ -5262,8 +5270,10 @@ export function AppProvider({
                 id: customerId,
                 shopId: currentShopId,
                 name: normalizedName,
+                address: normalizedAddress,
                 phone: normalizedPhone,
                 email: normalizedEmail,
+                vatNumber: normalizedVatNumber,
                 whatsapp: normalizedWhatsapp,
                 createdAt: new Date().toISOString()
               },
@@ -8252,8 +8262,10 @@ export function AppProvider({
               customerRecord = {
                 ...existingCustomer,
                 name: normalizedCustomer.name,
+                address: normalizedCustomer.address,
                 phone: normalizedCustomer.phone,
                 email: normalizedCustomer.email,
+                vatNumber: normalizedCustomer.vatNumber,
                 whatsapp: normalizedCustomer.whatsapp
               };
               nextCustomers = current.customers.map((customer) =>
@@ -8264,8 +8276,10 @@ export function AppProvider({
                 id: createId("cust"),
                 shopId: currentShopId,
                 name: normalizedCustomer.name,
+                address: normalizedCustomer.address,
                 phone: normalizedCustomer.phone,
                 email: normalizedCustomer.email,
+                vatNumber: normalizedCustomer.vatNumber,
                 whatsapp: normalizedCustomer.whatsapp,
                 createdAt: new Date().toISOString()
               };
@@ -8292,8 +8306,10 @@ export function AppProvider({
             number: billNumber,
             status: getBillStatus(paymentAllocation.paymentMethod, dueAmount),
             customerName: normalizedCustomer.name,
+            customerAddress: normalizedCustomer.address,
             customerPhone: normalizedCustomer.phone,
             customerEmail: normalizedCustomer.email,
+            customerVatNumber: normalizedCustomer.vatNumber,
             customerWhatsapp: normalizedCustomer.whatsapp,
             subtotal: totals.subtotal,
             itemDiscountAmount: totals.itemDiscountAmount,
@@ -8433,7 +8449,16 @@ export function AppProvider({
 
         return result;
       },
-      updateBillCustomerContact: ({ billId, customerEmail, customerId, customerName, customerPhone, customerWhatsapp }) => {
+      updateBillCustomerContact: ({
+        billId,
+        customerAddress,
+        customerEmail,
+        customerId,
+        customerName,
+        customerPhone,
+        customerVatNumber,
+        customerWhatsapp
+      }) => {
         if (!currentShopId || !session) {
           return {
             ok: false,
@@ -8458,8 +8483,12 @@ export function AppProvider({
           }
 
           const nextName = customerName !== undefined ? customerName.trim() || undefined : bill.customerName;
+          const nextAddress =
+            customerAddress !== undefined ? customerAddress.trim() || undefined : bill.customerAddress;
           const nextPhone = customerPhone !== undefined ? customerPhone.trim() || undefined : bill.customerPhone;
           const nextEmail = customerEmail !== undefined ? customerEmail.trim() || undefined : bill.customerEmail;
+          const nextVatNumber =
+            customerVatNumber !== undefined ? customerVatNumber.trim() || undefined : bill.customerVatNumber;
           const nextWhatsapp =
             customerWhatsapp !== undefined ? customerWhatsapp.trim() || undefined : bill.customerWhatsapp;
           const selectedCustomer = customerId
@@ -8474,8 +8503,10 @@ export function AppProvider({
           const customerDraft = {
             id: resolvedCustomerId,
             name: nextName,
+            address: nextAddress,
             phone: nextPhone,
             email: nextEmail,
+            vatNumber: nextVatNumber,
             whatsapp: nextWhatsapp
           };
 
@@ -8518,8 +8549,10 @@ export function AppProvider({
                   ? {
                       ...entry,
                       name: normalizedCustomer.name,
+                      address: normalizedCustomer.address,
                       phone: normalizedCustomer.phone,
                       email: normalizedCustomer.email,
+                      vatNumber: normalizedCustomer.vatNumber,
                       whatsapp: normalizedCustomer.whatsapp
                     }
                   : entry
@@ -8531,8 +8564,10 @@ export function AppProvider({
                   id: nextCustomerId,
                   shopId: currentShopId,
                   name: normalizedCustomer.name,
+                  address: normalizedCustomer.address,
                   phone: normalizedCustomer.phone,
                   email: normalizedCustomer.email,
+                  vatNumber: normalizedCustomer.vatNumber,
                   whatsapp: normalizedCustomer.whatsapp,
                   createdAt: new Date().toISOString()
                 },
@@ -8552,8 +8587,10 @@ export function AppProvider({
                     ...entry,
                     customerId: nextCustomerId,
                     customerName: nextName,
+                    customerAddress: nextAddress,
                     customerPhone: nextPhone,
                     customerEmail: nextEmail,
+                    customerVatNumber: nextVatNumber,
                     customerWhatsapp: nextWhatsapp
                   }
                 : entry
