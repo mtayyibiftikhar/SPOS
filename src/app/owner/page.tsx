@@ -468,6 +468,12 @@ export default function OwnerPage() {
     allowedDevices: 2,
     autoLockDaysAfterExpiry: 3
   });
+  const [locationCountries, setLocationCountries] = useState<string[]>(["Saudi Arabia"]);
+  const [locationCities, setLocationCities] = useState<string[]>([]);
+  const [countriesLoading, setCountriesLoading] = useState(true);
+  const [citiesLoading, setCitiesLoading] = useState(false);
+  const [countryLoadError, setCountryLoadError] = useState(false);
+  const [cityLoadError, setCityLoadError] = useState(false);
   const [licenseDrafts, setLicenseDrafts] = useState<
     Record<string, { status: LicenseStatus; expiresAt: string; planName: string; billingCycle: BillingCycle; packagePrice: number; totalPaid: number; autoPaymentEnabled: boolean; allowedDevices: number; autoLockDaysAfterExpiry: number; lockReason: string }>
   >({});
@@ -534,6 +540,103 @@ export default function OwnerPage() {
   const selectedShop = state.shops.find((shop) => shop.id === selectedShopId) ?? state.shops[0];
   const selectedShopSafeId = selectedShop?.id ?? "";
   const selectedLicense = state.licenses.find((license) => license.shopId === selectedShopSafeId);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+
+    const loadCountryOptions = async () => {
+      setCountriesLoading(true);
+      setCountryLoadError(false);
+
+      try {
+        const response = await fetch("/api/locations", {
+          cache: "no-store",
+          signal: controller.signal
+        });
+        const payload = (await response.json()) as { locations?: string[] };
+
+        if (!response.ok || !payload.locations?.length) {
+          throw new Error("Country list is unavailable.");
+        }
+
+        if (active) {
+          setLocationCountries(
+            [...new Set(["Saudi Arabia", ...payload.locations])].sort((left, right) =>
+              left.localeCompare(right, "en", { sensitivity: "base" })
+            )
+          );
+        }
+      } catch (error) {
+        if (active && !(error instanceof DOMException && error.name === "AbortError")) {
+          setCountryLoadError(true);
+        }
+      } finally {
+        if (active) {
+          setCountriesLoading(false);
+        }
+      }
+    };
+
+    void loadCountryOptions();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    const country = createShopForm.country.trim();
+    const controller = new AbortController();
+    let active = true;
+
+    setLocationCities([]);
+    setCityLoadError(false);
+
+    if (!country) {
+      setCitiesLoading(false);
+      return () => {
+        active = false;
+        controller.abort();
+      };
+    }
+
+    const loadCityOptions = async () => {
+      setCitiesLoading(true);
+
+      try {
+        const response = await fetch(`/api/locations?country=${encodeURIComponent(country)}`, {
+          cache: "no-store",
+          signal: controller.signal
+        });
+        const payload = (await response.json()) as { locations?: string[] };
+
+        if (!response.ok) {
+          throw new Error("City list is unavailable.");
+        }
+
+        if (active) {
+          setLocationCities(payload.locations ?? []);
+        }
+      } catch (error) {
+        if (active && !(error instanceof DOMException && error.name === "AbortError")) {
+          setCityLoadError(true);
+        }
+      } finally {
+        if (active) {
+          setCitiesLoading(false);
+        }
+      }
+    };
+
+    void loadCityOptions();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [createShopForm.country]);
 
   useEffect(() => {
     if (!ownerUser?.email) {
@@ -1701,11 +1804,79 @@ export default function OwnerPage() {
         </label>
         <label className="space-y-2">
           <span className="text-sm font-semibold text-slate-950">Country</span>
-          <Input value={createShopForm.country} onChange={(event) => setCreateShopForm((current) => ({ ...current, country: event.target.value }))} />
+          {countryLoadError ? (
+            <Input
+              placeholder="Type country"
+              value={createShopForm.country}
+              onChange={(event) =>
+                setCreateShopForm((current) => ({
+                  ...current,
+                  city: "",
+                  country: event.target.value
+                }))
+              }
+            />
+          ) : (
+            <Select
+              disabled={countriesLoading}
+              value={createShopForm.country}
+              onChange={(event) =>
+                setCreateShopForm((current) => ({
+                  ...current,
+                  city: "",
+                  country: event.target.value
+                }))
+              }
+            >
+              {countriesLoading ? <option value="Saudi Arabia">Loading countries...</option> : null}
+              {!countriesLoading && createShopForm.country && !locationCountries.includes(createShopForm.country) ? (
+                <option value={createShopForm.country}>{createShopForm.country}</option>
+              ) : null}
+              {!countriesLoading
+                ? locationCountries.map((country) => (
+                    <option key={country} value={country}>
+                      {country}
+                    </option>
+                  ))
+                : null}
+            </Select>
+          )}
+          {countryLoadError ? (
+            <span className="block text-xs leading-5 text-amber-700">
+              Online country list is temporarily unavailable. Enter the country manually.
+            </span>
+          ) : null}
         </label>
         <label className="space-y-2">
           <span className="text-sm font-semibold text-slate-950">City</span>
-          <Input value={createShopForm.city} onChange={(event) => setCreateShopForm((current) => ({ ...current, city: event.target.value }))} />
+          <Input
+            disabled={!createShopForm.country.trim()}
+            list="owner-shop-city-options"
+            placeholder={citiesLoading ? "Loading cities..." : "Search or type a city"}
+            value={createShopForm.city}
+            onChange={(event) =>
+              setCreateShopForm((current) => ({ ...current, city: event.target.value }))
+            }
+          />
+          <datalist id="owner-shop-city-options">
+            {locationCities.map((city) => (
+              <option key={city} value={city} />
+            ))}
+          </datalist>
+          <span
+            className={cn(
+              "block text-xs leading-5",
+              cityLoadError ? "text-amber-700" : "text-slate-500"
+            )}
+          >
+            {citiesLoading
+              ? `Loading cities in ${createShopForm.country}...`
+              : cityLoadError
+                ? "Online city suggestions are temporarily unavailable. Enter the city manually."
+                : locationCities.length
+                  ? `${locationCities.length} cities available. Start typing to search.`
+                  : "Type the city or locality name."}
+          </span>
         </label>
         <label className="space-y-2">
           <span className="text-sm font-semibold text-slate-950">Billing cycle</span>
