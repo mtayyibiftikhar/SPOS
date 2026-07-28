@@ -1,9 +1,9 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { optimizePosImage } from "@/lib/server/optimize-pos-image";
+import { getPosAssetDeliveryUrl, getPosAssetPath, POS_ASSETS_BUCKET } from "@/lib/pos-asset-url";
 
-export const POS_ASSETS_BUCKET = "pos-assets";
-export const SIGNED_IMAGE_URL_TTL_SECONDS = 60 * 60 * 24 * 365 * 5;
+export { POS_ASSETS_BUCKET } from "@/lib/pos-asset-url";
 export const MAX_POS_ASSET_BYTES = 900 * 1024;
 
 type UploadPosAssetInput = {
@@ -82,45 +82,15 @@ export async function uploadPrivatePosAsset(supabase: SupabaseClient, input: Upl
     throw error;
   }
 
-  const { data, error: signedUrlError } = await supabase.storage
-    .from(POS_ASSETS_BUCKET)
-    .createSignedUrl(path, SIGNED_IMAGE_URL_TTL_SECONDS);
-
-  if (signedUrlError || !data?.signedUrl) {
-    throw signedUrlError ?? new Error("Unable to create a signed image URL.");
-  }
-
   return {
     bucket: POS_ASSETS_BUCKET,
     path,
-    url: data.signedUrl
+    url: getPosAssetDeliveryUrl(path)
   };
 }
 
 export function getPrivatePosAssetPathFromUrl(urlOrPath: string) {
-  const value = urlOrPath.trim();
-
-  if (!value) {
-    return null;
-  }
-
-  if (!/^https?:\/\//i.test(value)) {
-    return value;
-  }
-
-  try {
-    const url = new URL(value);
-    const marker = `/storage/v1/object/sign/${POS_ASSETS_BUCKET}/`;
-    const markerIndex = url.pathname.indexOf(marker);
-
-    if (markerIndex === -1) {
-      return null;
-    }
-
-    return decodeURIComponent(url.pathname.slice(markerIndex + marker.length));
-  } catch {
-    return null;
-  }
+  return getPosAssetPath(urlOrPath);
 }
 
 export async function deletePrivatePosAsset(supabase: SupabaseClient, urlOrPath: string) {

@@ -35,6 +35,7 @@ import type {
 import { localeMeta, resolveTranslation, type TranslationKey, type TranslationValues } from "@/lib/i18n";
 import { DEFAULT_OWNER_BOOTSTRAP, normalizeDemoUsers, type OwnerBootstrapAccount } from "@/lib/demo-auth";
 import { initialAppState } from "@/lib/mock-data";
+import { getPosAssetDeliveryUrl, normalizeBrandAssetUrls } from "@/lib/pos-asset-url";
 import { applySettlementToBills, getCustomerAccountMetrics } from "@/lib/customer-accounts";
 import {
   calculateBusinessDaySummary,
@@ -898,6 +899,7 @@ function mergeSettingsByShop(storedSettings: DemoAppState["settingsByShop"] | un
       pos: {
         ...(defaultBundle?.pos ?? {}),
         ...(storedBundle?.pos ?? {}),
+        logoUrl: getPosAssetDeliveryUrl(storedBundle?.pos?.logoUrl ?? defaultBundle?.pos?.logoUrl ?? "") || undefined,
         autoDayRolloverEnabled:
           storedBundle?.pos?.autoDayRolloverEnabled ?? defaultBundle?.pos?.autoDayRolloverEnabled ?? false,
         attendanceEnabled:
@@ -971,12 +973,22 @@ function mergeSettingsPatchByShop(
       const currentBundle = merged[shopId];
 
       if (!currentBundle) {
-        merged[shopId] = patchBundle;
+        merged[shopId] = {
+          ...patchBundle,
+          pos: {
+            ...patchBundle.pos,
+            logoUrl: getPosAssetDeliveryUrl(patchBundle.pos.logoUrl ?? "") || undefined
+          }
+        };
         return merged;
       }
 
       merged[shopId] = {
-        pos: { ...currentBundle.pos, ...patchBundle.pos },
+        pos: {
+          ...currentBundle.pos,
+          ...patchBundle.pos,
+          logoUrl: getPosAssetDeliveryUrl(patchBundle.pos.logoUrl ?? currentBundle.pos.logoUrl ?? "") || undefined
+        },
         printer: { ...currentBundle.printer, ...patchBundle.printer },
         receipt: { ...currentBundle.receipt, ...patchBundle.receipt },
         tax: { ...currentBundle.tax, ...patchBundle.tax }
@@ -1011,7 +1023,7 @@ function normalizeStoredProducts(products: DemoAppState["products"]) {
       barcode,
       barcodes: assignedBarcodes,
       expiryDate: product.expiryDate?.trim() || undefined,
-      imageUrl: product.imageUrl?.trim() || undefined,
+      imageUrl: product.imageUrl ? getPosAssetDeliveryUrl(product.imageUrl) || undefined : undefined,
       reorderLevel: product.reorderLevel ?? 0,
       stockQuantity: product.stockQuantity ?? 0,
       taxable: product.taxable ?? true
@@ -1040,7 +1052,7 @@ function normalizeStoredState(stored: DemoAppState, ownerBootstrap: OwnerBootstr
   const normalized = {
     ...initialAppState,
     ...stored,
-    brand: {
+    brand: normalizeBrandAssetUrls({
       ...initialAppState.brand,
       ...(stored.brand ?? {}),
       receiptImprintEnabled: stored.brand?.receiptImprintEnabled ?? initialAppState.brand.receiptImprintEnabled,
@@ -1053,7 +1065,7 @@ function normalizeStoredState(stored: DemoAppState, ownerBootstrap: OwnerBootstr
       loginAdImageUrl: stored.brand?.loginAdImageUrl ?? initialAppState.brand.loginAdImageUrl,
       loginAdCtaLabel: stored.brand?.loginAdCtaLabel ?? initialAppState.brand.loginAdCtaLabel,
       loginAdCtaUrl: stored.brand?.loginAdCtaUrl ?? initialAppState.brand.loginAdCtaUrl
-    },
+    }),
     users: normalizeDemoUsers(stored.users ?? initialAppState.users, ownerSeed, ownerBootstrap),
     shops: (stored.shops ?? initialAppState.shops).map((shop) => {
       const license = (stored.licenses ?? initialAppState.licenses).find((entry) => entry.shopId === shop.id);
@@ -1071,6 +1083,10 @@ function normalizeStoredState(stored: DemoAppState, ownerBootstrap: OwnerBootstr
       autoLockDaysAfterExpiry: license.autoLockDaysAfterExpiry ?? 7
     })),
     productKeys,
+    categories: (stored.categories ?? initialAppState.categories).map((category) => ({
+      ...category,
+      imageUrl: category.imageUrl ? getPosAssetDeliveryUrl(category.imageUrl) || undefined : undefined
+    })),
     products: normalizeStoredProducts(stored.products ?? initialAppState.products),
     inventoryAdjustments: stored.inventoryAdjustments ?? [],
     inventoryBatches: stored.inventoryBatches ?? initialAppState.inventoryBatches ?? [],
@@ -1209,10 +1225,10 @@ function mergeOwnerPortalState(current: DemoAppState, ownerSnapshot?: Partial<De
 
   return {
     ...current,
-    brand: {
+    brand: normalizeBrandAssetUrls({
       ...current.brand,
       ...(ownerSnapshot.brand ?? {})
-    },
+    }),
     shops: mergeRowsById(current.shops, ownerSnapshot.shops ?? []),
     licenses: mergeRowsById(current.licenses, ownerSnapshot.licenses ?? []),
     productKeys: mergeRowsById(current.productKeys, ownerSnapshot.productKeys ?? []),
@@ -1415,16 +1431,22 @@ async function resetOwnerShopUserPasswordInCloud(
 function mergeCloudActivationStatePatch(current: DemoAppState, patch: CloudActivationStatePatch) {
   return {
     ...current,
-    brand: {
+    brand: normalizeBrandAssetUrls({
       ...current.brand,
       ...(patch.brand ?? {})
-    },
+    }),
     shops: mergeRowsById(current.shops, patch.shops ?? []),
     licenses: mergeRowsById(current.licenses, patch.licenses ?? []),
     productKeys: mergeRowsById(current.productKeys, patch.productKeys ?? []),
     deviceActivations: mergeRowsById(current.deviceActivations, patch.deviceActivations ?? []),
     users: mergeRowsById(current.users, patch.users ?? []),
-    categories: mergeRowsById(current.categories, patch.categories ?? []),
+    categories: mergeRowsById(
+      current.categories,
+      (patch.categories ?? []).map((category) => ({
+        ...category,
+        imageUrl: category.imageUrl ? getPosAssetDeliveryUrl(category.imageUrl) || undefined : undefined
+      }))
+    ),
     settingsByShop: mergeSettingsPatchByShop(current.settingsByShop, patch.settingsByShop)
   } satisfies DemoAppState;
 }
@@ -1582,10 +1604,10 @@ function mergeShopCloudStatePatch(current: DemoAppState, patch: ShopCloudStatePa
 
   return {
     ...current,
-    brand: {
+    brand: normalizeBrandAssetUrls({
       ...current.brand,
       ...(patch.brand ?? {})
-    },
+    }),
     shops: patch.shops ? [...current.shops.filter((shop) => shop.id !== shopId), ...patch.shops] : current.shops,
     licenses: replaceRowsForShop(current.licenses, patch.licenses, shopId),
     productKeys: replaceRowsForShop(current.productKeys, patch.productKeys, shopId),
@@ -1593,8 +1615,22 @@ function mergeShopCloudStatePatch(current: DemoAppState, patch: ShopCloudStatePa
     users: replaceRowsForShop(current.users.filter((user) => user.shopId), patch.users, shopId).concat(
       current.users.filter((user) => !user.shopId)
     ),
-    categories: replaceRowsForShop(current.categories, patch.categories, shopId),
-    products: replaceRowsForShop(current.products, patch.products, shopId),
+    categories: replaceRowsForShop(
+      current.categories,
+      patch.categories?.map((category) => ({
+        ...category,
+        imageUrl: category.imageUrl ? getPosAssetDeliveryUrl(category.imageUrl) || undefined : undefined
+      })),
+      shopId
+    ),
+    products: replaceRowsForShop(
+      current.products,
+      patch.products?.map((product) => ({
+        ...product,
+        imageUrl: product.imageUrl ? getPosAssetDeliveryUrl(product.imageUrl) || undefined : undefined
+      })),
+      shopId
+    ),
     inventoryAdjustments: replaceRowsForShop(current.inventoryAdjustments, patch.inventoryAdjustments, shopId),
     inventoryBatches: replaceRowsForShop(current.inventoryBatches, patch.inventoryBatches, shopId),
     suppliers: replaceRowsForShop(current.suppliers, patch.suppliers, shopId),
@@ -2039,10 +2075,10 @@ export function AppProvider({
 
         setState((current) => ({
           ...current,
-          brand: {
+          brand: normalizeBrandAssetUrls({
             ...current.brand,
             ...payload.brand
-          }
+          })
         }));
       } catch {
         // Public branding must never block login when the network is temporarily unavailable.
@@ -3766,7 +3802,7 @@ export function AppProvider({
           message: "Unable to create shop."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           if (
             current.shops.some(
               (shop) => shop.setupEmail?.trim().toLowerCase() === normalizedSetupEmail || shop.email?.trim().toLowerCase() === normalizedSetupEmail
@@ -3918,7 +3954,7 @@ export function AppProvider({
           persistLocalOwnerStateSnapshot(nextState);
 
           return nextState;
-        });
+        }));
 
         return result;
       },
@@ -5743,7 +5779,7 @@ export function AppProvider({
           message: "Unable to save product."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const accessBlock = getShopAccessBlock(current, currentShopId);
 
           if (accessBlock) {
@@ -5817,7 +5853,7 @@ export function AppProvider({
               ...current.products
             ]
           };
-        });
+        }));
 
         return result;
       },
