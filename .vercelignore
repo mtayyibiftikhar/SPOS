@@ -1,0 +1,32 @@
+# Local dependencies and build output
+node_modules/
+.next/
+.next-*/
+out/
+dist/
+dist-native/
+
+# Native build trees are not part of the web deployment
+apps/mobile/android/
+_dev/
+
+# Local runtime data, logs, and generated diagnostics
+.local/
+_local_owner_state/
+_backups/
+*.log
+*.err
+*.err.log
+*.tsbuildinfo
+.billing-response.html
+.layout-dev-chunk.js
+output/
+tmp/
+
+# Local tooling metadata and secrets
+.agents/
+.codex/
+.vercel/
+.env
+.env.*
+!.env.example
