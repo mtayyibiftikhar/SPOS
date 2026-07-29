@@ -572,14 +572,41 @@ export function ProductWorkspace() {
         userId: session?.id
       });
 
+      if (selectedProduct) {
+        const saveResult = saveProduct({
+          id: selectedProduct.id,
+          kind: selectedProduct.kind,
+          categoryId: selectedProduct.categoryId,
+          barcode: selectedProduct.barcode,
+          barcodes: getAssignedBarcodes(selectedProduct),
+          name: selectedProduct.name,
+          imageUrl: upload.url,
+          salePrice: selectedProduct.salePrice,
+          costPrice: selectedProduct.costPrice,
+          stockQuantity: selectedProduct.stockQuantity,
+          reorderLevel: selectedProduct.reorderLevel,
+          expiryDate: selectedProduct.expiryDate,
+          taxable: selectedProduct.taxable,
+          quickTab: selectedProduct.quickTab,
+          status: selectedProduct.status
+        });
+
+        if (!saveResult.ok) {
+          await deleteShopImageAsset(upload.url).catch(() => undefined);
+          throw new Error(saveResult.message ?? "Unable to attach the image to this product.");
+        }
+      }
+
       setProductForm((current) => ({ ...current, imageUrl: upload.url }));
-      if (previousImageUrl && previousImageUrl !== persistedImageUrl && previousImageUrl !== upload.url) {
+      if (previousImageUrl && previousImageUrl !== upload.url && (selectedProduct || previousImageUrl !== persistedImageUrl)) {
         void deleteShopImageAsset(previousImageUrl).catch(() => undefined);
       }
       setCatalogFeedback({
         tone: "success",
         message: upload.storedInCloud
-          ? "Image uploaded securely. Save the product to keep it."
+          ? selectedProduct
+            ? "Image uploaded and saved to the product."
+            : "Image uploaded securely. Save the product to keep it."
           : `${t("products.imageUploadSuccess")} Cloud upload fallback was used.`
       });
     } catch (error) {
@@ -651,14 +678,33 @@ export function ProductWorkspace() {
         userId: session?.id
       });
 
+      const selectedCategory = categoryForm.id
+        ? shopCategories.find((category) => category.id === categoryForm.id)
+        : undefined;
+
+      if (selectedCategory) {
+        const saveResult = updateCategory(selectedCategory.id, {
+          description: selectedCategory.description,
+          imageUrl: upload.url,
+          name: selectedCategory.name
+        });
+
+        if (!saveResult.ok) {
+          await deleteShopImageAsset(upload.url).catch(() => undefined);
+          throw new Error(saveResult.message ?? "Unable to attach the image to this category.");
+        }
+      }
+
       setCategoryForm((current) => ({ ...current, imageUrl: upload.url }));
-      if (previousImageUrl && previousImageUrl !== persistedImageUrl && previousImageUrl !== upload.url) {
+      if (previousImageUrl && previousImageUrl !== upload.url && (selectedCategory || previousImageUrl !== persistedImageUrl)) {
         void deleteShopImageAsset(previousImageUrl).catch(() => undefined);
       }
       setCategoryFeedback({
         tone: "success",
         message: upload.storedInCloud
-          ? "Image uploaded securely. Save the category to keep it."
+          ? selectedCategory
+            ? "Image uploaded and saved to the category."
+            : "Image uploaded securely. Save the category to keep it."
           : `${t("products.imageUploadSuccess")} Cloud upload fallback was used.`
       });
     } catch (error) {

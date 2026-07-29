@@ -25,6 +25,39 @@ function clean(value: string | null | undefined) {
   return value?.trim() ?? "";
 }
 
+async function syncShopSettingsRecord(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  shopId: string,
+  state: Partial<DemoAppState>
+) {
+  const settings = state.settingsByShop?.[shopId];
+
+  if (!settings) return;
+
+  const shop = state.shops?.find((entry) => entry.id === shopId);
+  const pos = settings.pos;
+  const { error } = await supabase.from("pos_settings").upsert(
+    {
+      address: pos.address ?? shop?.address ?? "",
+      currency: pos.currency || shop?.currency || "SAR",
+      email: pos.email?.trim() || shop?.email?.trim() || null,
+      logo_url: pos.logoUrl?.trim() || null,
+      phone: pos.phone ?? shop?.phone ?? "",
+      printer_settings: settings.printer ?? {},
+      receipt_settings: settings.receipt ?? {},
+      shop_id: shopId,
+      shop_name: pos.shopName || shop?.name || "Shop",
+      tax_settings: settings.tax ?? {},
+      updated_at: new Date().toISOString(),
+      vat_number: pos.vatNumber?.trim() || null,
+      website: pos.website?.trim() || shop?.website?.trim() || null
+    },
+    { onConflict: "shop_id" }
+  );
+
+  if (error) throw error;
+}
+
 function isMissingSnapshotTableError(error: { code?: string; message?: string }) {
   return error.code === "42P01" || error.code === "PGRST205" || /shop_cloud_snapshots/i.test(error.message ?? "");
 }
@@ -358,7 +391,9 @@ async function loadOwnerControlledShopState(
             [shop.id]: {
               pos: {
                 shopName: settings?.shop_name ?? shop.name,
-                logoUrl: settings?.logo_url ?? undefined,
+                logoUrl: settings
+                  ? settings.logo_url ?? undefined
+                  : currentState.settingsByShop?.[shop.id]?.pos.logoUrl,
                 address: settings?.address ?? shop.address ?? "",
                 phone: settings?.phone ?? shop.phone ?? "",
                 email: settings?.email ?? shop.email ?? undefined,
@@ -431,7 +466,10 @@ function mergeOwnerControlledShopState(
           ...currentSettings,
           pos: {
             ...ownerSettings.pos,
-            ...currentSettings.pos
+            ...currentSettings.pos,
+            // The upload endpoint writes this field immediately. Keep the
+            // relational value authoritative while the snapshot catches up.
+            logoUrl: ownerSettings.pos.logoUrl
           },
           printer: {
             ...ownerSettings.printer,
@@ -879,6 +917,7 @@ export async function POST(request: Request) {
     if (error) {
       if (isMissingSnapshotTableError(error) || isMissingTransactionalSnapshotError(error)) {
         await saveSnapshotToStorage(authorization.supabase, shopId, body.state);
+        await syncShopSettingsRecord(authorization.supabase, shopId, body.state);
 
         return NextResponse.json({ ok: true, revision: expectedRevision + 1, storageFallback: true });
       }
@@ -906,6 +945,8 @@ export async function POST(request: Request) {
         { status: 409 }
       );
     }
+
+    await syncShopSettingsRecord(authorization.supabase, shopId, commit.state ?? body.state);
 
     return NextResponse.json({
       duplicate: Boolean(commit.duplicate),
