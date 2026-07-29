@@ -58,6 +58,39 @@ async function syncShopSettingsRecord(
   if (error) throw error;
 }
 
+async function withAuthoritativeShopLogo(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  shopId: string,
+  state: Partial<DemoAppState>
+) {
+  const settings = state.settingsByShop?.[shopId];
+
+  if (!settings) return state;
+
+  const { data, error } = await supabase
+    .from("pos_settings")
+    .select("logo_url")
+    .eq("shop_id", shopId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return state;
+
+  return {
+    ...state,
+    settingsByShop: {
+      ...state.settingsByShop,
+      [shopId]: {
+        ...settings,
+        pos: {
+          ...settings.pos,
+          logoUrl: data.logo_url ?? undefined
+        }
+      }
+    }
+  } satisfies Partial<DemoAppState>;
+}
+
 function isMissingSnapshotTableError(error: { code?: string; message?: string }) {
   return error.code === "42P01" || error.code === "PGRST205" || /shop_cloud_snapshots/i.test(error.message ?? "");
 }
@@ -903,6 +936,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: "Shop state is required." }, { status: 400 });
     }
 
+    const stateToCommit = await withAuthoritativeShopLogo(authorization.supabase, shopId, body.state);
     const expectedRevision = Math.max(0, Math.trunc(Number(body.expectedRevision ?? 0)));
     const operationId = clean(body.operationId) || crypto.randomUUID();
     const { data, error } = await authorization.supabase.rpc("commit_shop_cloud_snapshot", {
@@ -910,14 +944,14 @@ export async function POST(request: Request) {
       p_operation_id: operationId,
       p_result: {},
       p_shop_id: shopId,
-      p_state: body.state,
+      p_state: stateToCommit,
       p_updated_by: authorization.userId
     });
 
     if (error) {
       if (isMissingSnapshotTableError(error) || isMissingTransactionalSnapshotError(error)) {
-        await saveSnapshotToStorage(authorization.supabase, shopId, body.state);
-        await syncShopSettingsRecord(authorization.supabase, shopId, body.state);
+        await saveSnapshotToStorage(authorization.supabase, shopId, stateToCommit);
+        await syncShopSettingsRecord(authorization.supabase, shopId, stateToCommit);
 
         return NextResponse.json({ ok: true, revision: expectedRevision + 1, storageFallback: true });
       }
@@ -946,13 +980,13 @@ export async function POST(request: Request) {
       );
     }
 
-    await syncShopSettingsRecord(authorization.supabase, shopId, commit.state ?? body.state);
+    await syncShopSettingsRecord(authorization.supabase, shopId, commit.state ?? stateToCommit);
 
     return NextResponse.json({
       duplicate: Boolean(commit.duplicate),
       ok: commit.ok !== false,
       revision: Number(commit.revision ?? expectedRevision + 1),
-      state: commit.state ?? body.state
+      state: commit.state ?? stateToCommit
     });
   } catch (error) {
     return NextResponse.json(
