@@ -6,6 +6,7 @@ import {
 } from "@/lib/attendance";
 import { closeExpiredAttendanceRecords } from "@/lib/server/attendance-rollover";
 import { applyCriticalShopMutation, type CriticalShopMutation } from "@/lib/server/shop-snapshot-mutations";
+import { syncNormalizedShopProjection } from "@/lib/server/normalized-shop-projection";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { loadBrandProfileSnapshot } from "@/lib/supabase/brand-assets";
 import { readShopDeviceSession, readShopUserSession } from "@/lib/supabase/shop-session";
@@ -23,6 +24,20 @@ type ShopStateRequest = {
 
 function clean(value: string | null | undefined) {
   return value?.trim() ?? "";
+}
+
+async function projectCommittedShopState(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  shopId: string,
+  state: Partial<DemoAppState>
+) {
+  try {
+    await syncNormalizedShopProjection(supabase, shopId, state);
+    return undefined;
+  } catch (error) {
+    console.error("Normalized shop projection failed", error);
+    return error instanceof Error ? error.message : "Normalized shop projection failed.";
+  }
 }
 
 async function syncShopSettingsRecord(
@@ -809,12 +824,16 @@ async function commitCriticalMutation(
       );
     }
 
+    const committedState = commit.state ?? mutationResult.state;
+    const projectionWarning = await projectCommittedShopState(authorization.supabase, shopId, committedState);
+
     return NextResponse.json({
       duplicate: Boolean(commit.duplicate),
       ok: commit.ok !== false,
       result: commit.result ?? mutationResult.result,
       revision: Math.max(revision + 1, Number(commit.revision ?? revision + 1)),
-      state: commit.state ?? mutationResult.state
+      state: committedState,
+      projectionWarning
     });
   }
 
@@ -952,8 +971,9 @@ export async function POST(request: Request) {
       if (isMissingSnapshotTableError(error) || isMissingTransactionalSnapshotError(error)) {
         await saveSnapshotToStorage(authorization.supabase, shopId, stateToCommit);
         await syncShopSettingsRecord(authorization.supabase, shopId, stateToCommit);
+        const projectionWarning = await projectCommittedShopState(authorization.supabase, shopId, stateToCommit);
 
-        return NextResponse.json({ ok: true, revision: expectedRevision + 1, storageFallback: true });
+        return NextResponse.json({ ok: true, projectionWarning, revision: expectedRevision + 1, storageFallback: true });
       }
 
       throw error;
@@ -980,13 +1000,16 @@ export async function POST(request: Request) {
       );
     }
 
-    await syncShopSettingsRecord(authorization.supabase, shopId, commit.state ?? stateToCommit);
+    const committedState = commit.state ?? stateToCommit;
+    await syncShopSettingsRecord(authorization.supabase, shopId, committedState);
+    const projectionWarning = await projectCommittedShopState(authorization.supabase, shopId, committedState);
 
     return NextResponse.json({
       duplicate: Boolean(commit.duplicate),
       ok: commit.ok !== false,
+      projectionWarning,
       revision: Number(commit.revision ?? expectedRevision + 1),
-      state: commit.state ?? stateToCommit
+      state: committedState
     });
   } catch (error) {
     return NextResponse.json(

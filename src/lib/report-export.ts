@@ -67,6 +67,56 @@ function estimateTextWidth(text: string, size: number) {
   return sanitizePdfText(text).length * size * 0.52;
 }
 
+function fitPdfTextToWidth(value: string, maxWidth: number, size: number) {
+  const text = sanitizePdfText(value);
+
+  if (estimateTextWidth(text, size) <= maxWidth) {
+    return text;
+  }
+
+  const suffix = "...";
+  let fitted = text;
+
+  while (fitted.length > 0 && estimateTextWidth(`${fitted}${suffix}`, size) > maxWidth) {
+    fitted = fitted.slice(0, -1);
+  }
+
+  return `${fitted.trimEnd()}${suffix}`;
+}
+
+function wrapPdfTextToWidth(value: string, maxWidth: number, size: number, maxLines = 2) {
+  const words = sanitizePdfText(value).split(" ").filter(Boolean);
+  const lines: string[] = [];
+  let current = "";
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+
+    if (estimateTextWidth(candidate, size) <= maxWidth) {
+      current = candidate;
+      continue;
+    }
+
+    if (current) {
+      lines.push(current);
+    }
+
+    current = word;
+
+    if (lines.length === maxLines - 1) {
+      break;
+    }
+  }
+
+  if (current && lines.length < maxLines) {
+    const consumed = lines.join(" ").length;
+    const remainingText = sanitizePdfText(value).slice(consumed).trim();
+    lines.push(fitPdfTextToWidth(remainingText, maxWidth, size));
+  }
+
+  return lines;
+}
+
 function base64ToUint8Array(base64: string) {
   const binary = window.atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -245,12 +295,13 @@ function drawSection(
     const isLast = index === rows.length - 1;
     const rowStep = row.detail ? 32 : 24;
 
-    renderPdfText(commands, sanitizePdfText(row.label), x + 18, rowY, 10.5, "F1");
     const valueWidth = estimateTextWidth(row.value, 10.8);
+    const textWidth = Math.max(80, width - 54 - valueWidth);
+    renderPdfText(commands, fitPdfTextToWidth(row.label, textWidth, 10.5), x + 18, rowY, 10.5, "F1");
     renderPdfText(commands, sanitizePdfText(row.value), x + width - 18 - valueWidth, rowY, 10.8, "F2");
 
     if (row.detail) {
-      renderPdfText(commands, sanitizePdfText(row.detail), x + 18, rowY - 13, 8.7, "F1");
+      renderPdfText(commands, fitPdfTextToWidth(row.detail, width - 36, 8.7), x + 18, rowY - 13, 8.7, "F1");
     }
 
     if (!isLast) {
@@ -556,7 +607,7 @@ export async function createStructuredReportPdfBlob({
     drawFilledRect(commands, 0, 0, pageWidth, pageHeight, [0.963, 0.973, 0.968]);
     drawFilledRect(commands, 0, pageHeight - 18, pageWidth, 18, [0.063, 0.725, 0.506]);
 
-    const headerHeight = isFirstPage ? 118 : 88;
+    const headerHeight = isFirstPage ? 132 : 92;
     const headerY = pageHeight - 34 - headerHeight;
     drawFilledRect(commands, margin, headerY, contentWidth, headerHeight, [1, 1, 1]);
     drawStrokedRect(commands, margin, headerY, contentWidth, headerHeight, [0.82, 0.87, 0.90], 0.9);
@@ -564,6 +615,9 @@ export async function createStructuredReportPdfBlob({
 
     const textStartX = logoAsset ? margin + 20 + logoAsset.displayWidth + 18 : margin + 22;
     const headerTextY = headerY + headerHeight - 38;
+    const metaWidth = 150;
+    const metaX = margin + contentWidth - metaWidth - 18;
+    const titleMaxWidth = Math.max(90, metaX - textStartX - 18);
 
     if (logoAsset) {
       const logoX = margin + 20;
@@ -573,14 +627,15 @@ export async function createStructuredReportPdfBlob({
       );
     }
 
-    renderPdfText(commands, sanitizePdfText(shopName) || "Simple POS", textStartX, headerTextY, isFirstPage ? 19 : 15, "F2");
-    renderPdfText(commands, sanitizePdfText(title), textStartX, headerTextY - (isFirstPage ? 22 : 18), isFirstPage ? 13.5 : 11.5, "F2");
+    renderPdfText(commands, fitPdfTextToWidth(shopName || "Simple POS", titleMaxWidth, isFirstPage ? 19 : 15), textStartX, headerTextY, isFirstPage ? 19 : 15, "F2");
+    renderPdfText(commands, fitPdfTextToWidth(title, titleMaxWidth, isFirstPage ? 13.5 : 11.5), textStartX, headerTextY - (isFirstPage ? 22 : 18), isFirstPage ? 13.5 : 11.5, "F2");
 
     if (isFirstPage) {
-      renderPdfText(commands, sanitizePdfText(subtitle), textStartX, headerTextY - 40, 9.5, "F1");
+      wrapPdfTextToWidth(subtitle, metaX - margin - 44, 9.2, 2).forEach((line, index) => {
+        renderPdfText(commands, line, margin + 22, headerY + 24 - index * 12, 9.2, "F1");
+      });
     }
 
-    const metaX = margin + contentWidth - 188;
     renderPdfText(
       commands,
       "REPORT PERIOD",

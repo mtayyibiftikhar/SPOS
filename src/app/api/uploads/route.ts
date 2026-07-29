@@ -182,6 +182,46 @@ export async function POST(request: Request) {
   }
 }
 
+export async function PATCH(request: Request) {
+  try {
+    const body = (await request.json()) as { logoUrl?: string; shopId?: string };
+    const requestedShopId = clean(body.shopId ?? request.headers.get("x-shop-id"));
+    const logoUrl = clean(body.logoUrl);
+
+    if (!requestedShopId) {
+      return NextResponse.json({ ok: false, message: "Shop id is required." }, { status: 400 });
+    }
+
+    if (logoUrl && !/^https?:\/\//i.test(logoUrl) && !logoUrl.startsWith("/api/pos-assets/")) {
+      return NextResponse.json({ ok: false, message: "Logo URL must use HTTPS or the POS asset path." }, { status: 400 });
+    }
+
+    const authorization = await authorizeShopUpload(request, requestedShopId);
+
+    if (!authorization.ok) {
+      return NextResponse.json({ ok: false, message: "Shop logo update is not authorized." }, { status: 401 });
+    }
+
+    const { error } = await authorization.supabase
+      .from("pos_settings")
+      .update({ logo_url: logoUrl || null })
+      .eq("shop_id", authorization.shopId);
+
+    if (error) throw error;
+
+    return NextResponse.json({ ok: true, logoUrl: logoUrl || null });
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return NextResponse.json({ ok: false, message: "A valid logo update payload is required." }, { status: 400 });
+    }
+
+    return NextResponse.json(
+      { ok: false, message: error instanceof Error ? error.message : "Unable to save the logo URL." },
+      { status: 500 }
+    );
+  }
+}
+
 export async function DELETE(request: Request) {
   try {
     const body = (await request.json()) as { path?: string; url?: string };

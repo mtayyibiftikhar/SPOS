@@ -16,10 +16,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -31,25 +31,17 @@ jobs:
         run: npm run native:icons
 
       - name: Build Windows installer
-        run: npm run desktop:build
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run desktop:build -- --publish never
 
       - name: Upload Windows installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: spos-shop-windows-installer
           path: |
             dist-native/windows/*.exe
             dist-native/windows/*.blockmap
-
-      - name: Publish tagged Windows installer
-        if: startsWith(github.ref, 'refs/tags/native-v')
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $installer = Get-ChildItem -LiteralPath "dist-native/windows" -Filter "*.exe" | Select-Object -First 1
-          if (-not $installer) { throw "Windows installer was not produced." }
-          gh release create $env:GITHUB_REF_NAME $installer.FullName --generate-notes --title "SPOS Shop $env:GITHUB_REF_NAME"
 
   android-apk:
     name: Android APK
@@ -57,16 +49,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 21
@@ -86,10 +78,45 @@ jobs:
 
       - name: Build debug APK
         working-directory: apps/mobile/android
-        run: ./gradlew assembleDebug
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
 
       - name: Upload Android APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: spos-shop-android-debug-apk
           path: apps/mobile/android/app/build/outputs/apk/debug/*.apk
+
+  publish-release:
+    name: Publish native release
+    if: startsWith(github.ref, 'refs/tags/native-v')
+    needs: [windows-installer, android-apk]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Windows installer
+        uses: actions/download-artifact@v8
+        with:
+          name: spos-shop-windows-installer
+          path: release-assets/windows
+
+      - name: Download Android APK
+        uses: actions/download-artifact@v8
+        with:
+          name: spos-shop-android-debug-apk
+          path: release-assets/android
+
+      - name: Publish complete tagged release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -t assets < <(find release-assets -type f \( -name '*.exe' -o -name '*.blockmap' -o -name '*.apk' \) -print)
+          if [ "${#assets[@]}" -lt 2 ]; then
+            echo "Expected Windows and Android release assets." >&2
+            exit 1
+          fi
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" --generate-notes --title "SPOS Shop $GITHUB_REF_NAME"

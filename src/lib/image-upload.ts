@@ -320,3 +320,28 @@ export async function deleteImageAssetFromCloud(input: {
 
   return result;
 }
+
+export async function persistShopLogoUrl(input: {
+  logoUrl: string;
+  shopId: string;
+  userEmail?: string;
+  userId?: string;
+}) {
+  const response = await fetch("/api/uploads", {
+    body: JSON.stringify({ logoUrl: input.logoUrl, shopId: input.shopId }),
+    headers: {
+      "Content-Type": "application/json",
+      "x-shop-id": input.shopId,
+      ...(input.userEmail ? { "x-user-email": input.userEmail } : {}),
+      ...(input.userId ? { "x-user-id": input.userId } : {})
+    },
+    method: "PATCH"
+  });
+  const result = (await response.json()) as { logoUrl?: string | null; message?: string; ok: boolean };
+
+  if (!response.ok || !result.ok) {
+    throw new Error(result.message ?? "Unable to save the logo URL.");
+  }
+
+  return result;
+}

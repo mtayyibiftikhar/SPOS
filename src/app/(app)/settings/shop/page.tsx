@@ -7,7 +7,7 @@ import { SettingsFormShell } from "@/components/settings/settings-form-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ResilientImage } from "@/components/ui/resilient-image";
-import { deleteImageAssetFromCloud, resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
+import { deleteImageAssetFromCloud, persistShopLogoUrl, resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
 
 export default function ShopSettingsPage() {
   const { currentSettings, currentShopId, session, state, t, updateSettings } = usePosApp();
@@ -93,15 +93,21 @@ export default function ShopSettingsPage() {
   const removeShopLogo = async () => {
     const currentLogoUrl = logoUrl.trim();
 
-    setLogoUrl("");
-    updateSettings("pos", { logoUrl: "" });
-
-    if (!currentLogoUrl) {
+    if (!currentShopId) {
       return;
     }
 
     try {
-      const result = await deleteShopLogoAsset(currentLogoUrl);
+      await persistShopLogoUrl({
+        logoUrl: "",
+        shopId: currentShopId,
+        userEmail: session?.email,
+        userId: session?.id
+      });
+      setLogoUrl("");
+      updateSettings("pos", { logoUrl: "" });
+
+      const result = currentLogoUrl ? await deleteShopLogoAsset(currentLogoUrl) : { deleted: false };
 
       setLogoFeedback({
         tone: "success",
@@ -122,18 +128,37 @@ export default function ShopSettingsPage() {
     >
       <form
         className="grid gap-5 md:grid-cols-2"
-        onSubmit={(event) => {
+        onSubmit={async (event) => {
           event.preventDefault();
-          updateSettings("pos", {
-            shopName,
-            address,
-            phone,
-            email: email.trim() || undefined,
-            website: website.trim() || undefined,
-            currency,
-            logoUrl: logoUrl.trim(),
-            vatNumber: vatNumber.trim() || undefined
-          });
+          setLogoFeedback(null);
+
+          try {
+            if (currentShopId) {
+              await persistShopLogoUrl({
+                logoUrl: logoUrl.trim(),
+                shopId: currentShopId,
+                userEmail: session?.email,
+                userId: session?.id
+              });
+            }
+
+            updateSettings("pos", {
+              shopName,
+              address,
+              phone,
+              email: email.trim() || undefined,
+              website: website.trim() || undefined,
+              currency,
+              logoUrl: logoUrl.trim(),
+              vatNumber: vatNumber.trim() || undefined
+            });
+            setLogoFeedback({ tone: "success", message: "Shop settings saved." });
+          } catch (error) {
+            setLogoFeedback({
+              tone: "error",
+              message: error instanceof Error ? error.message : "Unable to save shop settings."
+            });
+          }
         }}
       >
         <div className="md:col-span-2">

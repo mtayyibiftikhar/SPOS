@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
@@ -247,6 +247,7 @@ function buildRefundPrintHtml({
 }
 
 export function RefundsWorkspace() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { createRefund, currentShop, currentShopId, locale, session, state, t } = usePosApp();
   const initialBillId = searchParams.get("billId");
@@ -604,11 +605,8 @@ export function RefundsWorkspace() {
 
     setRefundQuantities({});
     setRefundReason("");
-    setFeedback({
-      tone: "success",
-      message: t("refund.success")
-    });
     setIsRefunding(false);
+    router.push(`/refunds/${result.refundId}?fresh=1`);
   };
 
   const selectBillForRefund = (bill: Bill) => {
@@ -1117,6 +1115,9 @@ export function RefundsWorkspace() {
                       <p className="mt-3 text-sm text-slate-600">{refund.reason}</p>
                       <p className="mt-3 text-lg font-semibold text-slate-950">{formatCurrency(refund.amount, currency, locale)}</p>
                       <p className="mt-1 text-sm text-slate-500">{refundItems.length} {t("common.items")}</p>
+                      <Button asChild className="mt-4" size="sm" variant="secondary">
+                        <Link href={`/refunds/${refund.id}`}>Open refund receipt</Link>
+                      </Button>
                     </div>
                   ))
                 ) : (
@@ -1238,7 +1239,11 @@ export function RefundsWorkspace() {
                             type="checkbox"
                           />
                         </td>
-                        <td className="px-4 py-4 font-semibold text-slate-950">{bill?.number ?? refund.originalBillId}</td>
+                        <td className="px-4 py-4 font-semibold text-slate-950">
+                          <Link className="hover:text-emerald-700 hover:underline" href={`/refunds/${refund.id}`}>
+                            {bill?.number ?? refund.originalBillId}
+                          </Link>
+                        </td>
                         <td className="px-4 py-4 text-slate-600">{formatDateTime(refund.returnDate, locale)}</td>
                         <td className="px-4 py-4 text-slate-600">{bill?.customerName || t("billing.walkInCustomer")}</td>
                         <td className="px-4 py-4 text-slate-600">{refund.reason}</td>

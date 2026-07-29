@@ -7,6 +7,11 @@ import type {
   RefundItem
 } from "@/types/pos";
 
+export function formatRefundReceiptNumber(refundId: string) {
+  const compactId = refundId.replace(/[^a-z0-9]/gi, "").toUpperCase();
+  return `REF-${compactId.slice(-8).padStart(8, "0")}`;
+}
+
 function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
 }

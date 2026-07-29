@@ -14,7 +14,7 @@ import { findBarcodeConflict, findCategoryNameConflict, normalizeBarcode } from 
 import { applySettlementToBills } from "../../src/lib/customer-accounts";
 import { getLedgerControlTotals, buildSaleLedgerEntries } from "../../src/lib/accounting";
 import { combinePhoneNumber, sanitizePhoneDigits, splitPhoneNumber } from "../../src/lib/phone";
-import { calculateBillRefundState, calculateSalesReportSummary } from "../../src/lib/refunds";
+import { calculateBillRefundState, calculateSalesReportSummary, formatRefundReceiptNumber } from "../../src/lib/refunds";
 import { createPublicReceiptToken } from "../../src/lib/public-receipts";
 import { clearShopDataScope } from "../../src/lib/shop-data-reset";
 import type {
@@ -425,6 +425,11 @@ test("refund state tracks partial quantities and prevents a second full refund",
   const complete = calculateBillRefundState({ billId: "bill_1", billItems: items, refunds, refundItems });
   assert.equal(complete.refundableItems[0].remainingQuantity, 0);
   assert.equal(complete.isFullyRefunded, true);
+});
+
+test("refund receipt numbers stay stable and customer friendly", () => {
+  assert.equal(formatRefundReceiptNumber("refund_a1b2c3d4e5f6"), "REF-C3D4E5F6");
+  assert.equal(formatRefundReceiptNumber("x"), "REF-0000000X");
 });
 
 test("a return today adjusts today's report without rewriting yesterday's sale", () => {
