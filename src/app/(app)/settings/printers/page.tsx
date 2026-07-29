@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MonitorCog, Printer, ReceiptText, RefreshCw } from "lucide-react";
+import { ExternalLink, MonitorCog, Printer, ReceiptText, RefreshCw } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
 import { SettingsFormShell } from "@/components/settings/settings-form-shell";
 import { Button } from "@/components/ui/button";
@@ -10,8 +10,11 @@ import { Select } from "@/components/ui/select";
 import {
   getInstalledPrinters,
   hasNativePrinterSupport,
+  printElementWithNative,
   type NativePrinter
 } from "@/lib/native-bridge";
+
+const WINDOWS_APP_RELEASE_URL = "https://github.com/mtayyibiftikhar/SPOS/releases/latest";
 
 export default function PrinterSettingsPage() {
   const { currentSettings, t, updateSettings } = usePosApp();
@@ -29,6 +32,8 @@ export default function PrinterSettingsPage() {
   const [printers, setPrinters] = useState<NativePrinter[]>([]);
   const [printersLoading, setPrintersLoading] = useState(false);
   const [printerError, setPrinterError] = useState("");
+  const [testFeedback, setTestFeedback] = useState<{ ok: boolean; message: string } | null>(null);
+  const [testPrinting, setTestPrinting] = useState(false);
 
   async function loadPrinters() {
     setPrintersLoading(true);
@@ -56,6 +61,30 @@ export default function PrinterSettingsPage() {
       void loadPrinters();
     }
   }, []);
+
+  async function testSelectedPrinter() {
+    setTestPrinting(true);
+    setTestFeedback(null);
+
+    try {
+      const printed = await printElementWithNative("#printer-test-receipt", "SPOS printer test", {
+        deviceName: printerDeviceName || undefined,
+        receiptSize,
+        silent: true
+      });
+
+      setTestFeedback({
+        ok: printed,
+        message: printed
+          ? `Test receipt sent to ${printerDisplayName || "the Windows default printer"}.`
+          : "The selected printer did not accept the test receipt. Refresh the printer list and try again."
+      });
+    } catch {
+      setTestFeedback({ ok: false, message: "Unable to send the test receipt to this printer." });
+    } finally {
+      setTestPrinting(false);
+    }
+  }
 
   if (!currentSettings) {
     return null;
@@ -166,6 +195,32 @@ export default function PrinterSettingsPage() {
                   : "Browsers cannot securely list or silently control installed printers. Browser printing will continue through the system print dialog."}
               </p>
             )}
+            {nativePrinterSupport ? (
+              <Button
+                disabled={printersLoading || testPrinting}
+                onClick={() => void testSelectedPrinter()}
+                type="button"
+                variant="secondary"
+              >
+                <Printer className="mr-2 h-4 w-4" />
+                {testPrinting ? "Sending test..." : "Test selected printer"}
+              </Button>
+            ) : (
+              <a
+                className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800"
+                href={WINDOWS_APP_RELEASE_URL}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Download SPOS Windows app
+                <ExternalLink className="ml-2 h-4 w-4" />
+              </a>
+            )}
+            {testFeedback ? (
+              <p className={testFeedback.ok ? "text-sm font-medium text-emerald-700" : "text-sm font-medium text-rose-700"}>
+                {testFeedback.message}
+              </p>
+            ) : null}
           </div>
           <Button type="submit">{t("common.saveChanges")}</Button>
         </Card>
@@ -182,7 +237,7 @@ export default function PrinterSettingsPage() {
               </h2>
             </div>
           </div>
-          <div className="mt-5 rounded-[28px] border border-line bg-white p-5">
+          <div id="printer-test-receipt" className="mt-5 rounded-[28px] border border-line bg-white p-5">
             {receiptSize === "a4" ? (
               <div className="space-y-4">
                 <div className="flex items-start justify-between border-b border-line pb-4">

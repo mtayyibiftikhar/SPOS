@@ -1,6 +1,6 @@
 {
   "name": "simple-pos",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Cloud-ready browser POS with native shell packages for shops.",
   "author": "Global FSMS",
   "private": true,

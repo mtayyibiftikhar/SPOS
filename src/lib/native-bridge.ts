@@ -10,6 +10,7 @@ type NativePrintHtmlPayload = {
   deviceName?: string;
   fileName: string;
   html: string;
+  receiptSize?: "58mm" | "80mm" | "a4";
   silent?: boolean;
 };
 
@@ -140,9 +141,15 @@ function getDocumentHeadMarkup() {
     .join("\n");
 }
 
-export function buildPrintableHtmlFromElement(element: HTMLElement, title: string) {
+export function buildPrintableHtmlFromElement(
+  element: HTMLElement,
+  title: string,
+  receiptSize: "58mm" | "80mm" | "a4" = "80mm"
+) {
   const direction = document.documentElement.dir || "ltr";
   const language = document.documentElement.lang || "en";
+  const pageSize = receiptSize === "a4" ? "A4" : `${receiptSize} 300mm`;
+  const contentWidth = receiptSize === "a4" ? "210mm" : receiptSize;
 
   return `<!doctype html>
 <html lang="${language}" dir="${direction}">
@@ -154,7 +161,13 @@ export function buildPrintableHtmlFromElement(element: HTMLElement, title: strin
   <style>
     html, body { margin: 0; background: #ffffff; }
     body { padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    @page { margin: 0; }
+    @page { size: ${pageSize}; margin: 0; }
+    #receipt-print-area, #printer-test-receipt {
+      box-sizing: border-box;
+      margin: 0 auto !important;
+      max-width: ${contentWidth} !important;
+      width: ${contentWidth} !important;
+    }
   </style>
 </head>
 <body>
@@ -168,6 +181,7 @@ export async function printElementWithNative(
   title: string,
   options?: {
     deviceName?: string;
+    receiptSize?: "58mm" | "80mm" | "a4";
     silent?: boolean;
   }
 ) {
@@ -186,7 +200,8 @@ export async function printElementWithNative(
   const result = await bridge.printReceiptHtml({
     deviceName: options?.deviceName,
     fileName: `${title.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "") || "receipt"}.html`,
-    html: buildPrintableHtmlFromElement(element, title),
+    html: buildPrintableHtmlFromElement(element, title, options?.receiptSize),
+    receiptSize: options?.receiptSize,
     silent: options?.silent
   });
 

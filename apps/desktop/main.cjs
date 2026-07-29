@@ -62,7 +62,19 @@ function printHtmlDocument({ html, fileName, deviceName, silent }, parentWindow)
       resolve(result);
     };
 
-    printWindow.webContents.once("did-finish-load", () => {
+    printWindow.webContents.once("did-finish-load", async () => {
+      await printWindow.webContents
+        .executeJavaScript(`Promise.all([
+          document.fonts?.ready ?? Promise.resolve(),
+          ...Array.from(document.images).map((image) => image.complete
+            ? Promise.resolve()
+            : new Promise((resolve) => {
+                image.addEventListener("load", resolve, { once: true });
+                image.addEventListener("error", resolve, { once: true });
+              }))
+        ])`)
+        .catch(() => undefined);
+
       printWindow.webContents.print(
         {
           deviceName: deviceName || undefined,

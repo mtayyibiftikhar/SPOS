@@ -893,7 +893,7 @@ const englishTranslations = {
   "settings.receiptQrPreview": "Automatic digital receipt QR",
   "settings.receiptQrPreviewDesc": "Each new bill prints a unique QR that opens that exact receipt online.",
   "settings.receiptQrEmpty": "Digital receipt QR is generated automatically after billing.",
-  "settings.printerPageSubtitle": "Browser printing is enough for the MVP. This page keeps the printer configuration clean and ready for later hardware integration.",
+  "settings.printerPageSubtitle": "Select an installed Windows printer, test it, and send completed sales to it automatically.",
   "settings.receiptPageSubtitle": "Receipt visibility rules live here so the later PDF, print, email, and WhatsApp flows share the same source.",
   "settings.taxPageSubtitle": "Tax configuration is centralized here so billing, receipt printing, and later reports all follow the same rule set.",
   "settings.dayShiftPageSubtitle": "Control automatic business-day rollover separately from shop identity.",

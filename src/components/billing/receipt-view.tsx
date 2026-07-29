@@ -133,6 +133,7 @@ export function ReceiptView({ billId }: { billId: string }) {
         t("receipt.title", { number: bill.number }),
         {
           deviceName: printerSettings.printerDeviceName,
+          receiptSize: printerSettings.receiptSize,
           silent: true
         }
       )
@@ -320,7 +321,8 @@ export function ReceiptView({ billId }: { billId: string }) {
     setFeedback(null);
 
     const printed = await printElementWithNative("#receipt-print-area", receiptTitle, {
-      deviceName: printerSettings?.printerDeviceName
+      deviceName: printerSettings?.printerDeviceName,
+      receiptSize: printerSettings?.receiptSize
     }).catch(() => false);
 
     if (!printed) {

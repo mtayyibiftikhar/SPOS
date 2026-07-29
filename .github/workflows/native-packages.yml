@@ -1,5 +1,8 @@
 name: Build Native Packages
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
   push:
@@ -37,6 +40,16 @@ jobs:
           path: |
             dist-native/windows/*.exe
             dist-native/windows/*.blockmap
+
+      - name: Publish tagged Windows installer
+        if: startsWith(github.ref, 'refs/tags/native-v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $installer = Get-ChildItem -LiteralPath "dist-native/windows" -Filter "*.exe" | Select-Object -First 1
+          if (-not $installer) { throw "Windows installer was not produced." }
+          gh release create $env:GITHUB_REF_NAME $installer.FullName --generate-notes --title "SPOS Shop $env:GITHUB_REF_NAME"
 
   android-apk:
     name: Android APK
