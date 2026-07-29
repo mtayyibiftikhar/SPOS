@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   ChartColumn,
   LayoutGrid,
@@ -40,6 +41,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const isBillingRoute = pathname === "/billing";
   const shopName = currentSettings?.pos.shopName ?? currentShop?.name ?? t("brand.name");
   const shopLogo = currentSettings?.pos.logoUrl;
+  const [failedLogoUrl, setFailedLogoUrl] = useState<string | null>(null);
   const logoFallback =
     shopName
       .split(/\s+/)
@@ -47,6 +49,10 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       .slice(0, 2)
       .map((part) => part.charAt(0).toUpperCase())
       .join("") || "SP";
+
+  useEffect(() => {
+    setFailedLogoUrl(null);
+  }, [shopLogo]);
 
   return (
     <aside className="flex h-full flex-col">
@@ -60,8 +66,13 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       >
         <div className="flex items-center gap-3">
           <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[18px] bg-white/10 ring-1 ring-white/15">
-            {shopLogo ? (
-              <img alt={shopName} className="h-full w-full object-cover" src={shopLogo} />
+            {shopLogo && failedLogoUrl !== shopLogo ? (
+              <img
+                alt={shopName}
+                className="h-full w-full object-cover"
+                src={shopLogo}
+                onError={() => setFailedLogoUrl(shopLogo)}
+              />
             ) : (
               <span className="text-sm font-semibold tracking-[0.12em] text-white">{logoFallback}</span>
             )}

@@ -1,5 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { toExactArrayBuffer } from "@/lib/binary-upload";
 import { optimizePosImage } from "@/lib/server/optimize-pos-image";
 import { getPosAssetDeliveryUrl, getPosAssetPath, POS_ASSETS_BUCKET } from "@/lib/pos-asset-url";
 
@@ -73,7 +74,7 @@ export async function uploadPrivatePosAsset(supabase: SupabaseClient, input: Upl
     .filter(Boolean)
     .join("/");
   const path = `${safeFolder}/${Date.now()}-${baseName}.${extension}`;
-  const { error } = await supabase.storage.from(POS_ASSETS_BUCKET).upload(path, input.buffer, {
+  const { error } = await supabase.storage.from(POS_ASSETS_BUCKET).upload(path, toExactArrayBuffer(input.buffer), {
     contentType: input.contentType,
     upsert: false
   });

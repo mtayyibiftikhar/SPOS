@@ -3362,7 +3362,7 @@ export function AppProvider({
           message: "Unable to register this POS."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const working = mergeOwnerPortalState(current, payload.ownerSnapshot);
           const requestedProductKey = payload.productKey?.trim() ?? "";
 
@@ -3748,7 +3748,7 @@ export function AppProvider({
               ...working.auditLogs
             ]
           };
-        });
+        }));
 
         return result;
       },
