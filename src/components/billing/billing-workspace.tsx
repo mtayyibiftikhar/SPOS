@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PhoneNumberField } from "@/components/ui/phone-number-field";
+import { ResilientImage } from "@/components/ui/resilient-image";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -1452,13 +1453,16 @@ export function BillingWorkspace() {
         tabIndex={stockBlocked ? -1 : 0}
       >
         <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-[18px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.18),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)] sm:h-[72px] sm:w-[72px]">
-          {product.imageUrl ? (
-            <img src={product.imageUrl} alt={productName} className="h-full w-full object-cover" />
-          ) : (
+          <ResilientImage
+            src={product.imageUrl}
+            alt={productName}
+            className="h-full w-full object-contain p-1.5"
+            fallback={
             <span className="font-display text-2xl font-semibold tracking-[-0.04em] text-slate-300">
               {productName.slice(0, 2).toUpperCase()}
             </span>
-          )}
+            }
+          />
         </div>
 
         <div className="min-w-0">
@@ -1916,19 +1920,18 @@ export function BillingWorkspace() {
                       type="button"
                     >
                       <div className="relative h-[68px] overflow-hidden rounded-[18px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.22),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)]">
-                        {category.imageUrl ? (
-                          <img
-                            src={category.imageUrl}
-                            alt={category.name}
-                            className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-                          />
-                        ) : (
+                        <ResilientImage
+                          src={category.imageUrl}
+                          alt={category.name}
+                          className="h-full w-full object-contain p-1.5 transition duration-500 group-hover:scale-105"
+                          fallback={
                           <div className="flex h-full items-center justify-center">
                             <span className="font-display text-2xl font-semibold tracking-[-0.04em] text-slate-300">
                               {category.name.slice(0, 2).toUpperCase()}
                             </span>
                           </div>
-                        )}
+                          }
+                        />
                       </div>
                       <div className="min-w-0">
                         <p className="line-clamp-1 text-base font-semibold text-slate-950">{category.name}</p>

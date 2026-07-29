@@ -3,6 +3,7 @@
 import { usePosApp } from "@/components/providers/app-provider";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { ResilientImage } from "@/components/ui/resilient-image";
 import { cn, formatCurrency } from "@/lib/utils";
 import { productKindLabelKeys } from "@/lib/i18n";
 import type { Product } from "@/types/pos";
@@ -38,17 +39,16 @@ export function ProductQuickTabGrid({
               product.imageUrl && "bg-slate-100"
             )}
           >
-            {product.imageUrl ? (
-              <img
-                src={product.imageUrl}
-                alt={getLocalizedProductName(product, locale)}
-                className="h-full w-full object-cover"
-              />
-            ) : (
+            <ResilientImage
+              src={product.imageUrl}
+              alt={getLocalizedProductName(product, locale)}
+              className="h-full w-full object-contain p-2"
+              fallback={
               <span className="font-display text-3xl font-semibold tracking-[-0.04em] text-slate-300">
                 {getLocalizedProductName(product, locale).slice(0, 2).toUpperCase()}
               </span>
-            )}
+              }
+            />
           </div>
           <div className="p-4">
           <div className="flex items-start justify-between gap-3">

@@ -186,6 +186,28 @@ function dataUrlToBlob(dataUrl: string) {
   return new Blob([bytes], { type: mimeType });
 }
 
+function verifyUploadedImage(url: string) {
+  if (typeof window === "undefined") return Promise.resolve();
+
+  return new Promise<void>((resolve, reject) => {
+    const image = new Image();
+    const timeout = window.setTimeout(() => {
+      image.src = "";
+      reject(new Error("The uploaded image could not be displayed. Please try again."));
+    }, 15_000);
+
+    image.onload = () => {
+      window.clearTimeout(timeout);
+      resolve();
+    };
+    image.onerror = () => {
+      window.clearTimeout(timeout);
+      reject(new Error("The uploaded image could not be displayed. Please try again."));
+    };
+    image.src = url;
+  });
+}
+
 export async function uploadImageAssetToCloud(input: UploadImageAssetInput): Promise<UploadImageAssetResult> {
   try {
     const formData = new FormData();
@@ -224,6 +246,17 @@ export async function uploadImageAssetToCloud(input: UploadImageAssetInput): Pro
 
     if (!response.ok || !result.ok || !result.url) {
       throw new Error(result.message ?? "Cloud upload failed.");
+    }
+
+    try {
+      await verifyUploadedImage(result.url);
+    } catch (error) {
+      await fetch("/api/uploads", {
+        body: JSON.stringify({ url: result.url }),
+        headers: { ...headers, "Content-Type": "application/json" },
+        method: "DELETE"
+      }).catch(() => undefined);
+      throw error;
     }
 
     return {

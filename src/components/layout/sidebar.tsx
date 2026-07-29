@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
 import {
   ChartColumn,
   LayoutGrid,
@@ -21,6 +20,7 @@ import { userRoleLabelKeys } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { usePosApp } from "@/components/providers/app-provider";
 import { Button } from "@/components/ui/button";
+import { ResilientImage } from "@/components/ui/resilient-image";
 
 const icons = {
   "/dashboard": LayoutGrid,
@@ -41,7 +41,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const isBillingRoute = pathname === "/billing";
   const shopName = currentSettings?.pos.shopName ?? currentShop?.name ?? t("brand.name");
   const shopLogo = currentSettings?.pos.logoUrl;
-  const [failedLogoUrl, setFailedLogoUrl] = useState<string | null>(null);
   const logoFallback =
     shopName
       .split(/\s+/)
@@ -49,10 +48,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       .slice(0, 2)
       .map((part) => part.charAt(0).toUpperCase())
       .join("") || "SP";
-
-  useEffect(() => {
-    setFailedLogoUrl(null);
-  }, [shopLogo]);
 
   return (
     <aside className="flex h-full flex-col">
@@ -66,16 +61,12 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       >
         <div className="flex items-center gap-3">
           <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[18px] bg-white/10 ring-1 ring-white/15">
-            {shopLogo && failedLogoUrl !== shopLogo ? (
-              <img
+            <ResilientImage
                 alt={shopName}
-                className="h-full w-full object-cover"
+                className="h-full w-full object-contain p-1"
                 src={shopLogo}
-                onError={() => setFailedLogoUrl(shopLogo)}
+                fallback={<span className="text-sm font-semibold tracking-[0.12em] text-white">{logoFallback}</span>}
               />
-            ) : (
-              <span className="text-sm font-semibold tracking-[0.12em] text-white">{logoFallback}</span>
-            )}
           </div>
           <div className="min-w-0">
             <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-white/55">

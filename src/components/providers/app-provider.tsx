@@ -5648,7 +5648,7 @@ export function AppProvider({
           message: "Unable to save category."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const normalizedName = name.trim();
 
           if (!normalizedName) {
@@ -5678,7 +5678,7 @@ export function AppProvider({
               ...current.categories
             ]
           };
-        });
+        }));
 
         return result;
       },
@@ -5692,7 +5692,7 @@ export function AppProvider({
           message: "Unable to update category."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const category = current.categories.find((entry) => entry.id === categoryId && entry.shopId === currentShopId);
 
           if (!category) {
@@ -5728,7 +5728,7 @@ export function AppProvider({
                 : entry
             )
           };
-        });
+        }));
 
         return result;
       },
@@ -5742,7 +5742,7 @@ export function AppProvider({
           message: "Unable to remove category."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const category = current.categories.find((entry) => entry.id === categoryId && entry.shopId === currentShopId);
 
           if (!category) {
@@ -5765,7 +5765,7 @@ export function AppProvider({
                 : product
             )
           };
-        });
+        }));
 
         return result;
       },

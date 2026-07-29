@@ -32,6 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { ResilientImage } from "@/components/ui/resilient-image";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn, formatCurrency } from "@/lib/utils";
@@ -167,14 +168,17 @@ function ImagePreview({
         className
       )}
     >
-      {imageUrl ? (
-        <img src={imageUrl} alt={label} className="h-full w-full object-cover" />
-      ) : (
+      <ResilientImage
+        src={imageUrl}
+        alt={label}
+        className="h-full w-full object-contain p-2"
+        fallback={
         <div className="text-center text-slate-400">
           <ImageIcon className="mx-auto h-6 w-6" />
           <p className="mt-2 text-[10px] font-semibold uppercase tracking-[0.18em]">{label}</p>
         </div>
-      )}
+        }
+      />
     </div>
   );
 }

@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
+import { ResilientImage } from "@/components/ui/resilient-image";
 import { Textarea } from "@/components/ui/textarea";
 import { customerMatchesSearch, isWalkInCustomerName } from "@/lib/billing";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
@@ -541,21 +542,18 @@ export function ReceiptView({ billId }: { billId: string }) {
           id="receipt-print-area"
         >
           <div className="border-b border-dashed border-line pb-4 text-center">
-            {posSettings?.logoUrl ? (
-              <div className="mb-2 flex justify-center">
-                <img
-                  src={posSettings.logoUrl}
-                  alt={posSettings.shopName || shop?.name || "Shop logo"}
-                  className="max-h-14 max-w-[11rem] object-contain"
-                />
-              </div>
-            ) : (
-              <div className="mb-2 flex justify-center">
+            <div className="mb-2 flex justify-center">
+              <ResilientImage
+                src={posSettings?.logoUrl}
+                alt={posSettings?.shopName || shop?.name || "Shop logo"}
+                className="max-h-14 max-w-[11rem] object-contain"
+                fallback={
                 <div className="flex h-12 w-12 items-center justify-center rounded-[18px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.18),_transparent_42%),linear-gradient(160deg,#0f172a_0%,#172036_100%)] font-display text-lg font-semibold tracking-[0.18em] text-white shadow-[0_16px_30px_rgba(15,23,42,0.16)]">
                   {receiptInitials}
                 </div>
-              </div>
-            )}
+                }
+              />
+            </div>
             <p className="mx-auto max-w-[22rem] text-balance break-words font-display text-2xl font-semibold leading-tight text-ink">
               {receiptBrand}
             </p>
@@ -759,13 +757,11 @@ export function ReceiptView({ billId }: { billId: string }) {
 
           {state.brand.receiptImprintEnabled ? (
             <div className="mt-5 border-t border-dashed border-line pt-5 text-center text-xs leading-5 text-slate-500">
-              {state.brand.logoUrl ? (
-                <img
-                  src={state.brand.logoUrl}
-                  alt={state.brand.companyName}
-                  className="mx-auto mb-2 max-h-8 w-auto object-contain"
-                />
-              ) : null}
+              <ResilientImage
+                src={state.brand.logoUrl}
+                alt={state.brand.companyName}
+                className="mx-auto mb-2 max-h-8 w-auto object-contain"
+              />
               <p className="font-semibold text-slate-700">
                 {state.brand.receiptImprintText || `Powered by ${state.brand.companyName}`}
               </p>

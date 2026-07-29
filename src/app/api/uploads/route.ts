@@ -31,6 +31,14 @@ function clean(value: FormDataEntryValue | string | null | undefined) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") {
+    return error.message;
+  }
+  return "Unable to upload image.";
+}
+
 function getCandidateShopIds(shopId: string) {
   return Array.from(new Set([shopId, stableUuid(`shop:${shopId}`)]));
 }
@@ -155,9 +163,9 @@ export async function POST(request: Request) {
 
     if (scope === "shop-logo" && authorizedShopId) {
       const { error } = await supabase
-        .from("pos_shops")
+        .from("pos_settings")
         .update({ logo_url: uploaded.url })
-        .eq("id", authorizedShopId);
+        .eq("shop_id", authorizedShopId);
 
       if (error) {
         await deletePrivatePosAsset(supabase, uploaded.path);
@@ -168,7 +176,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, ...uploaded });
   } catch (error) {
     return NextResponse.json(
-      { ok: false, message: error instanceof Error ? error.message : "Unable to upload image." },
+      { ok: false, message: getErrorMessage(error) },
       { status: 500 }
     );
   }
@@ -198,9 +206,9 @@ export async function DELETE(request: Request) {
 
       if (storagePath.includes("/shop-logo/")) {
         const { error } = await authorization.supabase
-          .from("pos_shops")
+          .from("pos_settings")
           .update({ logo_url: null })
-          .eq("id", storageShopId)
+          .eq("shop_id", storageShopId)
           .eq("logo_url", urlOrPath);
 
         if (error) {

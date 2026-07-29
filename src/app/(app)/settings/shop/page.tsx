@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { SettingsFormShell } from "@/components/settings/settings-form-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ResilientImage } from "@/components/ui/resilient-image";
 import { deleteImageAssetFromCloud, resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
 
 export default function ShopSettingsPage() {
@@ -182,7 +183,7 @@ export default function ShopSettingsPage() {
                 onChange={(event) => void handleLogoFileChange(event.target.files?.[0] ?? null)}
               />
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                Recommended logo size: square 512x512 JPG/PNG. The POS optimizes it automatically for receipts and reports.
+                Upload a JPG, PNG, or WebP at any common size. The POS automatically resizes and optimizes it for receipts and reports.
               </p>
               {logoFeedback ? (
                 <p className={logoFeedback.tone === "success" ? "mt-2 text-sm font-medium text-emerald-700" : "mt-2 text-sm font-medium text-rose-700"}>
@@ -195,7 +196,12 @@ export default function ShopSettingsPage() {
           <div>
             <Card className="flex min-h-[228px] flex-col items-center justify-center gap-4 border-dashed p-5 text-center">
               {logoUrl ? (
-                <img src={logoUrl} alt={shopName || "Shop logo"} className="max-h-20 w-auto object-contain" />
+                <ResilientImage
+                  src={logoUrl}
+                  alt={shopName || "Shop logo"}
+                  className="max-h-20 max-w-full object-contain"
+                  fallback={<span className="text-sm font-medium text-slate-500">Logo preview unavailable</span>}
+                />
               ) : null}
               <div className="space-y-2">
                 <p className="text-sm font-medium text-ink">{t("settings.logoPreview")}</p>
