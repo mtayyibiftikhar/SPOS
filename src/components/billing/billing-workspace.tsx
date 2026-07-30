@@ -1431,35 +1431,61 @@ export function BillingWorkspace() {
     }
 
     return (
-      <div className={cn("space-y-2", compact && "space-y-1.5")}>
-        {cartProducts.map((line) => (
-          <div
-            key={`summary-${line.product.id}`}
-            className={cn(
-              "rounded-[20px] border border-slate-200 bg-white px-3 py-3 shadow-[0_10px_24px_rgba(15,23,42,0.04)]",
-              compact && "rounded-[18px] px-3 py-2.5"
-            )}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-950">
-                  {getLocalizedProductName(line.product, locale)}
+      <div
+        className={cn(
+          "space-y-2",
+          compact && "space-y-0 overflow-hidden rounded-[18px] border border-slate-200 bg-white"
+        )}
+      >
+        {cartProducts.map((line) => {
+          const productName = getLocalizedProductName(line.product, locale);
+
+          return (
+            <div
+              key={`summary-${line.product.id}`}
+              className={cn(
+                "rounded-[20px] border border-slate-200 bg-white px-3 py-3 shadow-[0_10px_24px_rgba(15,23,42,0.04)]",
+                compact && "rounded-none border-0 border-b px-3 py-2 shadow-none last:border-b-0"
+              )}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div
+                    className={cn(
+                      "h-12 w-12 shrink-0 overflow-hidden rounded-[13px] bg-slate-50 ring-1 ring-slate-200",
+                      compact && "h-11 w-11 rounded-[11px]"
+                    )}
+                  >
+                    <ResilientImage
+                      src={line.product.imageUrl}
+                      alt={productName}
+                      className="h-full w-full object-contain p-1"
+                      fallback={
+                        <span className="flex h-full items-center justify-center font-display text-sm font-semibold text-slate-300">
+                          {productName.slice(0, 2).toUpperCase()}
+                        </span>
+                      }
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-950">{productName}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {line.quantity} x {formatCurrency(line.unitPrice, currency, locale)}
+                    </p>
+                    {line.discountAmount > 0 ? (
+                      <p className="mt-0.5 text-xs font-medium text-emerald-700">
+                        {t("common.discount")}: -{formatCurrency(line.discountAmount, currency, locale)}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+                <p className="shrink-0 text-sm font-semibold text-slate-950">
+                  {formatCurrency(line.lineTotal, currency, locale)}
                 </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {line.quantity} x {formatCurrency(line.unitPrice, currency, locale)}
-                </p>
-                {line.discountAmount > 0 ? (
-                  <p className="mt-1 text-xs font-medium text-emerald-700">
-                    {t("common.discount")}: -{formatCurrency(line.discountAmount, currency, locale)}
-                  </p>
-                ) : null}
               </div>
-              <p className="text-sm font-semibold text-slate-950">
-                {formatCurrency(line.lineTotal, currency, locale)}
-              </p>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     );
   };
@@ -2001,16 +2027,16 @@ export function BillingWorkspace() {
   );
 
   const customerView = (
-    <div className="mx-auto flex w-full max-w-[1920px] flex-col gap-3 xl:h-[90dvh] xl:overflow-hidden">
+    <div className="mx-auto flex w-full max-w-[1920px] flex-col gap-3 xl:h-[calc(100dvh-1.5rem)] xl:overflow-hidden">
       {renderStepHeader({
         backAction: () => setWorkflowStep("build"),
         backLabel: t("billing.backToSale"),
         step: "customer"
       })}
 
-      <div className="grid flex-1 min-h-0 gap-3 xl:grid-cols-[minmax(0,1.6fr)_360px]">
-        <Card className="grid min-h-[620px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:min-h-0">
-          <div className="border-b border-slate-200 px-4 py-4">
+      <div className="grid flex-1 min-h-0 gap-3 xl:grid-cols-[minmax(0,1.65fr)_minmax(440px,0.95fr)]">
+        <Card className="grid min-h-[620px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[26px] border-white/70 bg-white/95 shadow-[0_20px_52px_rgba(15,23,42,0.065)] xl:min-h-0">
+          <div className="border-b border-slate-200 px-5 py-4">
             <SectionEyebrow>{t("common.customer")}</SectionEyebrow>
             <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -2026,7 +2052,7 @@ export function BillingWorkspace() {
             </div>
           </div>
 
-          <div className="min-h-0 overflow-y-auto px-4 py-4">
+          <div className="min-h-0 overflow-y-auto px-5 py-4">
             <div>
               <label className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
                 {t("billing.customerSearchCompact")}
@@ -2079,11 +2105,11 @@ export function BillingWorkspace() {
               ) : null}
             </div>
 
-              <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <div className="mt-4 grid gap-x-4 gap-y-3.5 lg:grid-cols-2">
                 <div className="lg:col-span-2">
                   <label className="mb-2 block text-sm font-medium text-slate-700">{t("common.customerName")}</label>
                   <Input
-                    className="rounded-[16px] border-slate-200 bg-slate-50"
+                    className="h-10 rounded-[14px] border-slate-200 bg-slate-50"
                     value={customerForm.name}
                   onChange={(event) =>
                     setCustomerForm((current) => ({
@@ -2133,10 +2159,27 @@ export function BillingWorkspace() {
                   }
                 />
 
+                <label className="inline-flex h-9 items-center gap-2 text-sm font-medium text-slate-700 lg:col-start-2">
+                  <input
+                    checked={customerForm.whatsappSameAsPhone}
+                    className="h-4 w-4 accent-emerald-600"
+                    onChange={(event) =>
+                      setCustomerForm((current) => ({
+                        ...current,
+                        whatsappCountryCode: event.target.checked ? current.phoneCountryCode : current.whatsappCountryCode,
+                        whatsappNumber: event.target.checked ? current.phoneNumber : current.whatsappNumber,
+                        whatsappSameAsPhone: event.target.checked
+                      }))
+                    }
+                    type="checkbox"
+                  />
+                  {t("common.whatsappSameAsPhone")}
+                </label>
+
               <div className="lg:col-span-2">
                 <label className="mb-2 block text-sm font-medium text-slate-700">{t("common.email")}</label>
                 <Input
-                  className="rounded-[16px] border-slate-200 bg-slate-50"
+                  className="h-10 rounded-[14px] border-slate-200 bg-slate-50"
                   value={customerForm.email}
                   onChange={(event) =>
                     setCustomerForm((current) => ({
@@ -2150,7 +2193,7 @@ export function BillingWorkspace() {
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-700">{t("common.vatNumber")}</label>
                 <Input
-                  className="rounded-[16px] border-slate-200 bg-slate-50"
+                  className="h-10 rounded-[14px] border-slate-200 bg-slate-50"
                   value={customerForm.vatNumber}
                   onChange={(event) =>
                     setCustomerForm((current) => ({
@@ -2161,10 +2204,10 @@ export function BillingWorkspace() {
                 />
               </div>
 
-              <div className="lg:col-span-2">
+              <div>
                 <label className="mb-2 block text-sm font-medium text-slate-700">{t("common.address")}</label>
                 <Textarea
-                  className="min-h-20 rounded-[16px] border-slate-200 bg-slate-50"
+                  className="min-h-[76px] rounded-[14px] border-slate-200 bg-slate-50"
                   value={customerForm.address}
                   onChange={(event) =>
                     setCustomerForm((current) => ({
@@ -2176,30 +2219,13 @@ export function BillingWorkspace() {
               </div>
             </div>
 
-                <label className="mt-5 inline-flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 text-sm font-medium text-slate-950">
-                  <input
-                    checked={customerForm.whatsappSameAsPhone}
-                    className="h-4 w-4"
-                    onChange={(event) =>
-                      setCustomerForm((current) => ({
-                        ...current,
-                        whatsappCountryCode: event.target.checked ? current.phoneCountryCode : current.whatsappCountryCode,
-                        whatsappNumber: event.target.checked ? current.phoneNumber : current.whatsappNumber,
-                        whatsappSameAsPhone: event.target.checked
-                      }))
-                    }
-                type="checkbox"
-              />
-              {t("common.whatsappSameAsPhone")}
-            </label>
-
-            <div className="mt-5 rounded-[22px] border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            <div className="mt-4 rounded-[18px] border border-emerald-100 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">
               {t("billing.walkInAutoHint")}
             </div>
           </div>
         </Card>
 
-        <Card className="grid min-h-[620px] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:min-h-0">
+        <Card className="grid min-h-[620px] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[26px] border-white/70 bg-white/95 shadow-[0_20px_52px_rgba(15,23,42,0.065)] xl:min-h-0">
           <div className="border-b border-slate-200 px-4 py-4">
             <SectionEyebrow>{t("billing.summaryLabel")}</SectionEyebrow>
             <h2 className="mt-1 font-display text-[1.4rem] font-semibold tracking-[-0.04em] text-slate-950">
