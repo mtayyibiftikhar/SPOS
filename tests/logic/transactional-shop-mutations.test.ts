@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { applyCriticalShopMutation } from "../../src/lib/server/shop-snapshot-mutations";
+import { getCustomerAccountMetrics } from "../../src/lib/customer-accounts";
 import type { Bill, BillItem, Customer, DemoAppState, Product } from "../../src/types/pos";
 
 const SHOP_ID = "shop_transactional";
@@ -193,6 +194,43 @@ test("authoritative checkout blocks overselling and preserves an existing custom
   assert.equal(rejected.result.ok, false);
   assert.match(rejected.result.message ?? "", /not enough stock/i);
   assert.equal(rejected.state.products?.[0].stockQuantity, 5);
+});
+
+test("partially paid sales create a visible customer account bill", () => {
+  const created = applyCriticalShopMutation(
+    openState({ customers: [] }),
+    {
+      type: "create_bill",
+      payload: {
+        customer: { name: "Nora", phone: "+966500000099" },
+        items: [{ productId: "product_1", quantity: 1, unitPrice: 50 }],
+        discountType: "fixed",
+        discountValue: 0,
+        paymentMethod: "account",
+        paymentAmounts: { cash: 20, card: 0 }
+      }
+    },
+    { role: "cashier", shopId: SHOP_ID, userId: USER_ID }
+  );
+
+  const accountCustomer = created.state.customers?.find((entry) => entry.phone === "+966500000099");
+  const accountBill = created.state.bills?.find((entry) => entry.id === created.result.billId);
+  const metrics = getCustomerAccountMetrics({
+    bills: created.state.bills ?? [],
+    customerId: accountCustomer?.id ?? "",
+    settlements: []
+  });
+
+  assert.equal(created.result.ok, true);
+  assert.ok(accountCustomer);
+  assert.equal(accountBill?.customerId, accountCustomer.id);
+  assert.equal(accountBill?.paymentMethod, "account");
+  assert.equal(accountBill?.paidAmount, 20);
+  assert.equal(accountBill?.dueAmount, 30);
+  assert.equal(accountBill?.status, "due");
+  assert.equal(created.state.payments?.[0].amount, 20);
+  assert.deepEqual(metrics.openBills.map((entry) => entry.id), [accountBill?.id]);
+  assert.equal(metrics.outstandingBalance, 30);
 });
 
 test("account settlement cannot exceed the selected bill balance", () => {

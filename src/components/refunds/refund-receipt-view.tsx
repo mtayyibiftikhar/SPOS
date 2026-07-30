@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft, Printer, ReceiptText } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
@@ -13,6 +13,10 @@ import { paymentMethodLabelKeys } from "@/lib/i18n";
 import { printElementWithNative } from "@/lib/native-bridge";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
 import { buildPublicReceiptUrl } from "@/lib/public-receipts";
+import {
+  loadFreshRefundReceiptHandoff,
+  type FreshRefundReceiptHandoff
+} from "@/lib/receipt-handoff";
 import { formatRefundReceiptNumber } from "@/lib/refunds";
 import { formatBusinessDate, formatCurrency, formatDateTime } from "@/lib/utils";
 
@@ -20,9 +24,16 @@ export function RefundReceiptView({ refundId }: { refundId: string }) {
   const searchParams = useSearchParams();
   const { isHydrated, locale, state, t } = usePosApp();
   const hasAutoPrinted = useRef(false);
-  const refund = state.refunds.find((entry) => entry.id === refundId);
-  const bill = refund ? state.bills.find((entry) => entry.id === refund.originalBillId) : undefined;
-  const items = refund ? state.refundItems.filter((entry) => entry.refundId === refund.id) : [];
+  const [receiptHandoff, setReceiptHandoff] = useState<FreshRefundReceiptHandoff | null>(null);
+  const [receiptLookupTimedOut, setReceiptLookupTimedOut] = useState(false);
+  const stateRefund = state.refunds.find((entry) => entry.id === refundId);
+  const refund = stateRefund ?? receiptHandoff?.refund;
+  const stateBill = refund ? state.bills.find((entry) => entry.id === refund.originalBillId) : undefined;
+  const bill = stateBill ?? receiptHandoff?.bill;
+  const stateRefundItems = stateRefund
+    ? state.refundItems.filter((entry) => entry.refundId === stateRefund.id)
+    : [];
+  const items = stateRefundItems.length > 0 ? stateRefundItems : receiptHandoff?.refundItems ?? [];
   const shop = refund ? state.shops.find((entry) => entry.id === refund.shopId) : undefined;
   const cashier = refund ? state.users.find((entry) => entry.id === refund.createdBy) : undefined;
   const settings = refund ? state.settingsByShop[refund.shopId] : undefined;
@@ -30,7 +41,10 @@ export function RefundReceiptView({ refundId }: { refundId: string }) {
   const receiptNumber = formatRefundReceiptNumber(refundId);
   const isFreshReceipt = searchParams.get("fresh") === "1";
   const receiptBrand = settings?.pos.shopName ?? shop?.name ?? t("brand.name");
-  const originalItems = state.billItems.filter((entry) => entry.billId === bill?.id);
+  const stateBillItems = stateBill
+    ? state.billItems.filter((entry) => entry.billId === stateBill.id)
+    : [];
+  const originalItems = stateBillItems.length > 0 ? stateBillItems : receiptHandoff?.billItems ?? [];
   const refundQuantityByBillItemId = items.reduce<Record<string, number>>((quantities, item) => {
     quantities[item.billItemId] = (quantities[item.billItemId] ?? 0) + item.quantity;
     return quantities;
@@ -55,6 +69,20 @@ export function RefundReceiptView({ refundId }: { refundId: string }) {
     ? buildQrCodeImageUrl(buildPublicReceiptUrl(bill.publicToken), 172)
     : undefined;
 
+  useEffect(() => {
+    setReceiptHandoff(loadFreshRefundReceiptHandoff(refundId));
+  }, [refundId]);
+
+  useEffect(() => {
+    if (!isHydrated || (refund && bill)) {
+      setReceiptLookupTimedOut(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => setReceiptLookupTimedOut(true), 8000);
+    return () => window.clearTimeout(timer);
+  }, [bill, isHydrated, refund, refundId]);
+
   const printReceipt = async (silent = false) => {
     const printed = await printElementWithNative("#refund-receipt-print-area", `Refund ${receiptNumber}`, {
       deviceName: settings?.printer.printerDeviceName,
@@ -77,7 +105,7 @@ export function RefundReceiptView({ refundId }: { refundId: string }) {
     return () => window.clearTimeout(timer);
   }, [isFreshReceipt, refund?.id, settings?.printer.autoPrintAfterSale, settings?.printer.printerDeviceName, settings?.printer.receiptSize]);
 
-  if (!isHydrated) {
+  if (!isHydrated || ((!refund || !bill) && !receiptLookupTimedOut)) {
     return (
       <Card className="flex min-h-52 items-center justify-center p-8 text-center">
         <p className="text-sm font-medium text-slate-600">Loading refund receipt...</p>

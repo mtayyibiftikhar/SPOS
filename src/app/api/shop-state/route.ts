@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import {
   calculateScheduledAttendanceClosure,
   DEFAULT_SHIFT_END_TIME,
@@ -825,15 +825,20 @@ async function commitCriticalMutation(
     }
 
     const committedState = commit.state ?? mutationResult.state;
-    const projectionWarning = await projectCommittedShopState(authorization.supabase, shopId, committedState);
+
+    // The snapshot commit is the authoritative transaction. Normalized tables are
+    // a secondary projection and must not delay checkout/refund acknowledgement;
+    // otherwise the browser can time out after the sale has already been saved.
+    after(async () => {
+      await projectCommittedShopState(authorization.supabase, shopId, committedState);
+    });
 
     return NextResponse.json({
       duplicate: Boolean(commit.duplicate),
       ok: commit.ok !== false,
       result: commit.result ?? mutationResult.result,
       revision: Math.max(revision + 1, Number(commit.revision ?? revision + 1)),
-      state: committedState,
-      projectionWarning
+      state: committedState
     });
   }
 

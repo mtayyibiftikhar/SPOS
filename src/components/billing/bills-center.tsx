@@ -14,7 +14,7 @@ import { cn, formatBusinessDate, formatCurrency, formatDateTime } from "@/lib/ut
 import type { Bill, BillItem, Locale, POSSettings, Shop, User } from "@/types/pos";
 
 type RangePreset = "today" | "yesterday" | "week" | "month" | "year" | "custom";
-type BillsTab = "sales" | "refunded" | "accountPayments";
+type BillsTab = "sales" | "accountBills" | "refunded" | "accountPayments";
 
 const PAGE_SIZE = 10;
 
@@ -286,6 +286,10 @@ export function BillsCenter() {
       return bills.filter((bill) => bill.status === "refunded" || refundMetaByBillId.has(bill.id));
     }
 
+    if (activeTab === "accountBills") {
+      return bills.filter((bill) => bill.paymentMethod === "account" || bill.dueAmount > 0);
+    }
+
     return bills;
   }, [activeTab, bills, refundMetaByBillId]);
 
@@ -390,6 +394,7 @@ export function BillsCenter() {
   const rangeEnd = activeResultCount === 0 ? 0 : rangeStart + activePageLength - 1;
   const selectedBills = filteredBills.filter((bill) => selectedBillIds.has(bill.id));
   const refundedBillCount = bills.filter((bill) => bill.status === "refunded" || refundMetaByBillId.has(bill.id)).length;
+  const accountBillCount = bills.filter((bill) => bill.paymentMethod === "account" || bill.dueAmount > 0).length;
 
   const openPrintBatch = (billsToPrint: Bill[], title: string) => {
     setPrintFeedback(null);
@@ -451,13 +456,19 @@ export function BillsCenter() {
   return (
     <div className="space-y-6">
       <Card className="p-4">
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {([
             {
               key: "sales",
               title: t("bills.salesTab"),
               count: bills.length,
               description: selectedRangeLabel
+            },
+            {
+              key: "accountBills",
+              title: "Account bills",
+              count: accountBillCount,
+              description: "Pay-later and partially paid receipts"
             },
             {
               key: "refunded",
@@ -551,6 +562,8 @@ export function BillsCenter() {
             <h2 className="mt-2 font-display text-2xl font-semibold text-ink">
               {activeTab === "accountPayments"
                 ? "Account payments received"
+                : activeTab === "accountBills"
+                  ? "Account and partial bills"
                 : activeTab === "refunded"
                   ? t("bills.refundedTab")
                   : t("bills.searchTitle")}
@@ -563,15 +576,22 @@ export function BillsCenter() {
               })}
             </p>
           </div>
-          <label className="relative block xl:w-[360px]">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input
-              className="pl-11"
-              placeholder={t("bills.searchPlaceholder")}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </label>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            {activeTab === "accountBills" ? (
+              <Button asChild className="h-11 rounded-[16px]" variant="secondary">
+                <Link href="/customers?view=account">Open customer accounts</Link>
+              </Button>
+            ) : null}
+            <label className="relative block xl:w-[360px]">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                className="pl-11"
+                placeholder={t("bills.searchPlaceholder")}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </label>
+          </div>
         </div>
 
         {activeTab !== "accountPayments" ? <div className="mt-5 flex flex-wrap gap-3 rounded-[26px] border border-line bg-shell/60 p-3">

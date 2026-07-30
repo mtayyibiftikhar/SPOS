@@ -960,7 +960,7 @@ export function BillingWorkspace() {
       case "Payment amounts cannot exceed the bill total.":
         return t("billing.paymentExceedsTotal");
       default:
-        return message?.startsWith("Not enough stock") ? message : t("billing.createError");
+        return message || t("billing.createError");
     }
   };
 

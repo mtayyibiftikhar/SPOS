@@ -24,6 +24,8 @@ import type {
   ProductCategory,
   ProductKeyStatus,
   PurchasePaymentStatus,
+  Refund,
+  RefundItem,
   SessionUser,
   Shop,
   ShopSettingsBundle,
@@ -80,7 +82,7 @@ import {
 } from "@/lib/attendance";
 import { clearShopDataScope, ownerClearShopDataScopeLabels, type OwnerClearShopDataScope } from "@/lib/shop-data-reset";
 import { createPublicReceiptToken } from "@/lib/public-receipts";
-import { saveFreshReceiptHandoff } from "@/lib/receipt-handoff";
+import { saveFreshReceiptHandoff, saveFreshRefundReceiptHandoff } from "@/lib/receipt-handoff";
 import { createId, getDirection, hashSecret } from "@/lib/utils";
 
 const STORAGE_KEY = "simple-pos-state-v3";
@@ -2941,7 +2943,7 @@ export function AppProvider({
         }),
         headers: buildShopCloudHeaders(state, shopId, session),
         method: "POST",
-        signal: AbortSignal.timeout(20_000)
+        signal: AbortSignal.timeout(45_000)
       });
       const rawPayload = await response.text();
       const payload = parseJsonPayload<ShopCloudAccessPayload>(rawPayload, {
@@ -2975,6 +2977,23 @@ export function AppProvider({
           saveFreshReceiptHandoff(
             createdBill,
             remoteState.billItems?.filter((entry) => entry.billId === createdBill.id) ?? []
+          );
+        }
+
+        const createdRefundId = mutation.type === "create_refund" ? payload.result?.refundId : undefined;
+        const createdRefund = createdRefundId
+          ? remoteState.refunds?.find((entry) => entry.id === createdRefundId)
+          : undefined;
+        const refundedBill = createdRefund
+          ? remoteState.bills?.find((entry) => entry.id === createdRefund.originalBillId)
+          : undefined;
+
+        if (createdRefund && refundedBill) {
+          saveFreshRefundReceiptHandoff(
+            createdRefund,
+            remoteState.refundItems?.filter((entry) => entry.refundId === createdRefund.id) ?? [],
+            refundedBill,
+            remoteState.billItems?.filter((entry) => entry.billId === refundedBill.id) ?? []
           );
         }
 
@@ -8695,6 +8714,12 @@ export function AppProvider({
           ok: false,
           message: "Unable to create the refund."
         };
+        let createdRefundReceipt: {
+          bill: Bill;
+          billItems: BillItem[];
+          refund: Refund;
+          refundItems: RefundItem[];
+        } | null = null;
 
         flushSync(() => setState((current) => {
           const accessBlock = getShopAccessBlock(current, currentShopId);
@@ -8899,6 +8924,7 @@ export function AppProvider({
             amount,
             profitAdjustment
           };
+          createdRefundReceipt = { bill, billItems, refund: refundRecord, refundItems };
 
           return {
             ...current,
@@ -8957,6 +8983,22 @@ export function AppProvider({
             )
           };
         }));
+
+        const refundReceiptToSave = createdRefundReceipt as {
+          bill: Bill;
+          billItems: BillItem[];
+          refund: Refund;
+          refundItems: RefundItem[];
+        } | null;
+
+        if (refundReceiptToSave) {
+          saveFreshRefundReceiptHandoff(
+            refundReceiptToSave.refund,
+            refundReceiptToSave.refundItems,
+            refundReceiptToSave.bill,
+            refundReceiptToSave.billItems
+          );
+        }
 
         return result;
       },
