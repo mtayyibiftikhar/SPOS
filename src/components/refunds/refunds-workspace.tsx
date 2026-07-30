@@ -9,6 +9,8 @@ import {
   CalendarDays,
   Download,
   FileSearch,
+  Minus,
+  Plus,
   Printer,
   ReceiptText,
   Search
@@ -23,7 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { getBusinessDateInTimezone } from "@/lib/cash-control";
 import { billStatusLabelKeys, paymentMethodLabelKeys } from "@/lib/i18n";
 import { createStructuredReportPdfBlob, downloadBlob } from "@/lib/report-export";
-import { calculateBillItemProfit, calculateBillRefundState } from "@/lib/refunds";
+import { calculateBillRefundState, calculateRefundQuote } from "@/lib/refunds";
 import { cn, formatBusinessDate, formatCurrency, formatDateTime } from "@/lib/utils";
 import type { Bill, BillItem, Locale, PaymentMethod, Refund, RefundItem } from "@/types/pos";
 
@@ -153,8 +155,16 @@ function translateRefundError(t: ReturnType<typeof usePosApp>["t"], message?: st
       return t("refund.selectQuantity");
     case "Account adjustment refunds require a saved customer.":
       return t("refund.accountAdjustmentRequiresCustomer");
+    case "A refund quantity exceeds the remaining sold quantity.":
+      return "One of the selected quantities is no longer refundable. Refresh the receipt and choose from the remaining quantity.";
+    case "Cash or card refund cannot exceed the amount already paid on this bill.":
+      return "This cash/card refund is higher than the amount paid. Reduce the refund quantity or use account adjustment for the unpaid balance.";
+    case "Account adjustment cannot exceed this bill's current due amount.":
+      return "This account adjustment is higher than the bill's unpaid balance. Reduce the refund quantity or refund the paid portion by cash/card.";
+    case "This bill has no refundable value remaining.":
+      return "This bill has no refundable amount remaining.";
     default:
-      return t("refund.error");
+      return message?.trim() || t("refund.error");
   }
 }
 
@@ -449,14 +459,41 @@ export function RefundsWorkspace() {
 
     return {
       ...entry,
-      selectedQuantity,
-      refundAmount: entry.item.unitPrice * selectedQuantity,
-      profitAdjustment: calculateBillItemProfit(entry.item, selectedQuantity)
+      selectedQuantity
     };
   });
   const selectedRefundItems = refundableItems.filter((entry) => entry.selectedQuantity > 0);
-  const estimatedRefundAmount = selectedRefundItems.reduce((sum, entry) => sum + entry.refundAmount, 0);
-  const estimatedProfitAdjustment = selectedRefundItems.reduce((sum, entry) => sum + entry.profitAdjustment, 0);
+  const refundQuote = selectedBill
+    ? calculateRefundQuote({
+        bill: selectedBill,
+        billItems: items,
+        previousQuantitiesByBillItemId: refundState.refundedQuantitiesByBillItemId,
+        priorRefunds: state.refunds,
+        selectedItems: selectedRefundItems.map((entry) => ({
+          billItemId: entry.item.id,
+          quantity: entry.selectedQuantity
+        }))
+      })
+    : null;
+  const estimatedRefundAmount = refundQuote?.refundValue ?? 0;
+  const estimatedProfitAdjustment = selectedRefundItems.reduce((sum, entry) => {
+    const billedUnitRevenue =
+      (entry.item.lineTotal / Math.max(entry.item.quantity, 1)) * (refundQuote?.billRevenueScale ?? 1);
+    return sum + (billedUnitRevenue - entry.item.costPrice) * entry.selectedQuantity;
+  }, 0);
+  const payoutError = (() => {
+    if (!selectedBill || !refundQuote || refundQuote.refundValue <= 0) return null;
+    if (payoutMethod === "account" && !selectedBill.customerId) {
+      return "Account adjustment refunds require a saved customer.";
+    }
+    if ((payoutMethod === "cash" || payoutMethod === "card") && refundQuote.refundValue > refundQuote.refundablePaidAmount) {
+      return "Cash or card refund cannot exceed the amount already paid on this bill.";
+    }
+    if (payoutMethod === "account" && refundQuote.refundValue > selectedBill.dueAmount) {
+      return "Account adjustment cannot exceed this bill's current due amount.";
+    }
+    return null;
+  })();
 
   const allRefundHistory = useMemo(
     () =>
@@ -552,6 +589,16 @@ export function RefundsWorkspace() {
     }));
   };
 
+  const adjustRefundQuantity = (billItemId: string, remainingQuantity: number, delta: number) => {
+    const current = Number.parseInt(refundQuantities[billItemId] ?? "0", 10) || 0;
+    const next = Math.min(remainingQuantity, Math.max(0, current + delta));
+    setRefundQuantities((quantities) => ({
+      ...quantities,
+      [billItemId]: next > 0 ? String(next) : ""
+    }));
+    setFeedback(null);
+  };
+
   const selectFullRefund = () => {
     const nextQuantities = refundableItems.reduce<Record<string, string>>((accumulator, entry) => {
       if (entry.remainingQuantity > 0) {
@@ -578,6 +625,11 @@ export function RefundsWorkspace() {
         tone: "error",
         message: t("refund.adminOnly")
       });
+      return;
+    }
+
+    if (payoutError) {
+      setFeedback({ tone: "error", message: translateRefundError(t, payoutError) });
       return;
     }
 
@@ -1025,13 +1077,34 @@ export function RefundsWorkspace() {
                         </div>
                         <div>
                           <label className="mb-2 block text-sm font-medium text-ink">{t("refund.quantityLabel")}</label>
-                          <Input
-                            inputMode="numeric"
-                            value={refundQuantities[entry.item.id] ?? ""}
-                            onChange={(event) => handleRefundQuantityChange(entry.item.id, entry.remainingQuantity, event.target.value)}
-                            disabled={entry.remainingQuantity === 0 || refundState.isFullyRefunded || isRefunding || !canCreateRefund}
-                            placeholder="0"
-                          />
+                          <div className="grid grid-cols-[42px_minmax(0,1fr)_42px] gap-2">
+                            <Button
+                              aria-label={`Reduce refund quantity for ${localizedName(entry.item.productName, locale)}`}
+                              disabled={entry.selectedQuantity <= 0 || isRefunding || !canCreateRefund}
+                              onClick={() => adjustRefundQuantity(entry.item.id, entry.remainingQuantity, -1)}
+                              size="sm"
+                              variant="secondary"
+                            >
+                              <Minus className="h-4 w-4" />
+                            </Button>
+                            <Input
+                              className="text-center font-semibold"
+                              inputMode="numeric"
+                              value={refundQuantities[entry.item.id] ?? ""}
+                              onChange={(event) => handleRefundQuantityChange(entry.item.id, entry.remainingQuantity, event.target.value)}
+                              disabled={entry.remainingQuantity === 0 || refundState.isFullyRefunded || isRefunding || !canCreateRefund}
+                              placeholder="0"
+                            />
+                            <Button
+                              aria-label={`Increase refund quantity for ${localizedName(entry.item.productName, locale)}`}
+                              disabled={entry.selectedQuantity >= entry.remainingQuantity || isRefunding || !canCreateRefund}
+                              onClick={() => adjustRefundQuantity(entry.item.id, entry.remainingQuantity, 1)}
+                              size="sm"
+                              variant="secondary"
+                            >
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1062,6 +1135,11 @@ export function RefundsWorkspace() {
                     <option value="account">{t("refund.accountAdjustment")}</option>
                   </Select>
                   <p className="mt-2 text-xs leading-5 text-slate-500">{t("refund.payoutMethodHint")}</p>
+                  {payoutError ? (
+                    <p className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium leading-5 text-red-700">
+                      {translateRefundError(t, payoutError)}
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="mt-5">
@@ -1083,7 +1161,7 @@ export function RefundsWorkspace() {
 
                 <Button
                   className="mt-5 w-full"
-                  disabled={!canCreateRefund || refundState.isFullyRefunded || isRefunding || selectedRefundItems.length === 0}
+                  disabled={!canCreateRefund || refundState.isFullyRefunded || isRefunding || selectedRefundItems.length === 0 || Boolean(payoutError)}
                   onClick={handleCreateRefund}
                 >
                   {isRefunding ? t("refund.saving") : t("refund.createAction")}

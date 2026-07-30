@@ -2002,6 +2002,7 @@ export function AppProvider({
   const cloudBaseStateByShop = useRef<Record<string, ShopCloudStatePatch>>({});
   const cloudSyncInFlightByShop = useRef<Record<string, boolean>>({});
   const cloudSyncPendingByShop = useRef<Record<string, boolean>>({});
+  const deviceAccessMissingSinceByShop = useRef<Record<string, number>>({});
 
   useEffect(() => {
     let active = true;
@@ -2821,10 +2822,21 @@ export function AppProvider({
         Boolean(signedInAt) &&
         log.createdAt.localeCompare(signedInAt) > 0
     );
+    const hasDeviceAccess = hasActivatedDeviceAccess(state, session.shopId);
+
+    if (hasDeviceAccess) {
+      delete deviceAccessMissingSinceByShop.current[session.shopId];
+    } else if (!deviceAccessMissingSinceByShop.current[session.shopId]) {
+      deviceAccessMissingSinceByShop.current[session.shopId] = Date.now();
+    }
+
+    const deviceAccessWasRevoked =
+      !hasDeviceAccess &&
+      Date.now() - (deviceAccessMissingSinceByShop.current[session.shopId] ?? Date.now()) >= 5_000;
 
     if (
       getShopAccessBlock(state, session.shopId) ||
-      !hasActivatedDeviceAccess(state, session.shopId) ||
+      deviceAccessWasRevoked ||
       passwordWasResetAfterSignin
     ) {
       setState((current) => ({

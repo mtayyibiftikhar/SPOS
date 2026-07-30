@@ -16,6 +16,65 @@ function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
 }
 
+export function calculateRefundQuote({
+  bill,
+  billItems,
+  previousQuantitiesByBillItemId = {},
+  priorRefunds,
+  selectedItems
+}: {
+  bill: Bill;
+  billItems: BillItem[];
+  previousQuantitiesByBillItemId?: Record<string, number>;
+  priorRefunds: Refund[];
+  selectedItems: Array<{ billItemId: string; quantity: number }>;
+}) {
+  const selectedQuantities = selectedItems.reduce<Record<string, number>>((quantities, entry) => {
+    quantities[entry.billItemId] = roundMoney((quantities[entry.billItemId] ?? 0) + entry.quantity);
+    return quantities;
+  }, {});
+  const lineRevenueTotal = billItems.reduce((sum, item) => sum + item.lineTotal, 0);
+  const billRevenueScale = lineRevenueTotal > 0 ? bill.total / lineRevenueTotal : 1;
+  const alreadyRefunded = Math.abs(
+    priorRefunds
+      .filter((entry) => entry.originalBillId === bill.id)
+      .reduce((sum, entry) => sum + entry.amount, 0)
+  );
+  const priorPaidRefunds = Math.abs(
+    priorRefunds
+      .filter(
+        (entry) =>
+          entry.originalBillId === bill.id && (entry.paymentMethod === "cash" || entry.paymentMethod === "card")
+      )
+      .reduce((sum, entry) => sum + entry.amount, 0)
+  );
+  const selectedRefundValue = roundMoney(
+    billItems.reduce((sum, item) => {
+      const quantity = selectedQuantities[item.id] ?? 0;
+      const unitRevenue = (item.lineTotal / Math.max(item.quantity, 1)) * billRevenueScale;
+      return sum + unitRevenue * quantity;
+    }, 0)
+  );
+  const remainingBillValue = Math.max(0, roundMoney(bill.total - alreadyRefunded));
+  const fullyRefunded =
+    billItems.length > 0 &&
+    billItems.every(
+      (item) =>
+        (previousQuantitiesByBillItemId[item.id] ?? 0) + (selectedQuantities[item.id] ?? 0) >= item.quantity
+    );
+  const refundValue = fullyRefunded ? remainingBillValue : Math.min(remainingBillValue, selectedRefundValue);
+
+  return {
+    billRevenueScale,
+    fullyRefunded,
+    refundValue,
+    remainingBillValue,
+    refundablePaidAmount: Math.max(0, roundMoney(bill.paidAmount - priorPaidRefunds)),
+    selectedQuantities,
+    selectedRefundValue
+  };
+}
+
 function resolveBillBusinessDate(bill: Pick<Bill, "businessDate" | "createdAt">, timeZone: string) {
   if (bill.businessDate) {
     return bill.businessDate;

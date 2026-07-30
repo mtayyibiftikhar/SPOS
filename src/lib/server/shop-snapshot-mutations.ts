@@ -23,7 +23,7 @@ import {
 } from "@/lib/cash-control";
 import { applySettlementToBills, getCustomerAccountMetrics } from "@/lib/customer-accounts";
 import { createPublicReceiptToken } from "@/lib/public-receipts";
-import { calculateBillRefundState } from "@/lib/refunds";
+import { calculateBillRefundState, calculateRefundQuote } from "@/lib/refunds";
 import { calculateScheduledAttendanceClosure } from "@/lib/attendance";
 import { createId } from "@/lib/utils";
 import type {
@@ -755,41 +755,20 @@ function createRefundMutation(
   }
 
   const validSelected = selected.filter((entry): entry is { item: BillItem; quantity: number } => entry !== null);
-  const allRefundQuantities = { ...refundState.refundedQuantitiesByBillItemId };
-  validSelected.forEach((entry) => {
-    allRefundQuantities[entry.item.id] = (allRefundQuantities[entry.item.id] ?? 0) + entry.quantity;
+  const quote = calculateRefundQuote({
+    bill,
+    billItems,
+    previousQuantitiesByBillItemId: refundState.refundedQuantitiesByBillItemId,
+    priorRefunds: state.refunds ?? [],
+    selectedItems: validSelected.map((entry) => ({ billItemId: entry.item.id, quantity: entry.quantity }))
   });
-  const fullyRefunded =
-    billItems.length > 0 && billItems.every((item) => (allRefundQuantities[item.id] ?? 0) >= item.quantity);
-  const lineRevenueTotal = billItems.reduce((sum, item) => sum + item.lineTotal, 0);
-  const billRevenueScale = lineRevenueTotal > 0 ? bill.total / lineRevenueTotal : 1;
-  const alreadyRefunded = Math.abs(
-    (state.refunds ?? [])
-      .filter((entry) => entry.originalBillId === bill.id)
-      .reduce((sum, entry) => sum + entry.amount, 0)
-  );
-  const remainingBillValue = Math.max(0, Math.round((bill.total - alreadyRefunded) * 100) / 100);
-  const selectedRefundValue = Math.round(
-    validSelected.reduce(
-      (sum, entry) => sum + (entry.item.lineTotal / Math.max(entry.item.quantity, 1)) * billRevenueScale * entry.quantity,
-      0
-    ) * 100
-  ) / 100;
-  const refundValue = fullyRefunded ? remainingBillValue : Math.min(remainingBillValue, selectedRefundValue);
+  const { billRevenueScale, fullyRefunded, refundValue } = quote;
 
   if (refundValue <= 0) {
     return { result: { ok: false, message: "This bill has no refundable value remaining." }, state };
   }
 
-  const priorPaidRefunds = Math.abs(
-    (state.refunds ?? [])
-      .filter(
-        (entry) =>
-          entry.originalBillId === bill.id && (entry.paymentMethod === "cash" || entry.paymentMethod === "card")
-      )
-      .reduce((sum, entry) => sum + entry.amount, 0)
-  );
-  const refundablePaidAmount = Math.max(0, Math.round((bill.paidAmount - priorPaidRefunds) * 100) / 100);
+  const refundablePaidAmount = quote.refundablePaidAmount;
 
   if ((payload.payoutMethod === "cash" || payload.payoutMethod === "card") && refundValue > refundablePaidAmount) {
     return {

@@ -255,6 +255,46 @@ test("refund aggregates duplicate item requests and includes whole-bill discount
   assert.equal(accepted.state.products?.[0].stockQuantity, 6);
 });
 
+test("consecutive partial refunds charge only the newly selected quantity", () => {
+  const state = openState({
+    bills: [bill()],
+    billItems: [billItem({ quantity: 4, grossLineTotal: 100, lineTotal: 100 })]
+  });
+  const first = applyCriticalShopMutation(
+    state,
+    {
+      type: "create_refund",
+      payload: {
+        billId: "bill_existing",
+        payoutMethod: "cash",
+        reason: "First partial return",
+        items: [{ billItemId: "bill_item_existing", quantity: 1 }]
+      }
+    },
+    { role: "shop_admin", shopId: SHOP_ID, userId: ADMIN_ID }
+  );
+  const second = applyCriticalShopMutation(
+    first.state,
+    {
+      type: "create_refund",
+      payload: {
+        billId: "bill_existing",
+        payoutMethod: "cash",
+        reason: "Second partial return",
+        items: [{ billItemId: "bill_item_existing", quantity: 1 }]
+      }
+    },
+    { role: "shop_admin", shopId: SHOP_ID, userId: ADMIN_ID }
+  );
+
+  assert.equal(first.result.ok, true);
+  assert.equal(first.state.refunds?.[0].amount, -20);
+  assert.equal(second.result.ok, true);
+  assert.equal(second.state.refunds?.[0].amount, -20);
+  assert.equal(second.state.bills?.[0].status, "paid");
+  assert.equal(second.state.refundItems?.reduce((sum, item) => sum + item.quantity, 0), 2);
+});
+
 test("only one business day can be open for a shop", () => {
   const initial = openState({ businessDays: [], shifts: [] });
   const started = applyCriticalShopMutation(

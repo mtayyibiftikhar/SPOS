@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePosApp } from "@/components/providers/app-provider";
 import { BrandedLoadingScreen } from "@/components/shared/branded-loading-screen";
 import type { WorkspaceKind } from "@/types/pos";
@@ -15,9 +15,14 @@ export function AuthGuard({
 }) {
   const router = useRouter();
   const { isHydrated, isShopCloudReady, logout, session } = usePosApp();
+  const logoutRef = useRef(logout);
   const [ownerSessionStatus, setOwnerSessionStatus] = useState<"checking" | "valid" | "invalid">(
     requiredWorkspace === "owner" ? "checking" : "valid"
   );
+
+  useEffect(() => {
+    logoutRef.current = logout;
+  }, [logout]);
 
   useEffect(() => {
     if (!isHydrated || requiredWorkspace !== "owner" || session?.workspace !== "owner") {
@@ -29,20 +34,21 @@ export function AuthGuard({
     void fetch("/api/auth/owner-login", { cache: "no-store" })
       .then((response) => {
         if (!active) return;
-        setOwnerSessionStatus(response.ok ? "valid" : "invalid");
+        const explicitlyUnauthorized = response.status === 401 || response.status === 403;
+        setOwnerSessionStatus(explicitlyUnauthorized ? "invalid" : "valid");
 
-        if (!response.ok) logout();
+        if (explicitlyUnauthorized) logoutRef.current();
       })
       .catch(() => {
         if (!active) return;
-        setOwnerSessionStatus("invalid");
-        logout();
+        // A temporary network failure must not destroy a valid local session.
+        setOwnerSessionStatus("valid");
       });
 
     return () => {
       active = false;
     };
-  }, [isHydrated, logout, requiredWorkspace, session?.workspace]);
+  }, [isHydrated, requiredWorkspace, session?.id, session?.workspace]);
 
   useEffect(() => {
     if (isHydrated && (!session || session.workspace !== requiredWorkspace)) {
@@ -68,16 +74,16 @@ export function AuthGuard({
 
     void fetch("/api/auth/shop-login", { cache: "no-store" })
       .then((response) => {
-        if (active && !response.ok) logout();
+        if (active && (response.status === 401 || response.status === 403)) logoutRef.current();
       })
       .catch(() => {
-        if (active) logout();
+        // Keep the POS open during transient connection/server failures.
       });
 
     return () => {
       active = false;
     };
-  }, [isHydrated, logout, requiredWorkspace, session?.workspace]);
+  }, [isHydrated, requiredWorkspace, session?.id, session?.workspace]);
 
   if (!isHydrated) {
     return <BrandedLoadingScreen />;
