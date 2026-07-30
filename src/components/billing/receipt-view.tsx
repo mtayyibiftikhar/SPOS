@@ -20,6 +20,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { ResilientImage } from "@/components/ui/resilient-image";
+import { ReceiptBrandHeader } from "@/components/billing/receipt-brand-header";
 import { Textarea } from "@/components/ui/textarea";
 import { customerMatchesSearch, isWalkInCustomerName } from "@/lib/billing";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
@@ -223,13 +224,6 @@ export function ReceiptView({ billId }: { billId: string }) {
   const receiptBrand = posSettings?.shopName ?? shop?.name ?? t("brand.name");
   const digitalReceiptUrl = buildPublicReceiptUrl(bill.publicToken);
   const receiptQrImageUrl = buildQrCodeImageUrl(digitalReceiptUrl, 172);
-  const receiptInitials =
-    receiptBrand
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part.charAt(0).toUpperCase())
-      .join("") || "SP";
   const formattedCustomerName = bill.customerName?.trim() || t("billing.walkInCustomer");
   const whatsappTarget = bill.customerWhatsapp || bill.customerPhone;
   const shareItems = items.map((item) => ({
@@ -543,25 +537,13 @@ export function ReceiptView({ billId }: { billId: string }) {
           className="receipt-paper mx-auto w-full max-w-3xl p-6 sm:p-8 print:mx-0 print:max-w-none print:rounded-none print:border-0 print:bg-white print:p-0 print:shadow-none"
           id="receipt-print-area"
         >
-          <div className="border-b border-dashed border-line pb-4 text-center">
-            <div className="mb-2 flex justify-center">
-              <ResilientImage
-                src={posSettings?.logoUrl}
-                alt={posSettings?.shopName || shop?.name || "Shop logo"}
-                className="max-h-14 max-w-[11rem] object-contain"
-                fallback={
-                <div className="flex h-12 w-12 items-center justify-center rounded-[18px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.18),_transparent_42%),linear-gradient(160deg,#0f172a_0%,#172036_100%)] font-display text-lg font-semibold tracking-[0.18em] text-white shadow-[0_16px_30px_rgba(15,23,42,0.16)]">
-                  {receiptInitials}
-                </div>
-                }
-              />
-            </div>
-            <p className="mx-auto max-w-[22rem] text-balance break-words font-display text-2xl font-semibold leading-tight text-ink">
-              {receiptBrand}
-            </p>
-            <p className="mt-1 text-sm text-slate-600">{posSettings?.address ?? shop?.address}</p>
-            <p className="text-sm text-slate-600">{posSettings?.phone ?? shop?.phone}</p>
-          </div>
+          <ReceiptBrandHeader
+            address={posSettings?.address ?? shop?.address}
+            logoUrl={posSettings?.logoUrl}
+            phone={posSettings?.phone ?? shop?.phone}
+            shopName={receiptBrand}
+            vatNumber={posSettings?.vatNumber}
+          />
 
           {refundState && refundState.totalRefundAmount > 0 ? (
             <div
@@ -609,12 +591,6 @@ export function ReceiptView({ billId }: { billId: string }) {
                 <span className="font-medium text-ink">{t("common.dueAmount")}:</span>{" "}
                 {formatCurrency(bill.dueAmount, shop?.currency ?? "SAR", locale)}
               </p>
-              {posSettings?.vatNumber ? (
-                <p>
-                  <span className="font-medium text-ink">{t("common.vatNumber")}:</span>{" "}
-                  {posSettings.vatNumber}
-                </p>
-              ) : null}
             </div>
           </div>
 

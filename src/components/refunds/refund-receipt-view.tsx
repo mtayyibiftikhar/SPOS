@@ -8,7 +8,7 @@ import { usePosApp } from "@/components/providers/app-provider";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
-import { ResilientImage } from "@/components/ui/resilient-image";
+import { ReceiptBrandHeader } from "@/components/billing/receipt-brand-header";
 import { paymentMethodLabelKeys } from "@/lib/i18n";
 import { printElementWithNative } from "@/lib/native-bridge";
 import { formatRefundReceiptNumber } from "@/lib/refunds";
@@ -28,12 +28,6 @@ export function RefundReceiptView({ refundId }: { refundId: string }) {
   const receiptNumber = formatRefundReceiptNumber(refundId);
   const isFreshReceipt = searchParams.get("fresh") === "1";
   const receiptBrand = settings?.pos.shopName ?? shop?.name ?? t("brand.name");
-  const initials = receiptBrand
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join("") || "SP";
 
   const printReceipt = async (silent = false) => {
     const printed = await printElementWithNative("#refund-receipt-print-area", `Refund ${receiptNumber}`, {
@@ -95,16 +89,14 @@ export function RefundReceiptView({ refundId }: { refundId: string }) {
       ) : null}
 
       <Card className="receipt-paper mx-auto w-full max-w-3xl p-6 sm:p-8 print:mx-0 print:max-w-none print:rounded-none print:border-0 print:bg-white print:p-0 print:shadow-none" id="refund-receipt-print-area">
-        <div className="border-b border-dashed border-line pb-5 text-center">
-          <ResilientImage
-            src={settings?.pos.logoUrl}
-            alt={`${receiptBrand} logo`}
-            className="mx-auto mb-3 max-h-14 max-w-[11rem] object-contain"
-            fallback={<div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-[18px] bg-slate-950 font-display text-lg font-semibold text-white">{initials}</div>}
+        <div>
+          <ReceiptBrandHeader
+            address={settings?.pos.address ?? shop?.address}
+            logoUrl={settings?.pos.logoUrl}
+            phone={settings?.pos.phone ?? shop?.phone}
+            shopName={receiptBrand}
+            vatNumber={settings?.pos.vatNumber}
           />
-          <p className="font-display text-2xl font-semibold text-ink">{receiptBrand}</p>
-          {settings?.pos.address ?? shop?.address ? <p className="mt-1 text-sm text-slate-600">{settings?.pos.address ?? shop?.address}</p> : null}
-          {settings?.pos.phone ?? shop?.phone ? <p className="text-sm text-slate-600">{settings?.pos.phone ?? shop?.phone}</p> : null}
           <div className="mx-auto mt-5 inline-flex items-center gap-2 rounded-full bg-red-50 px-4 py-2 text-sm font-semibold text-red-700">
             <ReceiptText className="h-4 w-4" />Refund receipt
           </div>

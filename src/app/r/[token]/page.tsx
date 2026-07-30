@@ -2,6 +2,7 @@ import { RotateCcw, ShieldCheck } from "lucide-react";
 import { notFound } from "next/navigation";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { PublicReceiptActions } from "@/components/billing/public-receipt-actions";
+import { ReceiptBrandHeader } from "@/components/billing/receipt-brand-header";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
 import { getReceiptItemNameLines } from "@/lib/receipt-language";
 import { buildPublicReceiptUrl, normalizePublicReceiptToken } from "@/lib/public-receipts";
@@ -27,6 +28,7 @@ type DigitalReceipt = {
   bill: Bill;
   cashier: User | null;
   items: BillItem[];
+  logoUrl: string | null;
   refunds: Refund[];
   refundItems: RefundItem[];
   settings: ShopSettingsBundle | null;
@@ -88,7 +90,7 @@ async function loadDigitalReceipt(token: string): Promise<DigitalReceipt | null>
   const refundIds = new Set(refunds.map((refund) => refund.id));
   const { data: liveSettings } = await supabase
     .from("pos_settings")
-    .select("vat_number")
+    .select("logo_url, vat_number")
     .eq("shop_id", bill.shopId)
     .maybeSingle();
 
@@ -96,6 +98,7 @@ async function loadDigitalReceipt(token: string): Promise<DigitalReceipt | null>
     bill,
     cashier: row.state.users?.find((user) => user.id === bill.cashierId) ?? null,
     items: row.state.billItems?.filter((item) => item.billId === bill.id) ?? [],
+    logoUrl: liveSettings ? liveSettings.logo_url : settings?.pos.logoUrl ?? null,
     refunds,
     refundItems: row.state.refundItems?.filter((item) => refundIds.has(item.refundId)) ?? [],
     settings,
@@ -123,10 +126,9 @@ export default async function PublicReceiptPage({ params }: PublicReceiptPagePro
     notFound();
   }
 
-  const { bill, cashier, items, refunds, refundItems, settings, shop, updatedAt, vatNumber } = receipt;
+  const { bill, cashier, items, logoUrl, refunds, refundItems, settings, shop, updatedAt, vatNumber } = receipt;
   const currency = shop?.currency ?? settings?.pos.currency ?? "SAR";
   const shopName = settings?.pos.shopName ?? shop?.name ?? "Simple POS";
-  const logoUrl = settings?.pos.logoUrl;
   const receiptSettings = settings?.receipt;
   const taxLabel = bill.taxName ?? settings?.tax.name ?? "Tax";
   const refundState = calculateBillRefundState({
@@ -150,22 +152,14 @@ export default async function PublicReceiptPage({ params }: PublicReceiptPagePro
         </div>
 
         <article className="overflow-hidden rounded-[36px] border border-slate-200 bg-white shadow-[0_28px_90px_rgba(15,23,42,0.10)]">
-          <header className="border-b border-slate-200 px-5 py-7 text-center sm:px-8">
-            {logoUrl ? (
-              <img
-                alt={shopName}
-                className="mx-auto mb-4 max-h-20 max-w-[12rem] object-contain"
-                src={logoUrl}
-              />
-            ) : null}
-            <h1 className="mx-auto max-w-lg text-balance font-display text-3xl font-semibold leading-tight">
-              {shopName}
-            </h1>
-            {settings?.pos.address ? <p className="mt-3 text-sm text-slate-600">{settings.pos.address}</p> : null}
-            {settings?.pos.phone ? <p className="mt-1 text-sm text-slate-600">{settings.pos.phone}</p> : null}
-            {vatNumber ? (
-              <p className="mt-1 text-sm font-medium text-slate-700">VAT No. {vatNumber}</p>
-            ) : null}
+          <header className="px-5 pt-7 sm:px-8">
+            <ReceiptBrandHeader
+              address={settings?.pos.address ?? shop?.address}
+              logoUrl={logoUrl}
+              phone={settings?.pos.phone ?? shop?.phone}
+              shopName={shopName}
+              vatNumber={vatNumber}
+            />
           </header>
 
           {refundState.totalRefundAmount > 0 ? (

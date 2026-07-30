@@ -1,6 +1,7 @@
 import type { Bill, BillItem, BrandProfile, POSSettings, ReceiptSettings, ReceiptSize, Shop, User } from "@/types/pos";
 import { hasNativeDownloadSupport, saveBlobWithNative } from "@/lib/native-bridge";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
+import { getPosAssetDeliveryUrl } from "@/lib/pos-asset-url";
 import { buildPublicReceiptUrl } from "@/lib/public-receipts";
 import { getReceiptItemNameLines } from "@/lib/receipt-language";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
@@ -452,7 +453,8 @@ export function buildReceiptPdfDocument({
   const headerLines = [
     normalizeCanvasText(posSettings?.shopName ?? shop?.name ?? "Simple POS"),
     normalizeCanvasText(posSettings?.address ?? shop?.address),
-    normalizeCanvasText(posSettings?.phone ?? shop?.phone)
+    normalizeCanvasText(posSettings?.phone ?? shop?.phone),
+    normalizeCanvasText(posSettings?.vatNumber ? `VAT No. ${posSettings.vatNumber}` : undefined)
   ].filter(Boolean);
 
   appendRule(elements, { spacingAfter: 10 });
@@ -475,15 +477,6 @@ export function buildReceiptPdfDocument({
     { size: 9.5, spacingAfter: 4 }
   );
   appendPair(elements, "Status", billStatusLabels[bill.status], { size: 9.5, spacingAfter: 8 });
-
-  if (posSettings?.vatNumber) {
-    appendPair(
-      elements,
-      "VAT No.",
-      sanitizePdfText(posSettings.vatNumber),
-      { size: 9.5, spacingAfter: 8 }
-    );
-  }
 
   if (receiptSettings?.showCustomer) {
     const customerLines = [
@@ -629,8 +622,8 @@ export function buildReceiptPdfDocument({
     fileName: buildReceiptFileName(bill.number),
     receiptSize,
     headerLines,
-    logoUrl: posSettings?.logoUrl,
-    ownerLogoUrl: ownerImprintLines.length > 0 ? brand?.logoUrl : undefined,
+    logoUrl: posSettings?.logoUrl ? getPosAssetDeliveryUrl(posSettings.logoUrl) : undefined,
+    ownerLogoUrl: ownerImprintLines.length > 0 && brand?.logoUrl ? getPosAssetDeliveryUrl(brand.logoUrl) : undefined,
     ownerImprintLines,
     qrCaption: "Digital receipt",
     qrCodeUrl: buildQrCodeImageUrl(buildPublicReceiptUrl(bill.publicToken), receiptSize === "a4" ? 156 : 116),
