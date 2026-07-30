@@ -579,7 +579,7 @@ export function BillsCenter() {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             {activeTab === "accountBills" ? (
               <Button asChild className="h-11 rounded-[16px]" variant="secondary">
-                <Link href="/customers?view=account">Open customer accounts</Link>
+                <Link href="/accounts">Open customer accounts</Link>
               </Button>
             ) : null}
             <label className="relative block xl:w-[360px]">

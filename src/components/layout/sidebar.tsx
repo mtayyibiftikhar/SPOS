@@ -13,7 +13,8 @@ import {
   RotateCcw,
   Settings2,
   ShoppingCart,
-  Users2
+  Users2,
+  WalletCards
 } from "lucide-react";
 import { mainNavItems } from "@/lib/constants";
 import { userRoleLabelKeys } from "@/lib/i18n";
@@ -27,6 +28,7 @@ const icons = {
   "/time-clock": Clock3,
   "/billing": ShoppingCart,
   "/customers": Users2,
+  "/accounts": WalletCards,
   "/products": Package,
   "/inventory": Boxes,
   "/bills": Receipt,

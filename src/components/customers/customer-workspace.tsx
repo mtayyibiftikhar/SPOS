@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ChevronLeft,
@@ -287,7 +287,8 @@ function splitNameForExport(name: string) {
   };
 }
 
-export function CustomerWorkspace() {
+export function CustomerWorkspace({ standaloneAccounts = false }: { standaloneAccounts?: boolean }) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { currentShop, currentShopId, locale, saveCustomer, deleteCustomer, settleCustomerAccount, state, t } = usePosApp();
   const customerImportRef = useRef<HTMLInputElement | null>(null);
@@ -311,9 +312,17 @@ export function CustomerWorkspace() {
   const [settlementError, setSettlementError] = useState<string | null>(null);
   const requestedView = searchParams.get("view");
   const activeView: CustomerView =
-    requestedView === "directory" || requestedView === "account" || requestedView === "history"
+    standaloneAccounts
+      ? "account"
+      : requestedView === "directory" || requestedView === "history"
       ? requestedView
       : "overview";
+
+  useEffect(() => {
+    if (!standaloneAccounts && requestedView === "account") {
+      router.replace("/accounts");
+    }
+  }, [requestedView, router, standaloneAccounts]);
 
   const shopCustomers = useMemo(
     () =>
@@ -1981,13 +1990,12 @@ export function CustomerWorkspace() {
   const customerNavItems = [
     { href: "/customers?view=overview", active: activeView === "overview", icon: UserRound, label: t("customers.sectionsOverview") },
     { href: "/customers?view=directory", active: activeView === "directory", icon: UserRound, label: "Customer" },
-    { href: "/customers?view=account", active: activeView === "account", icon: Wallet, label: t("customers.accountTitle") },
     { href: "/customers?view=history", active: activeView === "history", icon: ReceiptText, label: t("customers.paymentHistory") }
   ];
 
   return (
     <div className="space-y-5">
-      <nav className="grid max-w-4xl grid-cols-2 gap-2 rounded-[24px] border border-slate-200 bg-white/88 p-2 shadow-[0_18px_45px_rgba(15,23,42,0.05)] backdrop-blur md:grid-cols-4">
+      {!standaloneAccounts ? <nav className="grid max-w-3xl grid-cols-1 gap-2 rounded-[24px] border border-slate-200 bg-white/88 p-2 shadow-[0_18px_45px_rgba(15,23,42,0.05)] backdrop-blur sm:grid-cols-3">
         {customerNavItems.map((item) => {
           const Icon = item.icon;
 
@@ -2006,7 +2014,7 @@ export function CustomerWorkspace() {
             </Link>
           );
         })}
-      </nav>
+      </nav> : null}
 
       {activeView === "overview" ? (
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

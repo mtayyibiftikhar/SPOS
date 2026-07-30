@@ -1,7 +1,7 @@
 const baseUrl = process.argv[2] || "http://localhost:3187";
 
 const pageRoutes = [
-  "/", "/login", "/dashboard", "/billing", "/customers", "/products",
+  "/", "/login", "/dashboard", "/billing", "/customers", "/accounts", "/products",
   "/inventory", "/bills", "/refunds", "/reports", "/settings",
   "/settings/shop", "/settings/printers", "/settings/receipt",
   "/settings/day-shift", "/settings/discounts", "/settings/tax",

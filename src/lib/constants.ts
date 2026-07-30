@@ -9,6 +9,7 @@ export const mainNavItems: Array<{
   { href: "/time-clock", labelKey: "nav.timeClock", subtitleKey: "nav.timeClockSubtitle" },
   { href: "/billing", labelKey: "nav.billing", subtitleKey: "nav.billingSubtitle" },
   { href: "/customers", labelKey: "nav.customers", subtitleKey: "nav.customersSubtitle" },
+  { href: "/accounts", labelKey: "nav.accounts", subtitleKey: "nav.accountsSubtitle" },
   { href: "/products", labelKey: "nav.products", subtitleKey: "nav.productsSubtitle" },
   { href: "/inventory", labelKey: "nav.inventory", subtitleKey: "nav.inventorySubtitle" },
   { href: "/bills", labelKey: "nav.bills", subtitleKey: "nav.billsSubtitle" },

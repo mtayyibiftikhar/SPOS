@@ -497,7 +497,7 @@ export function ReceiptView({ billId }: { billId: string }) {
       <div className="flex flex-wrap gap-3 print:hidden">
         {fromAccounts ? (
           <Button asChild variant="secondary">
-            <Link href="/customers?view=account">
+            <Link href="/accounts">
               <span className="inline-flex items-center gap-2">
                 <ArrowLeft className="h-4 w-4" />
                 Back to accounts
