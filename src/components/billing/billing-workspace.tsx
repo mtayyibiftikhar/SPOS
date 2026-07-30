@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
+  BadgePercent,
   Banknote,
   CheckCircle2,
   CircleAlert,
@@ -199,7 +200,7 @@ function StatusChip({ icon: Icon, label, tone }: StatusChipProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em]",
+        "inline-flex h-10 items-center gap-2 rounded-[13px] px-3.5 text-[10px] font-semibold uppercase tracking-[0.16em]",
         tone === "success" && "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
         tone === "warning" && "bg-amber-50 text-amber-800 ring-1 ring-amber-200",
         tone === "neutral" && "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
@@ -309,6 +310,7 @@ export function BillingWorkspace() {
   const [heldBills, setHeldBills] = useState<HeldBill[]>([]);
   const [heldBillsLoaded, setHeldBillsLoaded] = useState(false);
   const [showHeldBills, setShowHeldBills] = useState(false);
+  const [editingDiscountProductId, setEditingDiscountProductId] = useState<string | null>(null);
 
   const deferredQuickSearch = useDeferredValue(quickSearch);
 
@@ -1247,8 +1249,8 @@ export function BillingWorkspace() {
     }
 
     return (
-      <div className="space-y-2.5">
-        <div className="hidden rounded-[18px] border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 xl:grid xl:grid-cols-[minmax(0,1.35fr)_112px_168px_112px_124px_44px] xl:items-center">
+      <div className="space-y-3">
+        <div className="hidden px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 xl:grid xl:grid-cols-[minmax(0,1.35fr)_112px_132px_124px_124px_44px] xl:items-center">
           <span>{t("common.items")}</span>
           <span>{t("common.salePrice")}</span>
           <span>{t("common.discount")}</span>
@@ -1260,9 +1262,9 @@ export function BillingWorkspace() {
         {cartProducts.map((line) => (
           <div
             key={line.product.id}
-            className="rounded-[22px] border border-slate-200 bg-white px-3 py-3 shadow-[0_12px_26px_rgba(15,23,42,0.05)]"
+            className="rounded-[18px] border border-slate-200 bg-white px-3 py-3 shadow-[0_8px_20px_rgba(15,23,42,0.035)]"
           >
-            <div className="grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_112px_168px_112px_124px_44px] xl:items-center">
+            <div className="grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_112px_132px_124px_124px_44px] xl:items-center">
               <div className="min-w-0">
                 <div className="flex items-start justify-between gap-3 xl:block">
                   <div className="min-w-0">
@@ -1299,40 +1301,30 @@ export function BillingWorkspace() {
                 <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 xl:hidden">
                   {t("common.discount")}
                 </label>
-                <div className="grid grid-cols-[1fr_72px] gap-1.5">
-                  <div className="grid grid-cols-2 rounded-[14px] border border-slate-200 bg-slate-50 p-1">
-                    <button
-                      className={cn(
-                        "rounded-[10px] px-2 py-2 text-[11px] font-semibold transition",
-                        line.discountType === "fixed" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-white"
-                      )}
-                      onClick={() => updateLineDiscount(line.product.id, { discountType: "fixed" })}
-                      type="button"
-                    >
-                      {t("common.fixed")}
-                    </button>
-                    <button
-                      className={cn(
-                        "rounded-[10px] px-2 py-2 text-[11px] font-semibold transition",
-                        line.discountType === "percentage" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-white"
-                      )}
-                      onClick={() => updateLineDiscount(line.product.id, { discountType: "percentage" })}
-                      type="button"
-                    >
-                      %
-                    </button>
-                  </div>
-                  <Input
-                    className="h-10 rounded-[14px] border-slate-200 bg-slate-50 px-2 text-sm text-slate-950"
-                    inputMode="decimal"
-                    value={line.discountValueInput}
-                    onChange={(event) =>
-                      updateLineDiscount(line.product.id, {
-                        discountValueInput: sanitizePriceInput(event.target.value) || "0"
-                      })
-                    }
-                  />
-                </div>
+                <button
+                  aria-expanded={editingDiscountProductId === line.product.id}
+                  className={cn(
+                    "inline-flex h-10 w-full items-center justify-center gap-2 rounded-[14px] border px-3 text-xs font-semibold transition",
+                    editingDiscountProductId === line.product.id
+                      ? "border-slate-950 bg-slate-950 text-white"
+                      : line.discountAmount > 0
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                        : "border-slate-200 bg-slate-50 text-slate-700 hover:border-emerald-200 hover:bg-emerald-50"
+                  )}
+                  onClick={() =>
+                    setEditingDiscountProductId((current) =>
+                      current === line.product.id ? null : line.product.id
+                    )
+                  }
+                  type="button"
+                >
+                  <BadgePercent className="h-4 w-4" />
+                  <span className="truncate">
+                    {line.discountAmount > 0
+                      ? `-${formatCurrency(line.discountAmount, currency, locale)}`
+                      : t("common.discount")}
+                  </span>
+                </button>
               </div>
 
               <div>
@@ -1358,7 +1350,7 @@ export function BillingWorkspace() {
                 </div>
               </div>
 
-              <div className="rounded-[16px] bg-emerald-50 px-3 py-2 text-right ring-1 ring-emerald-100">
+              <div className="rounded-[14px] bg-emerald-50 px-3 py-2.5 text-right ring-1 ring-emerald-100">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-700 xl:hidden">
                   {t("common.total")}
                 </p>
@@ -1380,6 +1372,53 @@ export function BillingWorkspace() {
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
+
+            {editingDiscountProductId === line.product.id ? (
+              <div className="mt-3 flex flex-col gap-3 rounded-[16px] border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center">
+                <div className="grid grid-cols-2 rounded-[13px] border border-slate-200 bg-white p-1 sm:w-[190px]">
+                  <button
+                    className={cn(
+                      "rounded-[9px] px-3 py-2 text-xs font-semibold transition",
+                      line.discountType === "fixed" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-50"
+                    )}
+                    onClick={() => updateLineDiscount(line.product.id, { discountType: "fixed" })}
+                    type="button"
+                  >
+                    {t("common.fixed")}
+                  </button>
+                  <button
+                    className={cn(
+                      "rounded-[9px] px-3 py-2 text-xs font-semibold transition",
+                      line.discountType === "percentage" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-50"
+                    )}
+                    onClick={() => updateLineDiscount(line.product.id, { discountType: "percentage" })}
+                    type="button"
+                  >
+                    %
+                  </button>
+                </div>
+                <Input
+                  autoFocus
+                  className="h-10 rounded-[13px] border-slate-200 bg-white px-3 text-sm text-slate-950 sm:w-32"
+                  inputMode="decimal"
+                  value={line.discountValueInput}
+                  onChange={(event) =>
+                    updateLineDiscount(line.product.id, {
+                      discountValueInput: sanitizePriceInput(event.target.value) || "0"
+                    })
+                  }
+                />
+                <button
+                  aria-label={t("common.close")}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-[13px] border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 sm:ml-auto"
+                  onClick={() => setEditingDiscountProductId(null)}
+                  type="button"
+                >
+                  <X className="h-4 w-4" />
+                  {t("common.close")}
+                </button>
+              </div>
+            ) : null}
           </div>
         ))}
       </div>
@@ -1435,7 +1474,7 @@ export function BillingWorkspace() {
         key={product.id}
         aria-disabled={stockBlocked}
         className={cn(
-          "group grid w-full grid-cols-[64px_minmax(0,1fr)] gap-3 rounded-[22px] border border-slate-200 bg-white p-3 text-left shadow-[0_12px_26px_rgba(15,23,42,0.05)] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 sm:grid-cols-[72px_minmax(0,1fr)]",
+          "group grid w-full grid-cols-[76px_minmax(0,1fr)] gap-3 rounded-[20px] border border-slate-200 bg-white p-3 text-left shadow-[0_10px_24px_rgba(15,23,42,0.045)] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 sm:grid-cols-[84px_minmax(0,1fr)]",
           stockBlocked
             ? "opacity-70"
             : "cursor-pointer hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-[0_16px_34px_rgba(15,23,42,0.08)]"
@@ -1452,7 +1491,7 @@ export function BillingWorkspace() {
         role="button"
         tabIndex={stockBlocked ? -1 : 0}
       >
-        <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-[18px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.18),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)] sm:h-[72px] sm:w-[72px]">
+        <div className="flex h-[76px] w-[76px] items-center justify-center overflow-hidden rounded-[16px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.18),_transparent_42%),linear-gradient(145deg,#f8fafc_0%,#eef4ef_100%)] sm:h-[84px] sm:w-[84px]">
           <ResilientImage
             src={product.imageUrl}
             alt={productName}
@@ -1479,13 +1518,14 @@ export function BillingWorkspace() {
               </span>
             ) : null}
           </div>
-          <p className="mt-2 text-lg font-semibold leading-none tracking-[-0.03em] text-slate-950">
+          <p className="mt-2 text-lg font-semibold leading-none tracking-[-0.03em] text-emerald-700">
             {formatCurrency(product.salePrice, currency, locale)}
           </p>
         </div>
 
-        <div className="col-span-2 flex items-center justify-between border-t border-slate-100 pt-2">
-          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-700">
+        <div className="col-span-2 flex items-center justify-between border-t border-slate-100 pt-2.5">
+          <p className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-700">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
             {quantityInCart > 0 ? `${quantityInCart} ×` : t("common.add")}
           </p>
           {quantityInCart > 0 ? (
@@ -1572,13 +1612,13 @@ export function BillingWorkspace() {
   };
 
   const buildView = (
-    <div className="mx-auto flex w-full max-w-[1920px] flex-col gap-3 xl:h-[90dvh] xl:overflow-hidden">
-      <Card className="rounded-[28px] border-white/70 bg-white/92 px-4 py-3 shadow-[0_18px_44px_rgba(15,23,42,0.06)]">
+    <div className="mx-auto flex w-full max-w-[1920px] flex-col gap-3 xl:h-[calc(100dvh-1.5rem)] xl:overflow-hidden">
+      <Card className="rounded-[26px] border-white/70 bg-white/94 px-5 py-4 shadow-[0_18px_44px_rgba(15,23,42,0.06)]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2.5">
             <button
               aria-label={t("nav.dashboard")}
-              className="group inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] border border-slate-200 bg-white text-slate-700 shadow-[0_10px_24px_rgba(15,23,42,0.07)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+              className="group inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] border border-slate-200 bg-white text-slate-700 shadow-[0_10px_24px_rgba(15,23,42,0.07)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
               data-testid="billing-dashboard-back"
               onClick={() => window.location.assign("/dashboard")}
               title={t("nav.dashboard")}
@@ -1615,7 +1655,7 @@ export function BillingWorkspace() {
 
           <div className="flex flex-wrap items-center gap-2">
             <Button
-              className="h-10 rounded-[14px] border border-amber-200 bg-amber-50 px-4 text-amber-900 hover:bg-amber-100"
+              className="h-12 rounded-[15px] border border-amber-200 bg-amber-50 px-5 text-amber-900 hover:bg-amber-100"
               onClick={holdCurrentBill}
               variant="secondary"
             >
@@ -1626,7 +1666,7 @@ export function BillingWorkspace() {
             </Button>
             <Button
               className={cn(
-                "h-10 rounded-[14px] border px-4 transition",
+                "h-12 rounded-[15px] border px-5 transition",
                 showHeldBills
                   ? "border-slate-950 bg-slate-950 text-white hover:bg-slate-900"
                   : "border-slate-200 bg-white text-slate-950 hover:border-emerald-200 hover:bg-emerald-50"
@@ -1754,13 +1794,13 @@ export function BillingWorkspace() {
         ) : null}
       </Card>
 
-      <div className="grid flex-1 min-h-0 gap-3 xl:grid-cols-2">
-        <Card className="grid min-h-[560px] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:order-2 xl:min-h-0">
-          <div className="border-b border-slate-200 px-4 py-4">
+      <div className="grid flex-1 min-h-0 gap-3 xl:grid-cols-[minmax(0,0.98fr)_minmax(0,1.02fr)]">
+        <Card className="grid min-h-[560px] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[26px] border-white/70 bg-white/95 shadow-[0_20px_52px_rgba(15,23,42,0.065)] xl:order-2 xl:min-h-0">
+          <div className="border-b border-slate-200 px-5 py-5">
             <div className="relative">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
-                className="h-11 rounded-[16px] border-slate-200 bg-slate-50 pl-11 text-sm text-slate-950"
+                className="h-14 rounded-[16px] border-slate-200 bg-slate-50 pl-12 text-sm text-slate-950"
                 placeholder={t("billing.productSearchCompact")}
                 value={productSearch}
                 onChange={(event) => setProductSearch(event.target.value)}
@@ -1863,8 +1903,8 @@ export function BillingWorkspace() {
           </div>
         </Card>
 
-        <Card className="grid min-h-[560px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[30px] border-white/70 bg-white/95 shadow-[0_24px_60px_rgba(15,23,42,0.07)] xl:order-1 xl:min-h-0">
-          <div className="border-b border-slate-200 px-4 py-4">
+        <Card className="grid min-h-[560px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[26px] border-white/70 bg-white/95 shadow-[0_20px_52px_rgba(15,23,42,0.065)] xl:order-1 xl:min-h-0">
+          <div className="border-b border-slate-200 px-5 py-4">
             <SectionEyebrow>{t("billing.quickProductsTitle")}</SectionEyebrow>
             <div className="mt-1 flex items-start justify-between gap-3">
               <div>
@@ -1891,7 +1931,7 @@ export function BillingWorkspace() {
             <div className="relative mt-3">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
-                className="h-11 rounded-[16px] border-slate-200 bg-slate-50 pl-11 text-sm text-slate-950"
+                className="h-14 rounded-[16px] border-slate-200 bg-slate-50 pl-12 text-sm text-slate-950"
                 placeholder={t("billing.quickSearchPlaceholder")}
                 value={quickSearch}
                 onChange={(event) => setQuickSearch(event.target.value)}
@@ -1899,7 +1939,7 @@ export function BillingWorkspace() {
             </div>
           </div>
 
-          <div className="min-h-0 overflow-y-auto px-4 py-4">
+          <div className="min-h-0 overflow-y-auto px-5 py-4">
             {showQuickSearchProducts ? (
               quickSearchProducts.length > 0 ? (
                 <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">{quickSearchProducts.map((product) => renderQuickProductCard(product))}</div>
