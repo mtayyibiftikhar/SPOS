@@ -3864,13 +3864,15 @@ export function AppProvider({
           const expenseCategoryId = createId("expense_cat");
           const slug = `${slugify(normalizedShopName)}-${shopId.slice(-4)}`;
           const productKey = generateProductKeyCode(current.productKeys);
-          const normalizedExpiry = toDateTime(expiresAt);
+          const trialExpiry = new Date(createdAt);
+          trialExpiry.setDate(trialExpiry.getDate() + 3);
+          const normalizedExpiry = licenseStatus === "trial" ? trialExpiry.toISOString() : toDateTime(expiresAt);
           const license = {
             id: licenseId,
             shopId,
             status: licenseStatus,
             expiresAt: normalizedExpiry,
-            autoLockDaysAfterExpiry: Math.max(0, Math.round(autoLockDaysAfterExpiry)),
+            autoLockDaysAfterExpiry: licenseStatus === "trial" ? 0 : Math.max(0, Math.round(autoLockDaysAfterExpiry)),
             lastPaymentAt: licenseStatus === "active" ? createdAt : undefined,
             lockedAt: licenseStatus === "locked" ? createdAt : undefined,
             lockReason: licenseStatus === "locked" ? "Created as locked by owner." : undefined

@@ -13,6 +13,7 @@ import { calculateBusinessDaySummary, calculateShiftSummary } from "../../src/li
 import { findBarcodeConflict, findCategoryNameConflict, normalizeBarcode } from "../../src/lib/catalog";
 import { applySettlementToBills } from "../../src/lib/customer-accounts";
 import { getLedgerControlTotals, buildSaleLedgerEntries } from "../../src/lib/accounting";
+import { sanitizeNumericInput } from "../../src/lib/numeric-input";
 import { combinePhoneNumber, sanitizePhoneDigits, sanitizePhoneInput, splitPhoneNumber } from "../../src/lib/phone";
 import { calculateBillRefundState, calculateSalesReportSummary, formatRefundReceiptNumber } from "../../src/lib/refunds";
 import { createPublicReceiptToken } from "../../src/lib/public-receipts";
@@ -519,6 +520,12 @@ test("phone input accepts only digits and one leading plus", () => {
   assert.equal(sanitizePhoneInput("05(012) 3456"), "050123456");
   assert.equal(sanitizePhoneInput("9+66+500"), "966500");
   assert.equal(sanitizePhoneInput("+++"), "");
+});
+
+test("numeric input rejects alphabetic and special characters", () => {
+  assert.equal(sanitizeNumericInput("SAR 12a3.45!", true), "123.45");
+  assert.equal(sanitizeNumericInput("2e+4", false), "24");
+  assert.equal(sanitizeNumericInput("12.3.4", true), "12.34");
 });
 
 test("public receipt tokens are long, URL-safe, and unique", () => {

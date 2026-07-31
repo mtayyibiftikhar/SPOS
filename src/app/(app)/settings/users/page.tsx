@@ -409,6 +409,7 @@ export default function UsersPage() {
           <label className="mb-2 block text-sm font-medium text-ink">{t("common.phone")}</label>
           <Input
             disabled={!canManageUsers}
+            inputMode="tel"
             value={userForm.phone}
             onChange={(event) =>
               setUserForm((current) => ({

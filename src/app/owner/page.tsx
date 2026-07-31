@@ -261,6 +261,12 @@ function getExpiryDateForBillingCycle(billingCycle: BillingCycle) {
   return getExtendedExpiryDate(billingCycle);
 }
 
+function getTrialExpiryDate() {
+  const expiry = new Date();
+  expiry.setDate(expiry.getDate() + 3);
+  return formatDateInput(expiry);
+}
+
 function getExtendedExpiryDate(billingCycle: BillingCycle, currentExpiry?: string) {
   const current = currentExpiry ? new Date(currentExpiry) : new Date();
   const expiry = Number.isFinite(current.getTime()) && current.getTime() > Date.now() ? current : new Date();
@@ -1094,7 +1100,15 @@ export default function OwnerPage() {
 
   const createShop = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const result = ownerCreateShop(createShopForm);
+    const result = ownerCreateShop(
+      createShopForm.licenseStatus === "trial"
+        ? {
+            ...createShopForm,
+            expiresAt: getTrialExpiryDate(),
+            autoLockDaysAfterExpiry: 0
+          }
+        : createShopForm
+    );
 
     showResult(result, result.shopId);
 
@@ -1113,7 +1127,8 @@ export default function OwnerPage() {
         city: "",
         planName: getDefaultPlanName(current.billingCycle),
         licenseStatus: "active",
-        expiresAt: getExpiryDateForBillingCycle(current.billingCycle)
+        expiresAt: getExpiryDateForBillingCycle(current.billingCycle),
+        autoLockDaysAfterExpiry: 3
       }));
     }
   };
@@ -1889,7 +1904,7 @@ export default function OwnerPage() {
               setCreateShopForm((current) => ({
                 ...current,
                 billingCycle,
-                expiresAt: getExpiryDateForBillingCycle(billingCycle),
+                expiresAt: current.licenseStatus === "trial" ? getTrialExpiryDate() : getExpiryDateForBillingCycle(billingCycle),
                 planName: getDefaultPlanName(billingCycle)
               }));
             }}
@@ -1901,17 +1916,19 @@ export default function OwnerPage() {
         </label>
         <label className="space-y-2">
           <span className="text-sm font-semibold text-slate-950">Package amount</span>
-          <Input min={0} type="number" value={createShopForm.packagePrice} onChange={(event) => setCreateShopForm((current) => ({ ...current, packagePrice: Number(event.target.value) }))} />
+          <Input min={0} step="0.01" type="number" value={createShopForm.packagePrice} onChange={(event) => setCreateShopForm((current) => ({ ...current, packagePrice: Number(event.target.value) }))} />
         </label>
         <label className="space-y-2">
           <span className="text-sm font-semibold text-slate-950">Amount paid</span>
-          <Input min={0} type="number" value={createShopForm.totalPaid} onChange={(event) => setCreateShopForm((current) => ({ ...current, totalPaid: Number(event.target.value) }))} />
+          <Input min={0} step="0.01" type="number" value={createShopForm.totalPaid} onChange={(event) => setCreateShopForm((current) => ({ ...current, totalPaid: Number(event.target.value) }))} />
         </label>
         <label className="space-y-2">
           <span className="text-sm font-semibold text-slate-950">Expiry date</span>
-          <Input type="date" value={createShopForm.expiresAt} onChange={(event) => setCreateShopForm((current) => ({ ...current, expiresAt: event.target.value }))} />
+          <Input disabled={createShopForm.licenseStatus === "trial"} type="date" value={createShopForm.expiresAt} onChange={(event) => setCreateShopForm((current) => ({ ...current, expiresAt: event.target.value }))} />
           <span className="block text-xs leading-5 text-slate-500">
-            Auto-filled from today based on the billing cycle. You can still adjust it if needed.
+            {createShopForm.licenseStatus === "trial"
+              ? "Trial expiry is fixed automatically to three days from today."
+              : "Auto-filled from today based on the billing cycle. You can still adjust it if needed."}
           </span>
         </label>
         <label className="flex min-h-[82px] items-center gap-3 rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-3">
@@ -1922,7 +1939,9 @@ export default function OwnerPage() {
             onChange={(event) =>
               setCreateShopForm((current) => ({
                 ...current,
-                licenseStatus: event.target.checked ? "trial" : "active"
+                licenseStatus: event.target.checked ? "trial" : "active",
+                expiresAt: event.target.checked ? getTrialExpiryDate() : getExpiryDateForBillingCycle(current.billingCycle),
+                autoLockDaysAfterExpiry: event.target.checked ? 0 : 3
               }))
             }
           />
@@ -1935,11 +1954,11 @@ export default function OwnerPage() {
         </label>
         <label className="space-y-2">
           <span className="text-sm font-semibold text-slate-950">Allowed devices</span>
-          <Input min={1} type="number" value={createShopForm.allowedDevices} onChange={(event) => setCreateShopForm((current) => ({ ...current, allowedDevices: Number(event.target.value) }))} />
+          <Input min={1} step={1} type="number" value={createShopForm.allowedDevices} onChange={(event) => setCreateShopForm((current) => ({ ...current, allowedDevices: Number(event.target.value) }))} />
         </label>
         <label className="space-y-2">
           <span className="text-sm font-semibold text-slate-950">Auto-lock days after expiry</span>
-          <Input min={0} type="number" value={createShopForm.autoLockDaysAfterExpiry} onChange={(event) => setCreateShopForm((current) => ({ ...current, autoLockDaysAfterExpiry: Number(event.target.value) }))} />
+          <Input disabled={createShopForm.licenseStatus === "trial"} min={0} step={1} type="number" value={createShopForm.autoLockDaysAfterExpiry} onChange={(event) => setCreateShopForm((current) => ({ ...current, autoLockDaysAfterExpiry: Number(event.target.value) }))} />
         </label>
         <Button className="xl:col-span-3" type="submit">
           Create shop and key
@@ -2139,11 +2158,11 @@ export default function OwnerPage() {
                   </label>
                   <label className="space-y-2">
                     <span className="text-sm font-semibold text-slate-950">Allowed devices</span>
-                    <Input min={1} type="number" value={draft.allowedDevices} onChange={(event) => updateLicenseDraft(selectedShop.id, { allowedDevices: Number(event.target.value) })} />
+                    <Input min={1} step={1} type="number" value={draft.allowedDevices} onChange={(event) => updateLicenseDraft(selectedShop.id, { allowedDevices: Number(event.target.value) })} />
                   </label>
                   <label className="space-y-2">
                     <span className="text-sm font-semibold text-slate-950">Auto-lock after expiry</span>
-                    <Input min={0} type="number" value={draft.autoLockDaysAfterExpiry} onChange={(event) => updateLicenseDraft(selectedShop.id, { autoLockDaysAfterExpiry: Number(event.target.value) })} />
+                    <Input min={0} step={1} type="number" value={draft.autoLockDaysAfterExpiry} onChange={(event) => updateLicenseDraft(selectedShop.id, { autoLockDaysAfterExpiry: Number(event.target.value) })} />
                   </label>
                   <label className="space-y-2">
                     <span className="text-sm font-semibold text-slate-950">Lock reason</span>
@@ -2535,7 +2554,7 @@ export default function OwnerPage() {
                 </label>
                 <label className="space-y-2">
                   <span className="text-sm font-semibold text-slate-950">Price (SAR)</span>
-                  <Input min={0} type="number" value={packageForm.price} onChange={(event) => setPackageForm((current) => ({ ...current, price: Number(event.target.value) }))} />
+              <Input min={0} step="0.01" type="number" value={packageForm.price} onChange={(event) => setPackageForm((current) => ({ ...current, price: Number(event.target.value) }))} />
                 </label>
               </div>
               <Button disabled={isSavingPackage} type="submit">{isSavingPackage ? "Creating package..." : "Create package"}</Button>
@@ -2605,11 +2624,11 @@ export default function OwnerPage() {
               </label>
               <label className="space-y-2">
                 <span className="text-sm font-semibold text-slate-950">Package amount</span>
-                <Input min={0} type="number" value={draft.packagePrice} onChange={(event) => updateLicenseDraft(selectedShop.id, { packagePrice: Number(event.target.value) })} />
+                <Input min={0} step="0.01" type="number" value={draft.packagePrice} onChange={(event) => updateLicenseDraft(selectedShop.id, { packagePrice: Number(event.target.value) })} />
               </label>
               <label className="space-y-2">
                 <span className="text-sm font-semibold text-slate-950">Total paid</span>
-                <Input min={0} type="number" value={draft.totalPaid} onChange={(event) => updateLicenseDraft(selectedShop.id, { totalPaid: Number(event.target.value) })} />
+                <Input min={0} step="0.01" type="number" value={draft.totalPaid} onChange={(event) => updateLicenseDraft(selectedShop.id, { totalPaid: Number(event.target.value) })} />
               </label>
               <label className="space-y-2">
                 <span className="text-sm font-semibold text-slate-950">License status</span>
@@ -2625,7 +2644,7 @@ export default function OwnerPage() {
               </label>
               <label className="space-y-2">
                 <span className="text-sm font-semibold text-slate-950">Device limit</span>
-                <Input min={1} type="number" value={draft.allowedDevices} onChange={(event) => updateLicenseDraft(selectedShop.id, { allowedDevices: Number(event.target.value) })} />
+                <Input min={1} step={1} type="number" value={draft.allowedDevices} onChange={(event) => updateLicenseDraft(selectedShop.id, { allowedDevices: Number(event.target.value) })} />
               </label>
               <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Balance</p>
@@ -2635,7 +2654,7 @@ export default function OwnerPage() {
               </div>
               <label className="space-y-2 xl:col-span-2">
                 <span className="text-sm font-semibold text-slate-950">Record payment and renew</span>
-                <Input min={0} type="number" value={paymentAmount} onChange={(event) => setPaymentAmount(Number(event.target.value))} />
+                <Input min={0} step="0.01" type="number" value={paymentAmount} onChange={(event) => setPaymentAmount(Number(event.target.value))} />
               </label>
               <label className="flex items-center gap-3 rounded-3xl border border-violet-200 bg-violet-50 p-4 text-sm font-semibold text-slate-900">
                 <input
@@ -2869,7 +2888,7 @@ export default function OwnerPage() {
 
           {brandingView === "support" ? (
             <div className="grid gap-4 md:grid-cols-3">
-              <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">Support WhatsApp</span><Input value={supportWhatsapp} onChange={(event) => setSupportWhatsapp(event.target.value)} /></label>
+              <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">Support WhatsApp</span><Input inputMode="tel" value={supportWhatsapp} onChange={(event) => setSupportWhatsapp(sanitizePhoneInput(event.target.value))} /></label>
               <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">Support email</span><Input value={supportEmail} onChange={(event) => setSupportEmail(event.target.value)} /></label>
               <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">Support phone</span><Input inputMode="tel" value={supportPhone} onChange={(event) => setSupportPhone(sanitizePhoneInput(event.target.value))} /></label>
             </div>
