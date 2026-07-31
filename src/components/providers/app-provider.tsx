@@ -71,7 +71,8 @@ import {
   findCategoryNameConflict,
   findUserEmailConflict,
   generateUniqueBarcode,
-  normalizeBarcode
+  normalizeBarcode,
+  normalizeCatalogName
 } from "@/lib/catalog";
 import { calculateBillRefundState } from "@/lib/refunds";
 import {
@@ -201,6 +202,12 @@ type ProductInput = {
   taxable: boolean;
   quickTab: boolean;
   status: Product["status"];
+};
+
+type ProductImportInput = {
+  line: number;
+  categoryName: string;
+  product: ProductInput;
 };
 
 type OwnerCreateShopInput = {
@@ -755,6 +762,7 @@ interface AppContextValue {
   updateCategory: (categoryId: string, payload: Partial<ProductCategory>) => { ok: boolean; message?: string };
   deleteCategory: (categoryId: string) => { ok: boolean; message?: string };
   saveProduct: (payload: ProductInput) => { ok: boolean; message?: string; barcode?: string };
+  importProducts: (rows: ProductImportInput[]) => { ok: boolean; message?: string; importedCount?: number };
   adjustInventory: (payload: {
     productId: string;
     type: "add" | "remove";
@@ -5926,6 +5934,91 @@ export function AppProvider({
               },
               ...current.products
             ]
+          };
+        }));
+
+        return result;
+      },
+      importProducts: (rows) => {
+        if (!currentShopId) {
+          return { ok: false, message: "Shop unavailable." };
+        }
+
+        let result: { ok: boolean; message?: string; importedCount?: number } = {
+          ok: false,
+          message: "Unable to import products."
+        };
+
+        flushSync(() => setState((current) => {
+          const accessBlock = getShopAccessBlock(current, currentShopId);
+          if (accessBlock) {
+            result = { ok: false, message: accessBlock };
+            return current;
+          }
+
+          const nextProducts = [...current.products];
+          const createdCategories: ProductCategory[] = [];
+          const createdProducts: Product[] = [];
+          const categoryIds = new Map(
+            current.categories
+              .filter((category) => category.shopId === currentShopId)
+              .map((category) => [normalizeCatalogName(category.name), category.id])
+          );
+
+          for (const row of rows) {
+            const categoryName = row.categoryName.trim();
+            const normalizedCategoryName = normalizeCatalogName(categoryName);
+            let categoryId = normalizedCategoryName ? categoryIds.get(normalizedCategoryName) : undefined;
+            if (categoryName && !categoryId) {
+              categoryId = createId("cat");
+              categoryIds.set(normalizedCategoryName, categoryId);
+              const category: ProductCategory = {
+                id: categoryId,
+                shopId: currentShopId,
+                name: categoryName,
+                createdAt: new Date().toISOString()
+              };
+              createdCategories.push(category);
+            }
+
+            const barcodeCandidates = [row.product.barcode, ...(row.product.barcodes ?? [])]
+              .map((barcode) => normalizeBarcode(barcode))
+              .filter((barcode): barcode is string => Boolean(barcode));
+            const resolvedBarcodes = Array.from(new Set(barcodeCandidates));
+            const barcodeConflict = resolvedBarcodes
+              .map((barcode) => findBarcodeConflict(nextProducts, currentShopId, barcode))
+              .find(Boolean);
+            if (barcodeConflict) {
+              result = { ok: false, message: `Line ${row.line}: another product already uses this barcode.` };
+              return current;
+            }
+
+            const generatedBarcode = resolvedBarcodes.length
+              ? undefined
+              : generateUniqueBarcode(nextProducts, currentShopId);
+            const finalBarcodes = generatedBarcode ? [generatedBarcode] : resolvedBarcodes;
+            const createdAt = new Date().toISOString();
+            const product: Product = {
+              ...row.product,
+              id: createId("prod"),
+              shopId: currentShopId,
+              categoryId,
+              barcode: finalBarcodes[0],
+              barcodes: finalBarcodes,
+              expiryDate: row.product.kind === "product" ? row.product.expiryDate?.trim() || undefined : undefined,
+              imageUrl: row.product.imageUrl?.trim() || undefined,
+              createdAt,
+              updatedAt: createdAt
+            };
+            createdProducts.push(product);
+            nextProducts.push(product);
+          }
+
+          result = { ok: true, importedCount: createdProducts.length };
+          return {
+            ...current,
+            categories: [...createdCategories, ...current.categories],
+            products: [...createdProducts, ...current.products]
           };
         }));
 

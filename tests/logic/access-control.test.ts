@@ -63,6 +63,10 @@ test("legacy role permissions migrate into built-in access roles", () => {
   assert.deepEqual(legacyCashier?.permissions, ["billing", "refunds"]);
 });
 
+test("an explicitly empty role list stays empty after built-in roles are deleted", () => {
+  assert.deepEqual(getAccessRoles({ ...baseSettings, accessRoles: [] }), []);
+});
+
 test("route permissions include every primary POS section", () => {
   assert.equal(permissionForPath("/accounts"), "accounts");
   assert.equal(permissionForPath("/settings/backup"), "backup");

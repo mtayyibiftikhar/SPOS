@@ -13,27 +13,16 @@ import { usePosApp } from "@/components/providers/app-provider";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { downloadCsv, normalizeCsvHeader, parseCsv } from "@/lib/csv";
-import { normalizeBarcode, normalizeCatalogName, normalizeSpreadsheetBarcode, unwrapSpreadsheetText } from "@/lib/catalog";
+import { normalizeBarcode, normalizeSpreadsheetBarcode, unwrapSpreadsheetText } from "@/lib/catalog";
 import { hasShopPermission } from "@/lib/access-control";
+import {
+  downloadProductImportWorkbook,
+  PRODUCT_IMPORT_HEADERS,
+  readProductImportWorkbook
+} from "@/lib/product-import-workbook";
 import type { Product, ProductCategory } from "@/types/pos";
 
-const HEADERS = [
-  "english_name",
-  "arabic_name",
-  "urdu_name",
-  "type",
-  "category",
-  "sale_price",
-  "cost_price",
-  "primary_barcode",
-  "additional_barcodes",
-  "stock_quantity",
-  "reorder_level",
-  "taxable",
-  "quick_tab",
-  "status",
-  "image_url"
-] as const;
+const HEADERS = PRODUCT_IMPORT_HEADERS;
 
 type ProductCsvRow = Record<(typeof HEADERS)[number], string>;
 type PreviewRow = {
@@ -45,8 +34,8 @@ type PreviewRow = {
 
 function booleanValue(value: string) {
   const normalized = value.trim().toLowerCase();
-  if (["true", "yes", "1"].includes(normalized)) return true;
-  if (["false", "no", "0"].includes(normalized)) return false;
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
   return null;
 }
 
@@ -104,7 +93,7 @@ function productRows(products: Product[], categories: ProductCategory[]) {
 }
 
 export function ProductDataWorkspace() {
-  const { addCategory, currentSettings, currentShopId, saveProduct, session, state } = usePosApp();
+  const { currentSettings, currentShopId, importProducts: importProductBatch, session, state } = usePosApp();
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<PreviewRow[]>([]);
   const [fileName, setFileName] = useState("");
@@ -116,26 +105,7 @@ export function ProductDataWorkspace() {
   const invalidRows = preview.length - validRows.length;
 
   const downloadTemplate = () => {
-    downloadCsv("product-import-template.csv", [
-      [...HEADERS],
-      [
-        "Sample coffee",
-        "",
-        "",
-        "product",
-        "Drinks",
-        12,
-        6,
-        excelText("6281234567890"),
-        excelText("6281234567891|6281234567892"),
-        20,
-        5,
-        true,
-        true,
-        "active",
-        ""
-      ]
-    ]);
+    downloadProductImportWorkbook();
   };
 
   const exportProducts = () => {
@@ -147,7 +117,19 @@ export function ProductDataWorkspace() {
     if (!file) return;
     setMessage(null);
     setFileName(file.name);
-    const rows = parseCsv(await file.text());
+    let rows: string[][];
+    try {
+      rows = file.name.toLowerCase().endsWith(".xlsx")
+        ? readProductImportWorkbook(new Uint8Array(await file.arrayBuffer()))
+        : parseCsv(await file.text());
+    } catch (error) {
+      setPreview([]);
+      setMessage({
+        tone: "error",
+        text: error instanceof Error ? error.message : "Unable to read this product spreadsheet."
+      });
+      return;
+    }
     if (rows.length < 2) {
       setPreview([]);
       setMessage({ tone: "error", text: "The CSV has no product rows." });
@@ -173,11 +155,22 @@ export function ProductDataWorkspace() {
     });
 
     const fileBarcodeOwners = new Map<string, number>();
-    const parsed = rows.slice(1).map((values, rowIndex): PreviewRow => {
+    const populatedRows = rows.slice(1).filter((values) => values.some((value) => value.trim() !== ""));
+    if (!populatedRows.length) {
+      setPreview([]);
+      setMessage({ tone: "error", text: "The spreadsheet has no product rows." });
+      return;
+    }
+    const parsed = populatedRows.map((values, rowIndex): PreviewRow => {
       const data = Object.fromEntries(
         HEADERS.map((header, index) => [header, values[index]?.trim() ?? ""])
       ) as ProductCsvRow;
       const errors: string[] = [];
+
+      data.type = data.type.toLowerCase();
+      data.taxable = data.taxable.toLowerCase();
+      data.quick_tab = data.quick_tab.toLowerCase();
+      data.status = data.status.toLowerCase();
 
       if (values.length !== HEADERS.length) errors.push(`Expected ${HEADERS.length} columns but found ${values.length}.`);
       if (!data.english_name) errors.push("English name is required.");
@@ -228,45 +221,33 @@ export function ProductDataWorkspace() {
 
   const importProducts = () => {
     if (!isAdmin || preview.length === 0 || invalidRows > 0) return;
-    const categoryIds = new Map(categories.map((category) => [normalizeCatalogName(category.name), category.id]));
-
-    for (const row of preview) {
-      const categoryName = row.data.category.trim();
-      const normalizedCategoryName = normalizeCatalogName(categoryName);
-      let categoryId = categoryName ? categoryIds.get(normalizedCategoryName) : undefined;
-      if (categoryName && !categoryId) {
-        const result = addCategory({ name: categoryName, description: "", imageUrl: "" });
-        if (!result.ok || !result.categoryId) {
-          setMessage({ tone: "error", text: result.message ?? `Unable to create category ${categoryName}.` });
-          return;
-        }
-        categoryId = result.categoryId;
-        categoryIds.set(normalizedCategoryName, categoryId);
-      }
-
+    const result = importProductBatch(preview.map((row) => {
       const isService = row.data.type === "service";
-      const result = saveProduct({
-        kind: isService ? "service" : "product",
-        categoryId,
-        barcode: row.barcodes[0],
-        barcodes: row.barcodes,
-        name: { en: row.data.english_name, ar: row.data.arabic_name, ur: row.data.urdu_name },
-        imageUrl: row.data.image_url,
-        salePrice: Number(row.data.sale_price),
-        costPrice: Number(row.data.cost_price),
-        stockQuantity: isService ? 0 : Number(row.data.stock_quantity),
-        reorderLevel: isService ? 0 : Number(row.data.reorder_level),
-        taxable: booleanValue(row.data.taxable) ?? false,
-        quickTab: booleanValue(row.data.quick_tab) ?? false,
-        status: row.data.status === "inactive" ? "inactive" : "active"
-      });
-      if (!result.ok) {
-        setMessage({ tone: "error", text: `Line ${row.line}: ${result.message ?? "Unable to import product."}` });
-        return;
-      }
+      return {
+        line: row.line,
+        categoryName: row.data.category,
+        product: {
+          kind: isService ? "service" as const : "product" as const,
+          barcode: row.barcodes[0],
+          barcodes: row.barcodes,
+          name: { en: row.data.english_name, ar: row.data.arabic_name, ur: row.data.urdu_name },
+          imageUrl: row.data.image_url,
+          salePrice: Number(row.data.sale_price),
+          costPrice: Number(row.data.cost_price),
+          stockQuantity: isService ? 0 : Number(row.data.stock_quantity),
+          reorderLevel: isService ? 0 : Number(row.data.reorder_level),
+          taxable: booleanValue(row.data.taxable) ?? false,
+          quickTab: booleanValue(row.data.quick_tab) ?? false,
+          status: row.data.status === "inactive" ? "inactive" as const : "active" as const
+        }
+      };
+    }));
+    if (!result.ok) {
+      setMessage({ tone: "error", text: `${result.message ?? "Unable to import products."} Nothing was imported.` });
+      return;
     }
 
-    const importedCount = validRows.length;
+    const importedCount = result.importedCount ?? validRows.length;
     setPreview([]);
     setFileName("");
     if (fileRef.current) fileRef.current.value = "";
@@ -286,7 +267,7 @@ export function ProductDataWorkspace() {
         <DataAction
           icon={FileSpreadsheet}
           title="Download import schema"
-          text="The POS assigns product IDs. Barcode cells are Excel-safe; separate additional barcodes with a vertical bar (|). New category names are created automatically."
+        text="Excel dropdowns enforce product/service, true/false tax and quick-tab values, and active/inactive status. The POS assigns product IDs."
           action="Download schema"
           onClick={downloadTemplate}
         />
@@ -294,7 +275,7 @@ export function ProductDataWorkspace() {
           icon={Upload}
           title="Import product list"
           text="Preview and validate every row before products, services, categories, or barcodes are saved."
-          action="Choose CSV"
+          action="Choose file"
           disabled={!isAdmin}
           onClick={() => fileRef.current?.click()}
         />
@@ -303,7 +284,7 @@ export function ProductDataWorkspace() {
         ref={fileRef}
         className="hidden"
         type="file"
-        accept=".csv,text/csv"
+        accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
         onChange={(event) => void readFile(event.target.files?.[0])}
       />
 
@@ -380,13 +361,14 @@ export function ProductDataWorkspace() {
             </div>
             <div className="flex justify-end border-t border-slate-200 p-5">
               <Button disabled={!isAdmin || invalidRows > 0} onClick={importProducts}>
-                <Upload className="mr-2 h-4 w-4" />Import {validRows.length} records
+                <Upload className="mr-2 h-4 w-4" />
+                {invalidRows > 0 ? `Fix all ${invalidRows} invalid rows before import` : `Import all ${validRows.length} records`}
               </Button>
             </div>
           </>
         ) : (
           <div className="grid min-h-48 place-items-center p-8 text-center text-slate-500">
-            <div><FileSpreadsheet className="mx-auto mb-3 h-8 w-8" /><p>Choose a completed product CSV to validate it here.</p></div>
+            <div><FileSpreadsheet className="mx-auto mb-3 h-8 w-8" /><p>Choose a completed product Excel or CSV file to validate every row here.</p></div>
           </div>
         )}
       </Card>

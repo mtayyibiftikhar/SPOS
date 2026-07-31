@@ -55,6 +55,7 @@ export default function UsersPage() {
   const [isSavingUser, setIsSavingUser] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<User | null>(null);
   const [roleDraft, setRoleDraft] = useState<ShopAccessRole[]>(() => getAccessRoles(currentSettings?.pos));
   const [roleAssignmentDraft, setRoleAssignmentDraft] = useState<Record<string, string>>(
     () => ({ ...(currentSettings?.pos.userAccessRoleIds ?? {}) })
@@ -96,8 +97,15 @@ export default function UsersPage() {
   };
 
   const openCreateUser = () => {
+    if (!accessRoles.length && session?.role !== "super_admin") {
+      setFeedback({ tone: "error", message: "Create an access role before adding a staff user." });
+      return;
+    }
     setFeedback(null);
-    setUserForm({ ...emptyUserForm, role: accessRoles[0]?.id ?? "cashier" });
+    setUserForm({
+      ...emptyUserForm,
+      role: session?.role === "super_admin" ? "shop_admin" : accessRoles[0]?.id ?? ""
+    });
     setView("form");
   };
 
@@ -175,11 +183,13 @@ export default function UsersPage() {
     });
   };
 
-  const handleDeleteUser = async (user: User) => {
-    if (!window.confirm(`Delete ${user.name}? Login access will be removed, but historical sales and reports will keep the user's name.`)) return;
+  const handleDeleteUser = async () => {
+    const user = deleteCandidate;
+    if (!user) return;
     setDeletingUserId(user.id);
     const result = await deleteShopUser(user.id);
     setDeletingUserId(null);
+    setDeleteCandidate(null);
     setFeedback(result.ok
       ? { tone: "success", message: `${user.name} was deleted. Historical report records were retained.` }
       : { tone: "error", message: result.message ?? "Unable to delete user." });
@@ -232,7 +242,7 @@ export default function UsersPage() {
 
     const replacement = roleDraft.find((role) => role.id !== roleId);
     if (!replacement) {
-      setFeedback({ tone: "error", message: "Create another role before deleting the only role in this shop." });
+      setFeedback({ tone: "error", message: "This role still has users. Create another role so they can be moved before deletion." });
       return;
     }
 
@@ -327,7 +337,7 @@ export default function UsersPage() {
                 Role access
               </span>
             </Button>
-            <Button disabled={!canManageUsers} onClick={openCreateUser}>
+            <Button disabled={!canManageUsers || (!accessRoles.length && session?.role !== "super_admin")} onClick={openCreateUser}>
               <span className="inline-flex items-center gap-2">
                 <UserPlus className="h-4 w-4" />
                 New user
@@ -413,7 +423,7 @@ export default function UsersPage() {
                         size="sm"
                         variant="danger"
                         disabled={deletingUserId === user.id || user.id === session?.id}
-                        onClick={() => void handleDeleteUser(user)}
+                        onClick={() => setDeleteCandidate(user)}
                       >
                         <span className="inline-flex items-center gap-2">
                           <Trash2 className="h-4 w-4" />
@@ -514,7 +524,7 @@ export default function UsersPage() {
               }))
             }
           >
-            <option value="shop_admin">Admin (full access)</option>
+            {session?.role === "super_admin" ? <option value="shop_admin">Admin (full access)</option> : null}
             {accessRoles.map((role) => (
               <option key={role.id} value={role.id}>{role.name}</option>
             ))}
@@ -730,10 +740,42 @@ export default function UsersPage() {
   }
 
   return (
-    <SettingsFormShell title={t("settings.users")} subtitle="">
-      {view === "list" ? renderUserList() : null}
-      {view === "form" ? renderUserForm() : null}
-      {view === "roles" ? renderRoleAccess() : null}
-    </SettingsFormShell>
+    <>
+      <SettingsFormShell title={t("settings.users")} subtitle="">
+        {view === "list" ? renderUserList() : null}
+        {view === "form" ? renderUserForm() : null}
+        {view === "roles" ? renderRoleAccess() : null}
+      </SettingsFormShell>
+
+      {deleteCandidate ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm" role="presentation">
+          <div
+            aria-describedby="delete-user-description"
+            aria-labelledby="delete-user-title"
+            aria-modal="true"
+            className="w-full max-w-md rounded-[28px] border border-white/70 bg-white p-6 shadow-[0_30px_90px_rgba(15,23,42,0.35)]"
+            role="dialog"
+          >
+            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-rose-50 text-rose-600">
+              <Trash2 className="h-5 w-5" />
+            </span>
+            <h2 id="delete-user-title" className="mt-4 font-display text-2xl font-semibold text-slate-950">
+              Delete {deleteCandidate.name}?
+            </h2>
+            <p id="delete-user-description" className="mt-2 text-sm leading-6 text-slate-600">
+              Login access will be removed permanently. Historical bills, sales, and reports will continue showing this user&apos;s name.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <Button disabled={deletingUserId === deleteCandidate.id} variant="secondary" onClick={() => setDeleteCandidate(null)}>
+                Cancel
+              </Button>
+              <Button disabled={deletingUserId === deleteCandidate.id} variant="danger" onClick={() => void handleDeleteUser()}>
+                {deletingUserId === deleteCandidate.id ? "Deleting..." : "Delete user"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

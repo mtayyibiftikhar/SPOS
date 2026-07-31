@@ -46,7 +46,7 @@ function uniquePermissions(permissions: RolePermissionKey[] | undefined) {
 export function getAccessRoles(settings?: POSSettings | null): ShopAccessRole[] {
   const configured = settings?.accessRoles;
 
-  if (configured?.length) {
+  if (configured !== undefined) {
     return configured.map((role) => ({ ...role, permissions: uniquePermissions(role.permissions) }));
   }
 
