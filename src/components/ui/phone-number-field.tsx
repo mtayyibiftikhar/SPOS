@@ -1,6 +1,6 @@
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { phoneCountryOptions } from "@/lib/phone";
+import { phoneCountryOptions, sanitizePhoneDigits } from "@/lib/phone";
 
 type PhoneNumberFieldProps = {
   countryCode: string;
@@ -41,7 +41,7 @@ export function PhoneNumberField({
           inputMode="tel"
           placeholder={placeholder}
           value={number}
-          onChange={(event) => onNumberChange(event.target.value)}
+          onChange={(event) => onNumberChange(sanitizePhoneDigits(event.target.value))}
         />
       </div>
     </div>

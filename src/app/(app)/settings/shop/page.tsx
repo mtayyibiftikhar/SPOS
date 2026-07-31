@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ResilientImage } from "@/components/ui/resilient-image";
 import { deleteImageAssetFromCloud, persistShopLogoUrl, resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
+import { sanitizePhoneInput } from "@/lib/phone";
 
 export default function ShopSettingsPage() {
   const { currentSettings, currentShopId, session, state, t, updateSettings } = usePosApp();
@@ -171,7 +172,7 @@ export default function ShopSettingsPage() {
         </div>
         <div>
           <label className="mb-2 block text-sm font-medium text-ink">{t("common.phone")}</label>
-          <Input value={phone} onChange={(event) => setPhone(event.target.value)} />
+          <Input inputMode="tel" value={phone} onChange={(event) => setPhone(sanitizePhoneInput(event.target.value))} />
         </div>
         <div>
           <label className="mb-2 block text-sm font-medium text-ink">{t("common.email")}</label>

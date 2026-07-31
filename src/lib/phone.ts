@@ -19,6 +19,17 @@ export function sanitizePhoneDigits(value: string) {
   return value.replace(/[^\d]/g, "");
 }
 
+export function sanitizePhoneInput(value: string) {
+  const digits = sanitizePhoneDigits(value);
+  const hasInternationalPrefix = value.trimStart().startsWith("+");
+
+  if (!digits) {
+    return "";
+  }
+
+  return `${hasInternationalPrefix ? "+" : ""}${digits}`;
+}
+
 export function combinePhoneNumber(countryCode: string, localNumber: string) {
   const normalizedNumber = sanitizePhoneDigits(localNumber);
 

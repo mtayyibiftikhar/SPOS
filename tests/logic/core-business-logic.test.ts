@@ -13,7 +13,7 @@ import { calculateBusinessDaySummary, calculateShiftSummary } from "../../src/li
 import { findBarcodeConflict, findCategoryNameConflict, normalizeBarcode } from "../../src/lib/catalog";
 import { applySettlementToBills } from "../../src/lib/customer-accounts";
 import { getLedgerControlTotals, buildSaleLedgerEntries } from "../../src/lib/accounting";
-import { combinePhoneNumber, sanitizePhoneDigits, splitPhoneNumber } from "../../src/lib/phone";
+import { combinePhoneNumber, sanitizePhoneDigits, sanitizePhoneInput, splitPhoneNumber } from "../../src/lib/phone";
 import { calculateBillRefundState, calculateSalesReportSummary, formatRefundReceiptNumber } from "../../src/lib/refunds";
 import { createPublicReceiptToken } from "../../src/lib/public-receipts";
 import { clearShopDataScope } from "../../src/lib/shop-data-reset";
@@ -512,6 +512,13 @@ test("phone helpers preserve country code and sanitize formatting", () => {
   assert.equal(sanitizePhoneDigits("05 381-13039"), "0538113039");
   assert.equal(combinePhoneNumber("+966", "538 113 039"), "+966538113039");
   assert.deepEqual(splitPhoneNumber("+966538113039"), { countryCode: "+966", localNumber: "538113039" });
+});
+
+test("phone input accepts only digits and one leading plus", () => {
+  assert.equal(sanitizePhoneInput("+966 50-123abc!"), "+96650123");
+  assert.equal(sanitizePhoneInput("05(012) 3456"), "050123456");
+  assert.equal(sanitizePhoneInput("9+66+500"), "966500");
+  assert.equal(sanitizePhoneInput("+++"), "");
 });
 
 test("public receipt tokens are long, URL-safe, and unique", () => {

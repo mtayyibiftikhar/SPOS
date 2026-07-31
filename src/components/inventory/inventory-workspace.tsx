@@ -32,6 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { createStructuredReportPdfBlob, downloadBlob } from "@/lib/report-export";
+import { sanitizePhoneInput } from "@/lib/phone";
 import { cn, formatCurrency, formatDateTime } from "@/lib/utils";
 import type { Product, PurchaseOrder, PurchaseOrderItem, PurchasePaymentStatus, Supplier, SupplierPaymentMethod } from "@/types/pos";
 
@@ -2016,7 +2017,7 @@ export function InventoryWorkspace() {
               <SectionEyebrow>{supplierForm.id ? "Edit supplier" : "Add supplier"}</SectionEyebrow>
               <div className="mt-5 grid gap-4 md:grid-cols-2">
                 <Input placeholder="Supplier name" value={supplierForm.name} onChange={(event) => setSupplierForm((current) => ({ ...current, name: event.target.value }))} />
-                <Input placeholder="Phone" value={supplierForm.phone} onChange={(event) => setSupplierForm((current) => ({ ...current, phone: event.target.value }))} />
+                <Input inputMode="tel" placeholder="Phone" value={supplierForm.phone} onChange={(event) => setSupplierForm((current) => ({ ...current, phone: sanitizePhoneInput(event.target.value) }))} />
                 <Input placeholder="Email" value={supplierForm.email} onChange={(event) => setSupplierForm((current) => ({ ...current, email: event.target.value }))} />
                 <Input placeholder="VAT number" value={supplierForm.vatNumber} onChange={(event) => setSupplierForm((current) => ({ ...current, vatNumber: event.target.value }))} />
                 <Input placeholder="Contact person" value={supplierForm.contactPerson} onChange={(event) => setSupplierForm((current) => ({ ...current, contactPerson: event.target.value }))} />

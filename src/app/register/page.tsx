@@ -11,7 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { resizeImageFileToDataUrl } from "@/lib/image-upload";
-import { cn } from "@/lib/utils";
+import { sanitizePhoneInput } from "@/lib/phone";
+import { cn, hashSecret } from "@/lib/utils";
 import type { DemoAppState } from "@/types/pos";
 
 const CLOUD_ACTIVATION_STORAGE_KEY = "simple-pos-cloud-activation-state-v3";
@@ -309,6 +310,28 @@ export default function RegisterPage() {
     setIsSubmitting(true);
     const cachedCloudSnapshot = loadCachedCloudActivationSnapshot(form.productKey);
     const ownerSnapshot = cachedCloudSnapshot ?? (await loadLocalOwnerSnapshot());
+    const activationDetails = findActivationDetails(ownerSnapshot, form.productKey);
+    const expectedSetupEmail = activationDetails?.shop.setupEmail?.trim().toLowerCase();
+    const expectedSetupPasswordHash = activationDetails?.shop.setupPasswordHash;
+
+    if (expectedSetupEmail && (!form.setupEmail.trim() || form.setupPassword.trim().length < 8)) {
+      setError("Store email and a password of at least 8 characters are required.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (expectedSetupEmail && form.setupEmail.trim().toLowerCase() !== expectedSetupEmail) {
+      setError("Store email does not match the owner-created shop.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (expectedSetupPasswordHash && hashSecret(form.setupPassword.trim()) !== expectedSetupPasswordHash) {
+      setError("Store password does not match the owner-created shop.");
+      setIsSubmitting(false);
+      return;
+    }
+
     let cloudAdminUserId: string | undefined;
 
     if (cachedCloudSnapshot) {
@@ -459,7 +482,7 @@ export default function RegisterPage() {
                   </label>
                   <label className="space-y-2">
                     <span className="text-sm font-semibold text-slate-950">Phone</span>
-                    <Input value={form.phone} onChange={(event) => updateForm("phone", event.target.value)} />
+                    <Input inputMode="tel" value={form.phone} onChange={(event) => updateForm("phone", sanitizePhoneInput(event.target.value))} />
                   </label>
                   <label className="space-y-2">
                     <span className="text-sm font-semibold text-slate-950">Email</span>
@@ -548,7 +571,7 @@ export default function RegisterPage() {
                   </label>
                   <label className="space-y-2">
                     <span className="text-sm font-semibold text-slate-950">Admin phone</span>
-                    <Input value={form.adminPhone} onChange={(event) => updateForm("adminPhone", event.target.value)} />
+                    <Input inputMode="tel" value={form.adminPhone} onChange={(event) => updateForm("adminPhone", sanitizePhoneInput(event.target.value))} />
                   </label>
                   <label className="space-y-2">
                     <span className="text-sm font-semibold text-slate-950">Admin email</span>

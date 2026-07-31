@@ -3408,7 +3408,7 @@ export function AppProvider({
           if (
             working.users.some(
               (user) =>
-                user.email.trim().toLowerCase() === normalizedAdminEmail ||
+                (user.id !== payload.adminUserId && user.email.trim().toLowerCase() === normalizedAdminEmail) ||
                 (wantsCashier && user.email.trim().toLowerCase() === normalizedCashierEmail)
             )
           ) {
@@ -3454,9 +3454,10 @@ export function AppProvider({
               return current;
             }
 
-            const hasStoredSetupCredentials = Boolean(existingShop.setupEmail || existingShop.setupPasswordHash);
+            const hasStoredSetupEmail = Boolean(existingShop.setupEmail);
+            const hasStoredSetupPassword = Boolean(existingShop.setupPasswordHash);
 
-            if (hasStoredSetupCredentials) {
+            if (hasStoredSetupEmail || hasStoredSetupPassword) {
               if (!normalizedSetupEmail || !normalizedSetupPassword) {
                 result = {
                   ok: false,
@@ -3475,13 +3476,18 @@ export function AppProvider({
                 return current;
               }
 
-              if (
-                existingShop.setupEmail?.trim().toLowerCase() !== normalizedSetupEmail ||
-                existingShop.setupPasswordHash !== hashSecret(normalizedSetupPassword)
-              ) {
+              if (hasStoredSetupEmail && existingShop.setupEmail?.trim().toLowerCase() !== normalizedSetupEmail) {
                 result = {
                   ok: false,
-                  message: "Store email or password does not match the owner-created shop."
+                  message: "Store email does not match the owner-created shop."
+                };
+                return current;
+              }
+
+              if (hasStoredSetupPassword && existingShop.setupPasswordHash !== hashSecret(normalizedSetupPassword)) {
+                result = {
+                  ok: false,
+                  message: "Store password does not match the owner-created shop."
                 };
                 return current;
               }
@@ -3518,7 +3524,14 @@ export function AppProvider({
               return current;
             }
 
-            if (working.users.some((user) => user.shopId === existingProductKey.shopId && user.role === "shop_admin")) {
+            if (
+              working.users.some(
+                (user) =>
+                  user.shopId === existingProductKey.shopId &&
+                  user.role === "shop_admin" &&
+                  user.id !== payload.adminUserId
+              )
+            ) {
               result = {
                 ok: false,
                 message: "This shop already has an admin account. Use login, or ask the POS owner to reset access."
@@ -3697,7 +3710,7 @@ export function AppProvider({
                   },
                   ...working.deviceActivations
                 ],
-            users: [adminUser, ...cashierUsers, ...working.users],
+            users: [adminUser, ...cashierUsers, ...working.users.filter((user) => user.id !== adminUserId)],
             categories: working.categories.some((category) => category.shopId === shopId)
               ? working.categories
               : [

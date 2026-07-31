@@ -1,5 +1,7 @@
+import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { hashProductKey } from "@/lib/cloud-sync";
+import { sanitizePhoneInput } from "@/lib/phone";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
 import { uploadDataUrlPosAsset } from "@/lib/supabase/storage-assets";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -33,6 +35,34 @@ type CompleteInstallationRequest = {
 
 const MIN_PASSWORD_LENGTH = 8;
 
+type ProfileRow = {
+  created_at: string | null;
+  email: string;
+  id: string;
+  is_active: boolean;
+  last_login_at: string | null;
+  name: string;
+  phone: string | null;
+  role: "super_admin" | "shop_admin" | "cashier" | "support";
+  shop_id: string | null;
+};
+
+function createSupabaseAuthClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !anonKey) {
+    throw new Error("Supabase auth environment variables are not configured.");
+  }
+
+  return createClient(url, anonKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  });
+}
+
 function clean(value?: string) {
   return value?.trim() ?? "";
 }
@@ -47,17 +77,7 @@ function normalizeTaxMode(value?: string) {
   return value === "exclusive" ? "exclusive" : "inclusive";
 }
 
-function mapProfile(profile: {
-  created_at: string | null;
-  email: string;
-  id: string;
-  is_active: boolean;
-  last_login_at: string | null;
-  name: string;
-  phone: string | null;
-  role: "super_admin" | "shop_admin" | "cashier" | "support";
-  shop_id: string | null;
-}) {
+function mapProfile(profile: ProfileRow) {
   return {
     id: profile.id,
     shopId: profile.shop_id ?? undefined,
@@ -85,6 +105,8 @@ export async function POST(request: Request) {
   const adminName = clean(body.adminName);
   const adminEmail = clean(body.adminEmail).toLowerCase();
   const adminPassword = clean(body.adminPassword);
+  const adminPhone = optionalClean(sanitizePhoneInput(body.adminPhone ?? ""));
+  const shopPhone = sanitizePhoneInput(body.phone ?? "");
 
   if (!productKey || !shopName || !adminName || !adminEmail || !adminPassword) {
     return NextResponse.json(
@@ -199,74 +221,113 @@ export async function POST(request: Request) {
       );
     }
 
-    const existingAdmin = existingAdmins?.[0];
+    const existingAdmin = existingAdmins?.[0] as ProfileRow | undefined;
+    let authUserId: string;
+    let profileRow: ProfileRow;
 
     if (existingAdmin) {
-      return NextResponse.json(
-        {
-          ok: false,
-          alreadyInstalled: true,
-          message: "This shop already has an admin account. Go back to login and sign in.",
-          adminUser: mapProfile(existingAdmin)
-        },
-        { status: 409 }
-      );
-    }
-
-    const { data: emailProfile } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("email", adminEmail)
-      .maybeSingle();
-
-    if (emailProfile) {
-      return NextResponse.json(
-        { ok: false, message: "This admin email is already used. Use another email or ask the POS owner to reset access." },
-        { status: 409 }
-      );
-    }
-
-    const { data: createdAuthUser, error: authError } = await supabase.auth.admin.createUser({
-      email: adminEmail,
-      email_confirm: true,
-      password: adminPassword,
-      user_metadata: {
-        name: adminName,
-        phone: optionalClean(body.adminPhone),
-        role: "shop_admin",
-        shop_id: shop.id
+      if (!existingAdmin.is_active) {
+        return NextResponse.json(
+          { ok: false, message: "This admin account is inactive. Ask the POS owner to reactivate access." },
+          { status: 403 }
+        );
       }
-    });
 
-    if (authError) {
-      return NextResponse.json(
-        { ok: false, message: authError.message || "Unable to create the store admin login." },
-        { status: 409 }
-      );
-    }
+      if (existingAdmin.email.trim().toLowerCase() !== adminEmail) {
+        return NextResponse.json(
+          {
+            ok: false,
+            alreadyInstalled: true,
+            message: "This shop already has a different admin account. Go back to login and sign in."
+          },
+          { status: 409 }
+        );
+      }
 
-    const authUserId = createdAuthUser.user?.id;
+      const authClient = createSupabaseAuthClient();
+      const { data: authData, error: authError } = await authClient.auth.signInWithPassword({
+        email: adminEmail,
+        password: adminPassword
+      });
 
-    if (!authUserId) {
-      return NextResponse.json({ ok: false, message: "Unable to create the store admin login." }, { status: 500 });
-    }
+      if (authError || authData.user?.id !== existingAdmin.id) {
+        return NextResponse.json(
+          { ok: false, message: "Admin email or password is incorrect." },
+          { status: 401 }
+        );
+      }
 
-    const profileRow = {
-      id: authUserId,
-      shop_id: shop.id,
-      name: adminName,
-      email: adminEmail,
-      phone: optionalClean(body.adminPhone),
-      role: "shop_admin" as const,
-      is_active: true,
-      last_login_at: now,
-      created_at: now
-    };
-    const { error: profileError } = await supabase.from("profiles").insert(profileRow);
+      authUserId = existingAdmin.id;
+      profileRow = {
+        ...existingAdmin,
+        last_login_at: now,
+        name: adminName,
+        phone: adminPhone
+      };
+      const { error: profileUpdateError } = await supabase
+        .from("profiles")
+        .update({ last_login_at: now, name: adminName, phone: adminPhone })
+        .eq("id", authUserId);
 
-    if (profileError) {
-      await supabase.auth.admin.deleteUser(authUserId).catch(() => undefined);
-      throw profileError;
+      if (profileUpdateError) {
+        throw profileUpdateError;
+      }
+    } else {
+      const { data: emailProfile } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("email", adminEmail)
+        .maybeSingle();
+
+      if (emailProfile) {
+        return NextResponse.json(
+          { ok: false, message: "This admin email is already used. Use another email or ask the POS owner to reset access." },
+          { status: 409 }
+        );
+      }
+
+      const { data: createdAuthUser, error: authError } = await supabase.auth.admin.createUser({
+        email: adminEmail,
+        email_confirm: true,
+        password: adminPassword,
+        user_metadata: {
+          name: adminName,
+          phone: adminPhone,
+          role: "shop_admin",
+          shop_id: shop.id
+        }
+      });
+
+      if (authError) {
+        return NextResponse.json(
+          { ok: false, message: authError.message || "Unable to create the store admin login." },
+          { status: 409 }
+        );
+      }
+
+      authUserId = createdAuthUser.user?.id ?? "";
+
+      if (!authUserId) {
+        return NextResponse.json({ ok: false, message: "Unable to create the store admin login." }, { status: 500 });
+      }
+
+      profileRow = {
+        id: authUserId,
+        shop_id: shop.id,
+        name: adminName,
+        email: adminEmail,
+        phone: adminPhone,
+        role: "shop_admin",
+        is_active: true,
+        last_login_at: now,
+        created_at: now
+      };
+      const { error: profileError } = await supabase.from("profiles").insert(profileRow);
+
+      if (profileError) {
+        await supabase.auth.admin.deleteUser(authUserId).catch(() => undefined);
+        throw profileError;
+      }
     }
 
     const currency = clean(body.currency) || "SAR";
@@ -281,7 +342,7 @@ export async function POST(request: Request) {
           .from("shops")
           .update({
             name: shopName,
-            phone: clean(body.phone),
+            phone: shopPhone,
             email: optionalClean(body.email),
             website: optionalClean(body.website),
             address: clean(body.address),
@@ -296,7 +357,7 @@ export async function POST(request: Request) {
             shop_name: shopName,
             logo_url: optionalClean(storedLogoUrl),
             address: clean(body.address),
-            phone: clean(body.phone),
+            phone: shopPhone,
             email: optionalClean(body.email),
             website: optionalClean(body.website),
             currency,

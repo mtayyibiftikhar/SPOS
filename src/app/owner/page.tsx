@@ -34,6 +34,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { licenseStatusLabelKeys } from "@/lib/i18n";
+import { sanitizePhoneInput } from "@/lib/phone";
 import { deleteImageAssetFromCloud, resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
 import {
   ownerClearShopDataScopeDescriptions,
@@ -1796,7 +1797,7 @@ export default function OwnerPage() {
         </label>
         <label className="space-y-2">
           <span className="text-sm font-semibold text-slate-950">Phone with country code</span>
-          <Input inputMode="tel" placeholder="+966501234567" value={createShopForm.phone} onChange={(event) => setCreateShopForm((current) => ({ ...current, phone: event.target.value }))} />
+          <Input inputMode="tel" placeholder="+966501234567" value={createShopForm.phone} onChange={(event) => setCreateShopForm((current) => ({ ...current, phone: sanitizePhoneInput(event.target.value) }))} />
         </label>
         <label className="space-y-2 md:col-span-2">
           <span className="text-sm font-semibold text-slate-950">Address</span>
@@ -2198,7 +2199,7 @@ export default function OwnerPage() {
                   </label>
                   <label className="space-y-2">
                     <span className="text-sm font-semibold text-slate-950">Phone</span>
-                    <Input value={profileDraft.phone} onChange={(event) => updateShopProfileDraft(selectedShop, { phone: event.target.value })} />
+                    <Input inputMode="tel" value={profileDraft.phone} onChange={(event) => updateShopProfileDraft(selectedShop, { phone: sanitizePhoneInput(event.target.value) })} />
                   </label>
                   <label className="space-y-2">
                     <span className="text-sm font-semibold text-slate-950">Address</span>
@@ -2870,7 +2871,7 @@ export default function OwnerPage() {
             <div className="grid gap-4 md:grid-cols-3">
               <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">Support WhatsApp</span><Input value={supportWhatsapp} onChange={(event) => setSupportWhatsapp(event.target.value)} /></label>
               <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">Support email</span><Input value={supportEmail} onChange={(event) => setSupportEmail(event.target.value)} /></label>
-              <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">Support phone</span><Input value={supportPhone} onChange={(event) => setSupportPhone(event.target.value)} /></label>
+              <label className="space-y-2"><span className="text-sm font-semibold text-slate-950">Support phone</span><Input inputMode="tel" value={supportPhone} onChange={(event) => setSupportPhone(sanitizePhoneInput(event.target.value))} /></label>
             </div>
           ) : null}
 
@@ -2982,7 +2983,7 @@ export default function OwnerPage() {
                   <div className="mt-4 grid gap-3">
                     <Input placeholder="Full name" value={ownerUserForm.name} onChange={(event) => setOwnerUserForm((current) => ({ ...current, name: event.target.value }))} />
                     <Input placeholder="Email" type="email" value={ownerUserForm.email} onChange={(event) => setOwnerUserForm((current) => ({ ...current, email: event.target.value }))} />
-                    <Input placeholder="Phone" value={ownerUserForm.phone} onChange={(event) => setOwnerUserForm((current) => ({ ...current, phone: event.target.value }))} />
+                    <Input inputMode="tel" placeholder="Phone" value={ownerUserForm.phone} onChange={(event) => setOwnerUserForm((current) => ({ ...current, phone: sanitizePhoneInput(event.target.value) }))} />
                     <Select value={ownerUserForm.role} onChange={(event) => setOwnerUserForm((current) => ({ ...current, role: event.target.value as Extract<User["role"], "super_admin" | "support"> }))}>
                       <option value="super_admin">Owner - full control</option>
                       <option value="support">Customer service rep</option>

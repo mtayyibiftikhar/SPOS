@@ -27,6 +27,7 @@ import { buildQrCodeImageUrl } from "@/lib/qr-code";
 import { buildPublicReceiptUrl } from "@/lib/public-receipts";
 import { calculateBillRefundState } from "@/lib/refunds";
 import { hasNativeDownloadSupport, printElementWithNative, saveBlobWithNative } from "@/lib/native-bridge";
+import { sanitizePhoneInput } from "@/lib/phone";
 import { getReceiptItemNameLines, getReceiptItemNameText } from "@/lib/receipt-language";
 import { buildPolishedReceiptMessage } from "@/lib/receipt-sharing";
 import { loadFreshReceiptHandoff, type FreshReceiptHandoff } from "@/lib/receipt-handoff";
@@ -970,7 +971,7 @@ export function ReceiptView({ billId }: { billId: string }) {
                   onChange={(event) =>
                     setContactForm((current) => ({
                       ...current,
-                      phone: event.target.value
+                      phone: sanitizePhoneInput(event.target.value)
                     }))
                   }
                 />
@@ -996,7 +997,7 @@ export function ReceiptView({ billId }: { billId: string }) {
                   onChange={(event) =>
                     setContactForm((current) => ({
                       ...current,
-                      whatsapp: event.target.value
+                      whatsapp: sanitizePhoneInput(event.target.value)
                     }))
                   }
                 />

@@ -12,6 +12,7 @@ import {
   UsersRound
 } from "lucide-react";
 import { userRoleLabelKeys } from "@/lib/i18n";
+import { sanitizePhoneInput } from "@/lib/phone";
 import { usePosApp } from "@/components/providers/app-provider";
 import { SettingsFormShell } from "@/components/settings/settings-form-shell";
 import { Badge } from "@/components/ui/badge";
@@ -412,7 +413,7 @@ export default function UsersPage() {
             onChange={(event) =>
               setUserForm((current) => ({
                 ...current,
-                phone: event.target.value
+                phone: sanitizePhoneInput(event.target.value)
               }))
             }
           />
