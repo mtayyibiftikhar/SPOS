@@ -810,8 +810,8 @@ interface AppContextValue {
     phone?: string;
     role: Exclude<User["role"], "super_admin">;
     password?: string;
-  }) => { ok: boolean; message?: string; userId?: string };
-  setUserActive: (userId: string, isActive: boolean) => { ok: boolean; message?: string };
+  }) => Promise<{ ok: boolean; message?: string; userId?: string }>;
+  setUserActive: (userId: string, isActive: boolean) => Promise<{ ok: boolean; message?: string }>;
   createBill: (payload: CheckoutBillInput) => Promise<{ ok: boolean; billId?: string; message?: string }>;
   updateBillCustomerContact: (payload: {
     billId: string;
@@ -6721,7 +6721,7 @@ export function AppProvider({
           };
         });
       },
-      saveShopUser: ({ id, email, name, password, phone, role }) => {
+      saveShopUser: async ({ id, email, name, password, phone, role }) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
         }
@@ -6730,92 +6730,45 @@ export function AppProvider({
           return { ok: false, message: "Only the owner can manage users." };
         }
 
-        let result: { ok: boolean; message?: string; userId?: string } = {
-          ok: false,
-          message: "Unable to save user."
-        };
+        const normalizedName = name.trim();
+        const normalizedEmail = email.trim().toLowerCase();
+        const normalizedPassword = password?.trim() || "";
 
-        setState((current) => {
-          const normalizedName = name.trim();
-          const normalizedEmail = email.trim().toLowerCase();
-          const normalizedPhone = phone?.trim() || undefined;
-          const normalizedPassword = password?.trim() || undefined;
-          const passwordError = normalizedPassword
-            ? validatePasswordLength(normalizedPassword)
-            : null;
+        if (!normalizedName || !normalizedEmail) {
+          return { ok: false, message: "Name and email are required." };
+        }
 
-          if (!normalizedName || !normalizedEmail) {
-            result = { ok: false, message: "Name and email are required." };
-            return current;
+        if (!id && !normalizedPassword) {
+          return { ok: false, message: "Password is required for a new user." };
+        }
+
+        const passwordError = normalizedPassword ? validatePasswordLength(normalizedPassword) : null;
+        if (passwordError) return { ok: false, message: passwordError };
+
+        try {
+          const response = await fetch("/api/shop-users", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, email: normalizedEmail, name: normalizedName, password: normalizedPassword, phone, role })
+          });
+          const payload = (await response.json()) as { message?: string; ok?: boolean; user?: User };
+
+          if (!response.ok || !payload.ok || !payload.user) {
+            return { ok: false, message: payload.message ?? "Unable to save user." };
           }
 
-          if (passwordError) {
-            result = { ok: false, message: passwordError };
-            return current;
-          }
-
-          if (findUserEmailConflict(current.users, normalizedEmail, id)) {
-            result = { ok: false, message: "Another user already uses this email address." };
-            return current;
-          }
-
-          if (id) {
-            const existingUser = current.users.find((entry) => entry.id === id && entry.shopId === currentShopId);
-
-            if (!existingUser) {
-              result = { ok: false, message: "User not found." };
-              return current;
-            }
-
-            result = { ok: true, userId: existingUser.id };
-
-            return {
-              ...current,
-              users: current.users.map((entry) =>
-                entry.id === existingUser.id
-                  ? {
-                      ...entry,
-                      name: normalizedName,
-                      email: normalizedEmail,
-                      phone: normalizedPhone,
-                      role,
-                      passwordHash: normalizedPassword ? hashSecret(normalizedPassword) : entry.passwordHash
-                    }
-                  : entry
-              )
-            };
-          }
-
-          if (!normalizedPassword) {
-            result = { ok: false, message: "Password is required for a new user." };
-            return current;
-          }
-
-          const userId = createId("user");
-          result = { ok: true, userId };
-
-          return {
+          const savedUser = payload.user;
+          setState((current) => ({
             ...current,
-            users: [
-              {
-                id: userId,
-                shopId: currentShopId,
-                name: normalizedName,
-                email: normalizedEmail,
-                phone: normalizedPhone,
-                role,
-                isActive: true,
-                passwordHash: hashSecret(normalizedPassword),
-                createdAt: new Date().toISOString()
-              },
-              ...current.users
-            ]
-          };
-        });
+            users: [savedUser, ...current.users.filter((entry) => entry.id !== savedUser.id)]
+          }));
 
-        return result;
+          return { ok: true, userId: savedUser.id };
+        } catch {
+          return { ok: false, message: "Unable to reach the shop user service." };
+        }
       },
-      setUserActive: (userId, isActive) => {
+      setUserActive: async (userId, isActive) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
         }
@@ -6824,49 +6777,28 @@ export function AppProvider({
           return { ok: false, message: "Only the owner can manage users." };
         }
 
-        let result: { ok: boolean; message?: string } = {
-          ok: false,
-          message: "Unable to update user access."
-        };
+        try {
+          const response = await fetch("/api/shop-users", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: userId, isActive })
+          });
+          const payload = (await response.json()) as { message?: string; ok?: boolean; user?: User };
 
-        setState((current) => {
-          const user = current.users.find((entry) => entry.id === userId && entry.shopId === currentShopId);
-
-          if (!user) {
-            result = { ok: false, message: "User not found." };
-            return current;
+          if (!response.ok || !payload.ok || !payload.user) {
+            return { ok: false, message: payload.message ?? "Unable to update user access." };
           }
 
-          if (!isActive && user.id === session.id) {
-            result = { ok: false, message: "You cannot deactivate the current user." };
-            return current;
-          }
-
-          const activeAdmins = current.users.filter(
-            (entry) => entry.shopId === currentShopId && entry.role === "shop_admin" && entry.isActive && entry.id !== userId
-          );
-
-          if (!isActive && user.role === "shop_admin" && activeAdmins.length === 0) {
-            result = { ok: false, message: "At least one active owner is required." };
-            return current;
-          }
-
-          result = { ok: true };
-
-          return {
+          const savedUser = payload.user;
+          setState((current) => ({
             ...current,
-            users: current.users.map((entry) =>
-              entry.id === userId
-                ? {
-                    ...entry,
-                    isActive
-                  }
-                : entry
-            )
-          };
-        });
+            users: current.users.map((entry) => (entry.id === savedUser.id ? savedUser : entry))
+          }));
 
-        return result;
+          return { ok: true };
+        } catch {
+          return { ok: false, message: "Unable to reach the shop user service." };
+        }
       },
       startBusinessDay: async ({ businessDate, openingNote }) => {
         if (!currentShopId || !session) {

@@ -18,6 +18,8 @@ const apiTests = [
   { method: "POST", path: "/api/auth/shop-login", body: "{}", contentType: "application/json", expected: 400 },
   { method: "POST", path: "/api/auth/owner-login", body: "{}", contentType: "application/json", expected: 400 },
   { method: "POST", path: "/api/installation/complete", body: "{}", contentType: "application/json", expected: 400 },
+  { method: "POST", path: "/api/shop-users", body: "{}", contentType: "application/json", expected: 400 },
+  { method: "POST", path: "/api/shop-users", body: JSON.stringify({ name: "Smoke", email: "smoke@example.invalid", password: "password123", role: "cashier" }), contentType: "application/json", expected: 401 },
   { method: "POST", path: "/api/attendance/session", body: "{}", contentType: "application/json", expected: 401 },
   { method: "GET", path: "/api/attendance/scan?token=invalid", expected: 400 },
   { method: "POST", path: "/api/activation", body: "{}", contentType: "application/json", expected: 400 },

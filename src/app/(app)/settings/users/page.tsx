@@ -81,6 +81,8 @@ export default function UsersPage() {
   const [view, setView] = useState<UsersView>("list");
   const [query, setQuery] = useState("");
   const [userForm, setUserForm] = useState<UserFormState>(emptyUserForm);
+  const [isSavingUser, setIsSavingUser] = useState(false);
+  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
   const [roleDraft, setRoleDraft] = useState(() => mergeRolePermissions(currentSettings?.pos.rolePermissions));
   const [feedback, setFeedback] = useState<{
     tone: "success" | "error";
@@ -125,14 +127,15 @@ export default function UsersPage() {
     setView("form");
   };
 
-  const handleSaveUser = (event: FormEvent<HTMLFormElement>) => {
+  const handleSaveUser = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!canManageUsers) {
       return;
     }
 
-    const result = saveShopUser({
+    setIsSavingUser(true);
+    const result = await saveShopUser({
       id: userForm.id,
       name: userForm.name,
       email: userForm.email,
@@ -140,6 +143,8 @@ export default function UsersPage() {
       password: userForm.password,
       role: userForm.role
     });
+
+    setIsSavingUser(false);
 
     if (!result.ok) {
       setFeedback({
@@ -157,8 +162,10 @@ export default function UsersPage() {
     setView("list");
   };
 
-  const handleToggleUser = (userId: string, isActive: boolean) => {
-    const result = setUserActive(userId, isActive);
+  const handleToggleUser = async (userId: string, isActive: boolean) => {
+    setUpdatingUserId(userId);
+    const result = await setUserActive(userId, isActive);
+    setUpdatingUserId(null);
 
     if (!result.ok) {
       setFeedback({
@@ -331,7 +338,8 @@ export default function UsersPage() {
                       <Button
                         size="sm"
                         variant={user.isActive ? "danger" : "secondary"}
-                        onClick={() => handleToggleUser(user.id, !user.isActive)}
+                        disabled={updatingUserId === user.id}
+                        onClick={() => void handleToggleUser(user.id, !user.isActive)}
                       >
                         <span className="inline-flex items-center gap-2">
                           <UserMinus className="h-4 w-4" />
@@ -457,7 +465,7 @@ export default function UsersPage() {
         </div>
 
         <div className="flex flex-wrap gap-3 lg:col-span-2">
-          <Button disabled={!canManageUsers || !userForm.name.trim() || !userForm.email.trim()} type="submit">
+          <Button disabled={isSavingUser || !canManageUsers || !userForm.name.trim() || !userForm.email.trim()} type="submit">
             <span className="inline-flex items-center gap-2">
               {userForm.id ? <Edit3 className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
               {userForm.id ? t("users.updateAction") : t("users.createAction")}
