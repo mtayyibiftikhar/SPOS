@@ -4,7 +4,9 @@ import {
   getAccessRoles,
   getSessionAccessRoleName,
   hasShopPermission,
-  permissionForPath
+  mergeArchivedUserIds,
+  permissionForPath,
+  reassignUsersFromAccessRole
 } from "../../src/lib/access-control";
 import type { POSSettings, SessionUser } from "../../src/types/pos";
 
@@ -65,4 +67,29 @@ test("route permissions include every primary POS section", () => {
   assert.equal(permissionForPath("/accounts"), "accounts");
   assert.equal(permissionForPath("/settings/backup"), "backup");
   assert.equal(permissionForPath("/refunds/ref-1"), "refunds");
+});
+
+test("archived users remain hidden when the durable audit record outlives the snapshot", () => {
+  assert.deepEqual(
+    mergeArchivedUserIds(["snapshot-user"], ["audit-user", "snapshot-user", null]),
+    ["snapshot-user", "audit-user"]
+  );
+});
+
+test("deleting a role reassigns explicit and legacy role users", () => {
+  const result = reassignUsersFromAccessRole(
+    [
+      { id: "legacy-cashier", role: "cashier" },
+      { id: "custom-cashier", role: "cashier" },
+      { id: "admin", role: "shop_admin" }
+    ],
+    { "custom-cashier": "cashier", admin: "cashier" },
+    "cashier",
+    "support"
+  );
+
+  assert.deepEqual(result.reassignedUserIds, ["legacy-cashier", "custom-cashier"]);
+  assert.equal(result.assignments["legacy-cashier"], "support");
+  assert.equal(result.assignments["custom-cashier"], "support");
+  assert.equal(result.assignments.admin, "cashier");
 });

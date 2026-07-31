@@ -15,6 +15,7 @@ import { sanitizePhoneInput } from "@/lib/phone";
 import {
   getAccessRoles,
   getUserAccessRoleId,
+  reassignUsersFromAccessRole,
   SHOP_PERMISSION_OPTIONS
 } from "@/lib/access-control";
 import { usePosApp } from "@/components/providers/app-provider";
@@ -55,6 +56,11 @@ export default function UsersPage() {
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [roleDraft, setRoleDraft] = useState<ShopAccessRole[]>(() => getAccessRoles(currentSettings?.pos));
+  const [roleAssignmentDraft, setRoleAssignmentDraft] = useState<Record<string, string>>(
+    () => ({ ...(currentSettings?.pos.userAccessRoleIds ?? {}) })
+  );
+  const [roleDeleteTargetId, setRoleDeleteTargetId] = useState<string | null>(null);
+  const [roleReplacementId, setRoleReplacementId] = useState("");
   const [newRoleName, setNewRoleName] = useState("");
   const [feedback, setFeedback] = useState<{
     tone: "success" | "error";
@@ -182,6 +188,9 @@ export default function UsersPage() {
   const openRoleAccess = () => {
     setFeedback(null);
     setRoleDraft(getAccessRoles(currentSettings?.pos));
+    setRoleAssignmentDraft({ ...(currentSettings?.pos.userAccessRoleIds ?? {}) });
+    setRoleDeleteTargetId(null);
+    setRoleReplacementId("");
     setNewRoleName("");
     setView("roles");
   };
@@ -213,14 +222,40 @@ export default function UsersPage() {
   };
 
   const removeRole = (roleId: string) => {
-    const assigned = visibleUsers.some(
-      (user) => user.role !== "shop_admin" && getUserAccessRoleId(user, currentSettings?.pos) === roleId
+    const affectedUsers = visibleUsers.filter(
+      (user) => user.role !== "shop_admin" && (roleAssignmentDraft[user.id] ?? user.role) === roleId
     );
-    if (assigned) {
-      setFeedback({ tone: "error", message: "Move users to another role before deleting this role." });
+    if (!affectedUsers.length) {
+      setRoleDraft((current) => current.filter((role) => role.id !== roleId));
       return;
     }
-    setRoleDraft((current) => current.filter((role) => role.id !== roleId));
+
+    const replacement = roleDraft.find((role) => role.id !== roleId);
+    if (!replacement) {
+      setFeedback({ tone: "error", message: "Create another role before deleting the only role in this shop." });
+      return;
+    }
+
+    setRoleDeleteTargetId(roleId);
+    setRoleReplacementId(replacement.id);
+  };
+
+  const confirmRoleDeletion = () => {
+    if (!roleDeleteTargetId || !roleReplacementId || roleDeleteTargetId === roleReplacementId) return;
+    const result = reassignUsersFromAccessRole(
+      visibleUsers,
+      roleAssignmentDraft,
+      roleDeleteTargetId,
+      roleReplacementId
+    );
+    setRoleAssignmentDraft(result.assignments);
+    setRoleDraft((current) => current.filter((role) => role.id !== roleDeleteTargetId));
+    setFeedback({
+      tone: "success",
+      message: `${result.reassignedUserIds.length} user${result.reassignedUserIds.length === 1 ? "" : "s"} will move to the selected role when you save.`
+    });
+    setRoleDeleteTargetId(null);
+    setRoleReplacementId("");
   };
 
   const saveRoleAccess = () => {
@@ -235,7 +270,8 @@ export default function UsersPage() {
     }
 
     updateSettings("pos", {
-      accessRoles: roleDraft.map((role) => ({ ...role, name: role.name.trim() }))
+      accessRoles: roleDraft.map((role) => ({ ...role, name: role.name.trim() })),
+      userAccessRoleIds: roleAssignmentDraft
     });
     setFeedback({
       tone: "success",
@@ -574,6 +610,35 @@ export default function UsersPage() {
         </form>
       </div>
 
+      {roleDeleteTargetId ? (
+        <div className="mt-6 rounded-[24px] border border-amber-200 bg-amber-50 p-5">
+          <p className="font-display text-lg font-semibold text-slate-950">
+            Delete &quot;{roleDraft.find((role) => role.id === roleDeleteTargetId)?.name}&quot; and move its users
+          </p>
+          <p className="mt-1 text-sm text-slate-600">
+            Choose the role these users should receive. Their access changes together when you save.
+          </p>
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+            <label className="flex-1 text-sm font-semibold text-slate-700">
+              Move users to
+              <Select
+                className="mt-2"
+                value={roleReplacementId}
+                onChange={(event) => setRoleReplacementId(event.target.value)}
+              >
+                {roleDraft.filter((role) => role.id !== roleDeleteTargetId).map((role) => (
+                  <option key={role.id} value={role.id}>{role.name}</option>
+                ))}
+              </Select>
+            </label>
+            <Button variant="secondary" onClick={() => setRoleDeleteTargetId(null)}>Cancel</Button>
+            <Button className="bg-rose-600 hover:bg-rose-700" onClick={confirmRoleDeletion}>
+              Move users and delete role
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="mt-6 grid gap-4 xl:grid-cols-3">
         {roleDraft.map((role) => (
           <div key={role.id} className="rounded-[28px] border border-line bg-white p-4">
@@ -637,7 +702,12 @@ export default function UsersPage() {
       </div>
 
       <div className="mt-6 flex flex-wrap justify-end gap-3">
-        <Button variant="secondary" onClick={() => setRoleDraft(getAccessRoles(currentSettings?.pos))}>
+        <Button variant="secondary" onClick={() => {
+          setRoleDraft(getAccessRoles(currentSettings?.pos));
+          setRoleAssignmentDraft({ ...(currentSettings?.pos.userAccessRoleIds ?? {}) });
+          setRoleDeleteTargetId(null);
+          setRoleReplacementId("");
+        }}>
           Reset draft
         </Button>
         <Button disabled={!canManageUsers} onClick={saveRoleAccess}>

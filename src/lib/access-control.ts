@@ -61,6 +61,31 @@ export function getUserAccessRoleId(user: Pick<User, "id" | "role">, settings?: 
   return settings?.userAccessRoleIds?.[user.id] ?? user.role;
 }
 
+export function mergeArchivedUserIds(
+  ...sources: Array<ReadonlyArray<string | null | undefined> | null | undefined>
+) {
+  return Array.from(new Set(sources.flatMap((source) => source ?? []).filter((id): id is string => Boolean(id))));
+}
+
+export function reassignUsersFromAccessRole(
+  users: Array<Pick<User, "id" | "role">>,
+  assignments: Record<string, string> | undefined,
+  removedRoleId: string,
+  replacementRoleId: string
+) {
+  const nextAssignments = { ...(assignments ?? {}) };
+  const reassignedUserIds: string[] = [];
+
+  for (const user of users) {
+    if (user.role === "shop_admin" || user.role === "super_admin") continue;
+    if ((nextAssignments[user.id] ?? user.role) !== removedRoleId) continue;
+    nextAssignments[user.id] = replacementRoleId;
+    reassignedUserIds.push(user.id);
+  }
+
+  return { assignments: nextAssignments, reassignedUserIds };
+}
+
 export function hasShopPermission(
   session: Pick<SessionUser, "id" | "role" | "workspace"> | null | undefined,
   settings: POSSettings | null | undefined,

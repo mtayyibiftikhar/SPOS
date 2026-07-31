@@ -60,10 +60,10 @@ export function SettingsSectionNav() {
             <Link
               key={item.href}
               className={cn(
-                "group flex min-h-[74px] items-center gap-3 rounded-[22px] border px-4 py-3 transition hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50/60",
+                "group flex min-h-[74px] items-center gap-3 rounded-[22px] border px-4 py-3 transition",
                 isActive
-                  ? "border-slate-950 bg-slate-950 text-white shadow-[0_16px_40px_rgba(15,23,42,0.18)]"
-                  : "border-slate-200 bg-white text-slate-950"
+                  ? "border-slate-950 bg-slate-950 text-white shadow-[0_16px_40px_rgba(15,23,42,0.18)] hover:border-slate-950 hover:bg-slate-950 hover:text-white"
+                  : "border-slate-200 bg-white text-slate-950 hover:-translate-y-0.5 hover:border-emerald-200 hover:bg-emerald-50/60"
               )}
               href={item.href}
             >

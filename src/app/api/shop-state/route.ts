@@ -1,4 +1,5 @@
 import { after, NextResponse } from "next/server";
+import { mergeArchivedUserIds } from "@/lib/access-control";
 import {
   calculateScheduledAttendanceClosure,
   DEFAULT_SHIFT_END_TIME,
@@ -261,6 +262,7 @@ async function loadOwnerControlledShopState(
     { data: settings, error: settingsError },
     { data: profiles, error: profilesError },
     { data: auditLogs, error: auditLogsError },
+    { data: archivedUserLogs, error: archivedUserLogsError },
     { data: attendanceRecords, error: attendanceRecordsError },
     { data: payrollRates, error: payrollRatesError }
   ] = await Promise.all([
@@ -300,6 +302,12 @@ async function loadOwnerControlledShopState(
       .order("created_at", { ascending: false })
       .limit(75),
     supabase
+      .from("audit_logs")
+      .select("target_id")
+      .eq("shop_id", shopId)
+      .eq("action", "shop.user.archive")
+      .not("target_id", "is", null),
+    supabase
       .from("attendance_records")
       .select("*")
       .eq("shop_id", shopId)
@@ -319,6 +327,7 @@ async function loadOwnerControlledShopState(
   if (settingsError) throw settingsError;
   if (profilesError) throw profilesError;
   if (auditLogsError) throw auditLogsError;
+  if (archivedUserLogsError) throw archivedUserLogsError;
   if (attendanceRecordsError) throw attendanceRecordsError;
   if (payrollRatesError) throw payrollRatesError;
 
@@ -503,7 +512,10 @@ async function loadOwnerControlledShopState(
                 rolePermissions: currentState.settingsByShop?.[shop.id]?.pos.rolePermissions,
                 accessRoles: currentState.settingsByShop?.[shop.id]?.pos.accessRoles,
                 userAccessRoleIds: currentState.settingsByShop?.[shop.id]?.pos.userAccessRoleIds,
-                archivedUserIds: currentState.settingsByShop?.[shop.id]?.pos.archivedUserIds
+                archivedUserIds: mergeArchivedUserIds(
+                  currentState.settingsByShop?.[shop.id]?.pos.archivedUserIds,
+                  archivedUserLogs?.map((log) => log.target_id)
+                )
               },
               printer:
                 settings?.printer_settings ??
