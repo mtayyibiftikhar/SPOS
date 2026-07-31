@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { downloadCsv, normalizeCsvHeader, parseCsv } from "@/lib/csv";
 import { normalizeBarcode } from "@/lib/catalog";
+import { hasShopPermission } from "@/lib/access-control";
 import type { Product, ProductCategory } from "@/types/pos";
 
 const HEADERS = [
@@ -101,12 +102,12 @@ function productRows(products: Product[], categories: ProductCategory[]) {
 }
 
 export function ProductDataWorkspace() {
-  const { addCategory, currentShopId, saveProduct, session, state } = usePosApp();
+  const { addCategory, currentSettings, currentShopId, saveProduct, session, state } = usePosApp();
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<PreviewRow[]>([]);
   const [fileName, setFileName] = useState("");
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
-  const isAdmin = session?.role === "shop_admin";
+  const isAdmin = hasShopPermission(session, currentSettings?.pos, "products");
   const products = state.products.filter((product) => product.shopId === currentShopId);
   const categories = state.categories.filter((category) => category.shopId === currentShopId);
   const validRows = preview.filter((row) => row.errors.length === 0);

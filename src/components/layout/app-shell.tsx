@@ -7,6 +7,7 @@ import { Topbar } from "@/components/layout/topbar";
 import { usePosApp } from "@/components/providers/app-provider";
 import { AttendanceGate } from "@/components/attendance/attendance-gate";
 import { cn, formatDateTime } from "@/lib/utils";
+import { hasShopPermission, permissionForPath } from "@/lib/access-control";
 
 function getBlockedStatus(license: ReturnType<typeof usePosApp>["currentLicense"]) {
   if (!license) {
@@ -36,9 +37,11 @@ function getBlockedStatus(license: ReturnType<typeof usePosApp>["currentLicense"
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { currentLicense, currentSettings, currentShop, endSupportSession, locale, logout, saveFeedback, session, state, t } = usePosApp();
-  const isBillingRoute = pathname === "/billing";
   const blockedStatus = session?.workspace === "shop" ? getBlockedStatus(currentLicense) : null;
   const isLocked = blockedStatus === "locked";
+  const routePermission = permissionForPath(pathname);
+  const canOpenRoute = !routePermission || hasShopPermission(session, currentSettings?.pos, routePermission);
+  const isBillingRoute = pathname === "/billing" && canOpenRoute;
   const supportSession =
     session?.supportSessionId
       ? state.supportSessions.find((entry) => entry.id === session.supportSessionId && !entry.endedAt)
@@ -142,6 +145,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       Sign out
                     </button>
                   </div>
+                </div>
+              </div>
+            ) : !canOpenRoute ? (
+              <div className="grid min-h-[68vh] place-items-center">
+                <div className="w-full max-w-2xl rounded-[34px] border border-amber-200 bg-white p-8 text-center shadow-[0_28px_80px_rgba(15,23,42,0.10)]">
+                  <span className="mx-auto grid h-16 w-16 place-items-center rounded-[24px] bg-amber-100 text-amber-700">
+                    <LockKeyhole className="h-7 w-7" />
+                  </span>
+                  <p className="mt-6 text-xs font-bold uppercase tracking-[0.28em] text-amber-700">Role access</p>
+                  <h1 className="mt-3 font-display text-3xl font-semibold text-slate-950">You do not have access to this section</h1>
+                  <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-600">
+                    Ask the shop admin to enable this section for your assigned role. Permission changes apply automatically.
+                  </p>
                 </div>
               </div>
             ) : (

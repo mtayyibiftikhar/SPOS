@@ -546,6 +546,38 @@ test("refund permissions and payout limits are server enforced", () => {
     },
     { role: "cashier", shopId: SHOP_ID, userId: USER_ID }
   );
+  const customRefundRoleState = {
+    ...state,
+    settingsByShop: {
+      [SHOP_ID]: {
+        pos: {
+          shopName: "Test shop",
+          address: "",
+          phone: "",
+          currency: "SAR",
+          accessRoles: [{
+            id: "returns-manager",
+            name: "Returns Manager",
+            permissions: ["refunds" as const],
+            createdAt: NOW,
+            updatedAt: NOW
+          }],
+          userAccessRoleIds: { [USER_ID]: "returns-manager" }
+        },
+        printer: { receiptSize: "80mm" as const, autoPrintAfterSale: false },
+        receipt: { footerText: "", showTax: true, showCustomer: true, showCashier: true, showVatNumber: true, showSecondaryLanguage: false, secondaryLanguage: "ar" as const, receiptSize: "80mm" as const },
+        tax: { enabled: true, name: "VAT", rate: 15, mode: "inclusive" as const, showOnReceipt: true }
+      }
+    }
+  };
+  const customRoleAttempt = applyCriticalShopMutation(
+    customRefundRoleState,
+    {
+      type: "create_refund",
+      payload: { billId: "bill_existing", payoutMethod: "account", reason: "Return", items: [{ billItemId: "bill_item_existing", quantity: 1 }] }
+    },
+    { role: "cashier", shopId: SHOP_ID, userId: USER_ID }
+  );
   const cashAttempt = applyCriticalShopMutation(
     state,
     {
@@ -564,6 +596,7 @@ test("refund permissions and payout limits are server enforced", () => {
   );
 
   assert.equal(cashierAttempt.result.ok, false);
+  assert.equal(customRoleAttempt.result.ok, true);
   assert.equal(cashAttempt.result.ok, false);
   assert.match(cashAttempt.result.message ?? "", /cannot exceed the amount already paid/i);
   assert.equal(accountAdjustment.result.ok, true);

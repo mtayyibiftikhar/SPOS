@@ -26,6 +26,7 @@ import { createPublicReceiptToken } from "@/lib/public-receipts";
 import { calculateBillRefundState, calculateRefundQuote } from "@/lib/refunds";
 import { calculateScheduledAttendanceClosure } from "@/lib/attendance";
 import { createId } from "@/lib/utils";
+import { hasShopPermission } from "@/lib/access-control";
 import type {
   Bill,
   BillItem,
@@ -83,12 +84,24 @@ type MutationContext = {
   userId: string;
 };
 
+function contextHasPermission(
+  state: Partial<DemoAppState>,
+  context: MutationContext,
+  permission: Parameters<typeof hasShopPermission>[2]
+) {
+  return hasShopPermission(
+    { id: context.userId, role: context.role, workspace: "shop" },
+    state.settingsByShop?.[context.shopId]?.pos,
+    permission
+  );
+}
+
 function startBusinessDayMutation(
   state: Partial<DemoAppState>,
   payload: Extract<CriticalShopMutation, { type: "start_business_day" }>["payload"],
   context: MutationContext
 ) {
-  if (context.role !== "shop_admin") {
+  if (!contextHasPermission(state, context, "dashboard")) {
     return { result: { ok: false, message: "Only the shop admin can start the business day." }, state };
   }
 
@@ -128,7 +141,7 @@ function closeBusinessDayMutation(
   payload: Extract<CriticalShopMutation, { type: "close_business_day" }>["payload"],
   context: MutationContext
 ) {
-  if (context.role !== "shop_admin") {
+  if (!contextHasPermission(state, context, "dashboard")) {
     return { result: { ok: false, message: "Only the shop admin can close the business day." }, state };
   }
 
@@ -220,7 +233,7 @@ function startShiftMutation(
   payload: Extract<CriticalShopMutation, { type: "start_shift" }>["payload"],
   context: MutationContext
 ) {
-  if (!context.role || !["shop_admin", "cashier"].includes(context.role)) {
+  if (!contextHasPermission(state, context, "timeClock") && !contextHasPermission(state, context, "billing")) {
     return { result: { ok: false, message: "Only shop users can start shifts." }, state };
   }
 
@@ -704,7 +717,7 @@ function createRefundMutation(
   payload: CreateRefundInput,
   context: MutationContext
 ): { result: CriticalMutationResult; state: Partial<DemoAppState> } {
-  if (context.role !== "shop_admin") {
+  if (!contextHasPermission(state, context, "refunds")) {
     return { result: { ok: false, message: "Only the shop admin can create refunds." }, state };
   }
 

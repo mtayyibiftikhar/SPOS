@@ -6,13 +6,17 @@ import {
   Edit3,
   KeyRound,
   Search,
-  ShieldCheck,
+  Trash2,
   UserMinus,
   UserPlus,
   UsersRound
 } from "lucide-react";
-import { userRoleLabelKeys } from "@/lib/i18n";
 import { sanitizePhoneInput } from "@/lib/phone";
+import {
+  getAccessRoles,
+  getUserAccessRoleId,
+  SHOP_PERMISSION_OPTIONS
+} from "@/lib/access-control";
 import { usePosApp } from "@/components/providers/app-provider";
 import { SettingsFormShell } from "@/components/settings/settings-form-shell";
 import { Badge } from "@/components/ui/badge";
@@ -21,7 +25,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { cn, formatDateTime } from "@/lib/utils";
-import type { RolePermissionKey, User, UserRole } from "@/types/pos";
+import type { RolePermissionKey, ShopAccessRole, User } from "@/types/pos";
 
 type UserFormState = {
   id?: string;
@@ -29,7 +33,7 @@ type UserFormState = {
   email: string;
   phone: string;
   password: string;
-  role: Exclude<UserRole, "super_admin">;
+  role: string;
 };
 
 type UsersView = "list" | "form" | "roles";
@@ -42,40 +46,6 @@ const emptyUserForm: UserFormState = {
   role: "cashier"
 };
 
-const permissionOptions: Array<{
-  key: RolePermissionKey;
-  label: string;
-  helper: string;
-}> = [
-  { key: "billing", label: "Billing", helper: "Create checkout bills" },
-  { key: "customers", label: "Customers", helper: "Manage customer records" },
-  { key: "products", label: "Products", helper: "Add and edit products" },
-  { key: "inventory", label: "Inventory", helper: "Stock and supplier control" },
-  { key: "timeClock", label: "Time Clock", helper: "Clock-in, attendance, and payroll" },
-  { key: "bills", label: "Bills", helper: "View and reprint receipts" },
-  { key: "refunds", label: "Refunds", helper: "Create and view returns" },
-  { key: "reports", label: "Reports", helper: "View business reports" },
-  { key: "settings", label: "Settings", helper: "Change shop configuration" },
-  { key: "backup", label: "Backup", helper: "Import and export store data" }
-];
-
-const manageableRoles: Array<Exclude<UserRole, "super_admin">> = ["shop_admin", "cashier", "support"];
-
-const defaultRolePermissions: Record<Exclude<UserRole, "super_admin">, RolePermissionKey[]> = {
-  shop_admin: permissionOptions.map((option) => option.key),
-  cashier: ["billing", "customers", "timeClock", "bills"],
-  support: ["customers", "bills", "reports"]
-};
-
-function mergeRolePermissions(
-  permissions?: Partial<Record<Exclude<UserRole, "super_admin">, RolePermissionKey[]>>
-) {
-  return manageableRoles.reduce<Record<Exclude<UserRole, "super_admin">, RolePermissionKey[]>>((accumulator, role) => {
-    accumulator[role] = permissions?.[role] ?? defaultRolePermissions[role];
-    return accumulator;
-  }, { ...defaultRolePermissions });
-}
-
 export default function UsersPage() {
   const { currentSettings, currentUsers, locale, session, setUserActive, saveShopUser, t, updateSettings } = usePosApp();
   const [view, setView] = useState<UsersView>("list");
@@ -83,12 +53,18 @@ export default function UsersPage() {
   const [userForm, setUserForm] = useState<UserFormState>(emptyUserForm);
   const [isSavingUser, setIsSavingUser] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
-  const [roleDraft, setRoleDraft] = useState(() => mergeRolePermissions(currentSettings?.pos.rolePermissions));
+  const [roleDraft, setRoleDraft] = useState<ShopAccessRole[]>(() => getAccessRoles(currentSettings?.pos));
+  const [newRoleName, setNewRoleName] = useState("");
   const [feedback, setFeedback] = useState<{
     tone: "success" | "error";
     message: string;
   } | null>(null);
   const canManageUsers = session?.role === "shop_admin" || session?.role === "super_admin";
+  const accessRoles = useMemo(() => getAccessRoles(currentSettings?.pos), [currentSettings?.pos]);
+  const accessRoleNames = useMemo(
+    () => new Map(accessRoles.map((role) => [role.id, role.name])),
+    [accessRoles]
+  );
 
   const filteredUsers = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -110,7 +86,7 @@ export default function UsersPage() {
 
   const openCreateUser = () => {
     setFeedback(null);
-    resetForm();
+    setUserForm({ ...emptyUserForm, role: accessRoles[0]?.id ?? "cashier" });
     setView("form");
   };
 
@@ -122,7 +98,7 @@ export default function UsersPage() {
       email: user.email,
       phone: user.phone ?? "",
       password: "",
-      role: user.role === "super_admin" ? "shop_admin" : user.role
+      role: getUserAccessRoleId(user, currentSettings?.pos)
     });
     setView("form");
   };
@@ -141,7 +117,7 @@ export default function UsersPage() {
       email: userForm.email,
       phone: userForm.phone,
       password: userForm.password,
-      role: userForm.role
+      role: userForm.role === "shop_admin" ? "shop_admin" : "cashier"
     });
 
     setIsSavingUser(false);
@@ -152,6 +128,13 @@ export default function UsersPage() {
         message: result.message ?? t("users.saveError")
       });
       return;
+    }
+
+    if (result.userId) {
+      const nextAssignments = { ...(currentSettings?.pos.userAccessRoleIds ?? {}) };
+      if (userForm.role === "shop_admin") delete nextAssignments[result.userId];
+      else nextAssignments[result.userId] = userForm.role;
+      updateSettings("pos", { userAccessRoleIds: nextAssignments });
     }
 
     setFeedback({
@@ -183,13 +166,15 @@ export default function UsersPage() {
 
   const openRoleAccess = () => {
     setFeedback(null);
-    setRoleDraft(mergeRolePermissions(currentSettings?.pos.rolePermissions));
+    setRoleDraft(getAccessRoles(currentSettings?.pos));
+    setNewRoleName("");
     setView("roles");
   };
 
-  const togglePermission = (role: Exclude<UserRole, "super_admin">, permission: RolePermissionKey) => {
-    setRoleDraft((current) => {
-      const permissions = new Set(current[role] ?? []);
+  const togglePermission = (roleId: string, permission: RolePermissionKey) => {
+    setRoleDraft((current) => current.map((role) => {
+      if (role.id !== roleId) return role;
+      const permissions = new Set(role.permissions);
 
       if (permissions.has(permission)) {
         permissions.delete(permission);
@@ -197,11 +182,30 @@ export default function UsersPage() {
         permissions.add(permission);
       }
 
-      return {
-        ...current,
-        [role]: Array.from(permissions)
-      };
-    });
+      return { ...role, permissions: Array.from(permissions), updatedAt: new Date().toISOString() };
+    }));
+  };
+
+  const addRole = () => {
+    const name = newRoleName.trim();
+    if (!name) return;
+    const now = new Date().toISOString();
+    setRoleDraft((current) => [
+      ...current,
+      { id: `role-${crypto.randomUUID()}`, name, permissions: [], createdAt: now, updatedAt: now }
+    ]);
+    setNewRoleName("");
+  };
+
+  const removeRole = (roleId: string) => {
+    const assigned = currentUsers.some(
+      (user) => user.role !== "shop_admin" && getUserAccessRoleId(user, currentSettings?.pos) === roleId
+    );
+    if (assigned) {
+      setFeedback({ tone: "error", message: "Move users to another role before deleting this role." });
+      return;
+    }
+    setRoleDraft((current) => current.filter((role) => role.id !== roleId));
   };
 
   const saveRoleAccess = () => {
@@ -209,8 +213,14 @@ export default function UsersPage() {
       return;
     }
 
+    const normalizedNames = roleDraft.map((role) => role.name.trim().toLowerCase());
+    if (normalizedNames.some((name) => !name) || new Set(normalizedNames).size !== normalizedNames.length) {
+      setFeedback({ tone: "error", message: "Every role needs a unique name." });
+      return;
+    }
+
     updateSettings("pos", {
-      rolePermissions: roleDraft
+      accessRoles: roleDraft.map((role) => ({ ...role, name: role.name.trim() }))
     });
     setFeedback({
       tone: "success",
@@ -313,7 +323,9 @@ export default function UsersPage() {
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-base font-semibold text-ink">{user.name}</p>
                         <Badge variant={user.role === "shop_admin" ? "warning" : "neutral"}>
-                          {t(userRoleLabelKeys[user.role])}
+                          {user.role === "shop_admin"
+                            ? "Admin"
+                            : accessRoleNames.get(getUserAccessRoleId(user, currentSettings?.pos)) ?? "Staff"}
                         </Badge>
                         <Badge variant={user.isActive ? "success" : "danger"}>
                           {user.isActive ? t("common.active") : t("common.inactive")}
@@ -440,9 +452,10 @@ export default function UsersPage() {
               }))
             }
           >
-            <option value="shop_admin">{t(userRoleLabelKeys.shop_admin)}</option>
-            <option value="cashier">{t(userRoleLabelKeys.cashier)}</option>
-            <option value="support">{t(userRoleLabelKeys.support)}</option>
+            <option value="shop_admin">Admin (full access)</option>
+            {accessRoles.map((role) => (
+              <option key={role.id} value={role.id}>{role.name}</option>
+            ))}
           </Select>
         </div>
 
@@ -502,23 +515,49 @@ export default function UsersPage() {
         </Button>
       </div>
 
+      <div className="mt-6 rounded-[28px] border border-line bg-shell/60 p-4">
+        <p className="text-sm font-semibold text-ink">Create a new role</p>
+        <p className="mt-1 text-xs text-slate-500">Name the role, then enable the POS sections it can use.</p>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+          <Input
+            placeholder="Example: Supervisor or Stock Controller"
+            value={newRoleName}
+            onChange={(event) => setNewRoleName(event.target.value)}
+          />
+          <Button disabled={!canManageUsers || !newRoleName.trim()} onClick={addRole}>Create role</Button>
+        </div>
+      </div>
+
       <div className="mt-6 grid gap-4 xl:grid-cols-3">
-        {manageableRoles.map((role) => (
-          <div key={role} className="rounded-[28px] border border-line bg-white p-4">
+        {roleDraft.map((role) => (
+          <div key={role.id} className="rounded-[28px] border border-line bg-white p-4">
             <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="font-semibold text-ink">{t(userRoleLabelKeys[role])}</p>
+              <div className="min-w-0 flex-1">
+                <Input
+                  className="h-10 font-semibold"
+                  value={role.name}
+                  onChange={(event) => setRoleDraft((current) => current.map((entry) =>
+                    entry.id === role.id
+                      ? { ...entry, name: event.target.value, updatedAt: new Date().toISOString() }
+                      : entry
+                  ))}
+                />
                 <p className="mt-1 text-xs text-slate-500">
-                  {roleDraft[role]?.length ?? 0} enabled sections
+                  {role.permissions.length} enabled sections
                 </p>
               </div>
-              <span className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
-                <ShieldCheck className="h-5 w-5" />
-              </span>
+              <button
+                aria-label={`Delete ${role.name} role`}
+                className="grid h-10 w-10 place-items-center rounded-2xl bg-rose-50 text-rose-600 transition hover:bg-rose-100"
+                onClick={() => removeRole(role.id)}
+                type="button"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
             </div>
             <div className="mt-4 space-y-2">
-              {permissionOptions.map((permission) => {
-                const enabled = roleDraft[role]?.includes(permission.key) ?? false;
+              {SHOP_PERMISSION_OPTIONS.map((permission) => {
+                const enabled = role.permissions.includes(permission.key);
 
                 return (
                   <button
@@ -527,9 +566,9 @@ export default function UsersPage() {
                       "flex w-full items-center justify-between gap-3 rounded-2xl border p-3 text-left transition",
                       enabled ? "border-emerald-200 bg-emerald-50" : "border-line bg-shell/60 hover:bg-white"
                     )}
-                    disabled={!canManageUsers || role === "shop_admin"}
+                    disabled={!canManageUsers}
                     type="button"
-                    onClick={() => togglePermission(role, permission.key)}
+                    onClick={() => togglePermission(role.id, permission.key)}
                   >
                     <span>
                       <span className="block text-sm font-semibold text-ink">{permission.label}</span>
@@ -552,7 +591,7 @@ export default function UsersPage() {
       </div>
 
       <div className="mt-6 flex flex-wrap justify-end gap-3">
-        <Button variant="secondary" onClick={() => setRoleDraft(mergeRolePermissions(currentSettings?.pos.rolePermissions))}>
+        <Button variant="secondary" onClick={() => setRoleDraft(getAccessRoles(currentSettings?.pos))}>
           Reset draft
         </Button>
         <Button disabled={!canManageUsers} onClick={saveRoleAccess}>
@@ -561,6 +600,18 @@ export default function UsersPage() {
       </div>
     </Card>
   );
+
+  if (!canManageUsers) {
+    return (
+      <SettingsFormShell title={t("settings.users")} subtitle="">
+        <Card className="border-amber-200 bg-amber-50 p-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-700">Admin only</p>
+          <h2 className="mt-2 font-display text-2xl font-semibold text-ink">User and role management is protected</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">Only the shop admin can view users, create roles, or change access.</p>
+        </Card>
+      </SettingsFormShell>
+    );
+  }
 
   return (
     <SettingsFormShell title={t("settings.users")} subtitle="">

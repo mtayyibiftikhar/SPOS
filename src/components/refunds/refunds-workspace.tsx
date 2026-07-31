@@ -16,6 +16,7 @@ import {
   Search
 } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
+import { hasShopPermission } from "@/lib/access-control";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -293,7 +294,7 @@ export function RefundsWorkspace() {
   const [historyCustomTo, setHistoryCustomTo] = useState(todayBusinessDate);
   const currency = currentShop?.currency ?? "SAR";
   const currentSettings = currentShopId ? state.settingsByShop[currentShopId] : undefined;
-  const canCreateRefund = session?.role === "shop_admin";
+  const canCreateRefund = hasShopPermission(session, currentSettings?.pos, "refunds");
 
   const bills = useMemo(
     () =>

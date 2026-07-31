@@ -9,6 +9,7 @@ import {
 } from "@/lib/attendance";
 import { closeExpiredAttendanceRecords } from "@/lib/server/attendance-rollover";
 import { isMissingAttendanceScheduleColumns } from "@/lib/server/attendance-schema";
+import { hasShopPermission } from "@/lib/access-control";
 import type { AttendanceRecord, DemoAppState } from "@/types/pos";
 
 type AttendanceAction =
@@ -39,6 +40,24 @@ type AttendanceRequest = {
 };
 
 const RIYADH_TIME_ZONE = "Asia/Riyadh";
+
+async function canManageAttendance(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  session: NonNullable<ReturnType<typeof readShopUserSession>>
+) {
+  if (session.role === "shop_admin") return true;
+  const { data } = await supabase
+    .from("shop_cloud_snapshots")
+    .select("state")
+    .eq("shop_id", session.shopId)
+    .maybeSingle();
+  const state = (data?.state ?? {}) as Partial<DemoAppState>;
+  return hasShopPermission(
+    { id: session.userId, role: session.role, workspace: "shop" },
+    state.settingsByShop?.[session.shopId]?.pos,
+    "timeClock"
+  );
+}
 
 function currentRiyadhDate(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -206,6 +225,9 @@ export async function GET(request: Request) {
   try {
     const now = new Date();
     const supabase = createSupabaseAdminClient();
+    if (!(await canManageAttendance(supabase, session))) {
+      return NextResponse.json({ ok: false, message: "Your role cannot access attendance." }, { status: 403 });
+    }
     await closeExpiredAttendanceRecords(supabase, session.shopId, now);
     const { data, error } = await loadAttendanceRecords(supabase, session.shopId);
 
@@ -247,16 +269,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "Choose a clock-in or clock-out action." }, { status: 400 });
   }
 
-  if (targetUserId !== session.userId && session.role !== "shop_admin") {
-    return NextResponse.json({ ok: false, message: "Only the shop admin can update another employee." }, { status: 403 });
-  }
-
-  if (["clock_in", "close_day", "rollover", "save_adjustment", "save_payroll_rate"].includes(body.action) && session.role !== "shop_admin") {
-    return NextResponse.json({ ok: false, message: "Only the shop admin can bypass verified clock-in." }, { status: 403 });
-  }
-
   try {
     const supabase = createSupabaseAdminClient();
+    const canManage = await canManageAttendance(supabase, session);
+
+    if (!canManage) {
+      return NextResponse.json({ ok: false, message: "Your role cannot access attendance." }, { status: 403 });
+    }
 
     if (body.action === "rollover") {
       const closedCount = await closeExpiredAttendanceRecords(supabase, session.shopId, new Date());

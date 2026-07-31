@@ -33,6 +33,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { createStructuredReportPdfBlob, downloadBlob } from "@/lib/report-export";
 import { sanitizePhoneInput } from "@/lib/phone";
+import { hasShopPermission } from "@/lib/access-control";
 import { cn, formatCurrency, formatDateTime } from "@/lib/utils";
 import type { Product, PurchaseOrder, PurchaseOrderItem, PurchasePaymentStatus, Supplier, SupplierPaymentMethod } from "@/types/pos";
 
@@ -166,6 +167,7 @@ export function InventoryWorkspace() {
     createPurchaseOrder,
     currentShop,
     currentShopId,
+    currentSettings,
     deleteSupplier,
     locale,
     receivePurchaseOrder,
@@ -185,7 +187,7 @@ export function InventoryWorkspace() {
       ? requestedView
       : "overview";
   const currency = currentShop?.currency ?? "SAR";
-  const isManager = session?.role === "shop_admin";
+  const isManager = hasShopPermission(session, currentSettings?.pos, "inventory");
   const shopProducts = useMemo(
     () => state.products.filter((product) => product.shopId === currentShopId),
     [currentShopId, state.products]

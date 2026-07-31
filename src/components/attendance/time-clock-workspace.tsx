@@ -31,6 +31,7 @@ import {
   getAttendanceScheduleWindow
 } from "@/lib/attendance";
 import { calculateShiftSummary } from "@/lib/cash-control";
+import { hasShopPermission } from "@/lib/access-control";
 import { createStructuredReportPdfBlob, downloadBlob } from "@/lib/report-export";
 import { cn, formatBusinessDate, formatCurrency, formatDateTime } from "@/lib/utils";
 import type { AttendanceRecord, User } from "@/types/pos";
@@ -131,7 +132,7 @@ export function TimeClockWorkspace() {
     session,
     state
   } = usePosApp();
-  const isAdmin = session?.role === "shop_admin";
+  const isAdmin = hasShopPermission(session, currentSettings?.pos, "timeClock");
   const currency = currentSettings?.pos.currency ?? "SAR";
   const today = currentBusinessDay?.businessDate ?? new Date().toISOString().slice(0, 10);
   const monthStart = `${today.slice(0, 7)}-01`;

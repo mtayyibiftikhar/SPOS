@@ -2,10 +2,11 @@
 
 import { usePosApp } from "@/components/providers/app-provider";
 import { SettingsSectionNav } from "@/components/settings/settings-section-nav";
+import { hasShopPermission } from "@/lib/access-control";
 
 export function SettingsHub() {
-  const { session } = usePosApp();
-  const canManageSettings = session?.role === "shop_admin" || session?.role === "super_admin";
+  const { currentSettings, session } = usePosApp();
+  const canManageSettings = hasShopPermission(session, currentSettings?.pos, "settings");
 
   return (
     <div className="space-y-5">

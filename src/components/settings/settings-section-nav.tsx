@@ -18,6 +18,7 @@ import {
 import { settingsLinks } from "@/lib/constants";
 import { usePosApp } from "@/components/providers/app-provider";
 import { cn } from "@/lib/utils";
+import { hasShopPermission } from "@/lib/access-control";
 
 const settingIcons = {
   "/settings/shop": Store,
@@ -36,11 +37,17 @@ const staffVisibleSettings = new Set(["/settings/support"]);
 
 export function SettingsSectionNav() {
   const pathname = usePathname();
-  const { session, t } = usePosApp();
-  const canManageSettings = session?.role === "shop_admin" || session?.role === "super_admin";
+  const { currentSettings, session, t } = usePosApp();
+  const isAdmin = session?.role === "shop_admin" || session?.role === "super_admin";
+  const canManageSettings = hasShopPermission(session, currentSettings?.pos, "settings");
+  const canManageBackup = hasShopPermission(session, currentSettings?.pos, "backup");
   const visibleLinks = canManageSettings
-    ? settingsLinks
-    : settingsLinks.filter((item) => staffVisibleSettings.has(item.href));
+    ? settingsLinks.filter((item) => {
+        if (item.href === "/settings/users") return isAdmin;
+        if (item.href === "/settings/backup") return hasShopPermission(session, currentSettings?.pos, "backup");
+        return true;
+      })
+    : settingsLinks.filter((item) => staffVisibleSettings.has(item.href) || (item.href === "/settings/backup" && canManageBackup));
 
   return (
     <div className="rounded-[30px] border border-white/80 bg-white/90 p-3 shadow-[0_22px_70px_rgba(15,23,42,0.07)] backdrop-blur">

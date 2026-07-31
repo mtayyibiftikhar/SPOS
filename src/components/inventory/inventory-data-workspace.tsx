@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { normalizeBarcode } from "@/lib/catalog";
 import { downloadCsv, normalizeCsvHeader, parseCsv } from "@/lib/csv";
+import { hasShopPermission } from "@/lib/access-control";
 import type { Product, Supplier } from "@/types/pos";
 
 const HEADERS = [
@@ -74,12 +75,12 @@ function productBarcodes(product: Product) {
 }
 
 export function InventoryDataWorkspace() {
-  const { adjustInventory, currentShopId, saveProduct, session, state } = usePosApp();
+  const { adjustInventory, currentSettings, currentShopId, saveProduct, session, state } = usePosApp();
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<PreviewRow[]>([]);
   const [fileName, setFileName] = useState("");
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
-  const isAdmin = session?.role === "shop_admin";
+  const isAdmin = hasShopPermission(session, currentSettings?.pos, "inventory");
   const products = state.products.filter(
     (product) => product.shopId === currentShopId && product.kind === "product"
   );

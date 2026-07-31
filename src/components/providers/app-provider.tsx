@@ -84,6 +84,7 @@ import { clearShopDataScope, ownerClearShopDataScopeLabels, type OwnerClearShopD
 import { createPublicReceiptToken } from "@/lib/public-receipts";
 import { saveFreshReceiptHandoff, saveFreshRefundReceiptHandoff } from "@/lib/receipt-handoff";
 import { createId, getDirection, hashSecret } from "@/lib/utils";
+import { hasShopPermission } from "@/lib/access-control";
 
 const STORAGE_KEY = "simple-pos-state-v3";
 const SHARED_STATE_ENDPOINT = "/api/local-state";
@@ -919,7 +920,9 @@ function mergeSettingsByShop(storedSettings: DemoAppState["settingsByShop"] | un
             shop_admin: ["billing", "customers", "products", "inventory", "bills", "refunds", "reports", "settings", "backup"],
             cashier: ["billing", "customers", "bills"],
             support: ["reports", "settings"]
-          }
+          },
+        accessRoles: storedBundle?.pos?.accessRoles ?? defaultBundle?.pos?.accessRoles,
+        userAccessRoleIds: storedBundle?.pos?.userAccessRoleIds ?? defaultBundle?.pos?.userAccessRoleIds ?? {}
       },
       printer: {
         ...(defaultBundle?.printer ?? {}),
@@ -1836,6 +1839,18 @@ function mergeConcurrentShopCloudState(
   remote: ShopCloudStatePatch,
   shopId: string
 ) {
+  const baseSettings = base.settingsByShop?.[shopId];
+  const localSettings = local.settingsByShop?.[shopId];
+  const remoteSettings = remote.settingsByShop?.[shopId];
+  const mergedSettings = !localSettings
+    ? remoteSettings
+    : !remoteSettings
+      ? localSettings
+      : jsonEqual(localSettings, baseSettings)
+        ? remoteSettings
+        : jsonEqual(remoteSettings, baseSettings)
+          ? localSettings
+          : remoteSettings;
   const mergeProducts = (baseRow: Product | undefined, localRow: Product, remoteRow: Product) => {
     const baseStock = baseRow?.stockQuantity ?? 0;
     const localDelta = localRow.stockQuantity - baseStock;
@@ -1882,6 +1897,7 @@ function mergeConcurrentShopCloudState(
     productKeys: remote.productKeys ?? local.productKeys,
     deviceActivations: remote.deviceActivations ?? local.deviceActivations,
     users: remote.users ?? local.users,
+    settingsByShop: mergedSettings ? { [shopId]: mergedSettings } : {},
     categories: mergeConcurrentRows(base.categories, local.categories, remote.categories),
     products: mergeConcurrentRows(base.products, local.products, remote.products, mergeProducts),
     inventoryAdjustments: mergeConcurrentRows(
@@ -5908,7 +5924,7 @@ export function AppProvider({
           return { ok: false, message: "Session unavailable." };
         }
 
-        if (session.role !== "shop_admin") {
+        if (!hasShopPermission(session, currentSettings?.pos, "inventory")) {
           return { ok: false, message: "Only the shop admin can adjust inventory." };
         }
 
@@ -6030,7 +6046,7 @@ export function AppProvider({
           return { ok: false, message: "Session unavailable." };
         }
 
-        if (session.role !== "shop_admin") {
+        if (!hasShopPermission(session, currentSettings?.pos, "inventory")) {
           return { ok: false, message: "Only the shop admin can manage suppliers." };
         }
 
@@ -6136,7 +6152,7 @@ export function AppProvider({
           return { ok: false, message: "Session unavailable." };
         }
 
-        if (session.role !== "shop_admin") {
+        if (!hasShopPermission(session, currentSettings?.pos, "inventory")) {
           return { ok: false, message: "Only the shop admin can manage suppliers." };
         }
 
@@ -6182,7 +6198,7 @@ export function AppProvider({
           return { ok: false, message: "Session unavailable." };
         }
 
-        if (session.role !== "shop_admin") {
+        if (!hasShopPermission(session, currentSettings?.pos, "inventory")) {
           return { ok: false, message: "Only the shop admin can create purchase orders." };
         }
 
@@ -6357,7 +6373,7 @@ export function AppProvider({
           return { ok: false, message: "Session unavailable." };
         }
 
-        if (session.role !== "shop_admin") {
+        if (!hasShopPermission(session, currentSettings?.pos, "inventory")) {
           return { ok: false, message: "Only the shop admin can receive purchase orders." };
         }
 
@@ -6582,7 +6598,7 @@ export function AppProvider({
           return { ok: false, message: "Session unavailable." };
         }
 
-        if (session.role !== "shop_admin") {
+        if (!hasShopPermission(session, currentSettings?.pos, "inventory")) {
           return { ok: false, message: "Only the shop admin can cancel purchase orders." };
         }
 
@@ -6805,7 +6821,7 @@ export function AppProvider({
           return { ok: false, message: "Session unavailable." };
         }
 
-        if (session.role !== "shop_admin") {
+        if (!hasShopPermission(session, currentSettings?.pos, "dashboard")) {
           return { ok: false, message: "Only the shop admin can start the business day." };
         }
 
@@ -6855,7 +6871,7 @@ export function AppProvider({
           return { ok: false, message: "Session unavailable." };
         }
 
-        if (session.role !== "shop_admin") {
+        if (!hasShopPermission(session, currentSettings?.pos, "dashboard")) {
           return { ok: false, message: "Only the shop admin can close the business day." };
         }
 
@@ -6964,7 +6980,7 @@ export function AppProvider({
           return { ok: false, message: "Session unavailable." };
         }
 
-        if (session.role !== "shop_admin") {
+        if (!hasShopPermission(session, currentSettings?.pos, "dashboard")) {
           return { ok: false, message: "Only the shop admin can auto close and roll over the business day." };
         }
 
@@ -7161,11 +7177,11 @@ export function AppProvider({
         const source = payload.source ?? "qr";
         const targetUserId = payload.userId ?? session.id;
 
-        if (targetUserId !== session.id && session.role !== "shop_admin") {
+        if (targetUserId !== session.id && !hasShopPermission(session, currentSettings?.pos, "timeClock")) {
           return { ok: false, message: "Only the shop admin can clock in another employee." };
         }
 
-        if (source === "admin_bypass" && session.role !== "shop_admin") {
+        if (source === "admin_bypass" && !hasShopPermission(session, currentSettings?.pos, "timeClock")) {
           return { ok: false, message: "Only the shop admin can bypass clock-in verification." };
         }
 
@@ -7314,7 +7330,7 @@ export function AppProvider({
 
         const targetUserId = payload.userId ?? session.id;
 
-        if (targetUserId !== session.id && session.role !== "shop_admin") {
+        if (targetUserId !== session.id && !hasShopPermission(session, currentSettings?.pos, "timeClock")) {
           return { ok: false, message: "Only the shop admin can clock out another employee." };
         }
 
@@ -7442,7 +7458,7 @@ export function AppProvider({
           return { ok: false, message: "Session unavailable." };
         }
 
-        if (session.role !== "shop_admin") {
+        if (!hasShopPermission(session, currentSettings?.pos, "timeClock")) {
           return { ok: false, message: "Only the shop admin can adjust attendance." };
         }
 
@@ -7562,7 +7578,7 @@ export function AppProvider({
           return { ok: false, message: "Session unavailable." };
         }
 
-        if (session.role !== "shop_admin") {
+        if (!hasShopPermission(session, currentSettings?.pos, "timeClock")) {
           return { ok: false, message: "Only the shop admin can update payroll rates." };
         }
 
@@ -7661,7 +7677,7 @@ export function AppProvider({
           return { ok: false, message: "Session unavailable." };
         }
 
-        if (!["shop_admin", "cashier"].includes(session.role)) {
+        if (!hasShopPermission(session, currentSettings?.pos, "timeClock") && !hasShopPermission(session, currentSettings?.pos, "billing")) {
           return { ok: false, message: "Only shop users can start shifts." };
         }
 
@@ -7739,7 +7755,7 @@ export function AppProvider({
           return { ok: false, message: "Session unavailable." };
         }
 
-        if (!["shop_admin", "cashier"].includes(session.role)) {
+        if (!hasShopPermission(session, currentSettings?.pos, "timeClock") && !hasShopPermission(session, currentSettings?.pos, "billing")) {
           return { ok: false, message: "Only shop users can start shifts." };
         }
 
@@ -7979,7 +7995,7 @@ export function AppProvider({
           return { ok: false, message: "Session unavailable." };
         }
 
-        if (session.role !== "shop_admin") {
+        if (!hasShopPermission(session, currentSettings?.pos, "dashboard")) {
           return { ok: false, message: "Only the shop admin can record expenses." };
         }
 
@@ -8650,7 +8666,7 @@ export function AppProvider({
           return commitCriticalShopMutationToCloud({ type: "create_refund", payload });
         }
 
-        if (session.role !== "shop_admin") {
+        if (!hasShopPermission(session, currentSettings?.pos, "refunds")) {
           return {
             ok: false,
             message: "Only the shop admin can create refunds."

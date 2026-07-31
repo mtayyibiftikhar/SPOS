@@ -106,6 +106,44 @@ async function withAuthoritativeShopLogo(
   } satisfies Partial<DemoAppState>;
 }
 
+async function withAuthoritativeAccessControl(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  shopId: string,
+  state: Partial<DemoAppState>,
+  role: UserRole | null
+) {
+  if (role === "shop_admin") return state;
+  const submittedSettings = state.settingsByShop?.[shopId];
+  if (!submittedSettings) return state;
+
+  const { data, error } = await supabase
+    .from("shop_cloud_snapshots")
+    .select("state")
+    .eq("shop_id", shopId)
+    .maybeSingle();
+  if (error && !isMissingSnapshotTableError(error)) throw error;
+
+  const currentState = (data?.state ?? {}) as Partial<DemoAppState>;
+  const authoritativePos = currentState.settingsByShop?.[shopId]?.pos;
+  if (!authoritativePos) return state;
+
+  return {
+    ...state,
+    settingsByShop: {
+      ...state.settingsByShop,
+      [shopId]: {
+        ...submittedSettings,
+        pos: {
+          ...submittedSettings.pos,
+          accessRoles: authoritativePos.accessRoles,
+          rolePermissions: authoritativePos.rolePermissions,
+          userAccessRoleIds: authoritativePos.userAccessRoleIds
+        }
+      }
+    }
+  } satisfies Partial<DemoAppState>;
+}
+
 function isMissingSnapshotTableError(error: { code?: string; message?: string }) {
   return error.code === "42P01" || error.code === "PGRST205" || /shop_cloud_snapshots/i.test(error.message ?? "");
 }
@@ -460,7 +498,10 @@ async function loadOwnerControlledShopState(
                     ?.attendanceRequireLocation ?? true,
                 attendanceRequireSelfie:
                   (currentState.settingsByShop?.[shop.id]?.pos as { attendanceRequireSelfie?: boolean } | undefined)
-                    ?.attendanceRequireSelfie ?? false
+                    ?.attendanceRequireSelfie ?? false,
+                rolePermissions: currentState.settingsByShop?.[shop.id]?.pos.rolePermissions,
+                accessRoles: currentState.settingsByShop?.[shop.id]?.pos.accessRoles,
+                userAccessRoleIds: currentState.settingsByShop?.[shop.id]?.pos.userAccessRoleIds
               },
               printer:
                 settings?.printer_settings ??
@@ -960,7 +1001,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: "Shop state is required." }, { status: 400 });
     }
 
-    const stateToCommit = await withAuthoritativeShopLogo(authorization.supabase, shopId, body.state);
+    const accessControlledState = await withAuthoritativeAccessControl(
+      authorization.supabase,
+      shopId,
+      body.state,
+      authorization.role
+    );
+    const stateToCommit = await withAuthoritativeShopLogo(authorization.supabase, shopId, accessControlledState);
     const expectedRevision = Math.max(0, Math.trunc(Number(body.expectedRevision ?? 0)));
     const operationId = clean(body.operationId) || crypto.randomUUID();
     const { data, error } = await authorization.supabase.rpc("commit_shop_cloud_snapshot", {

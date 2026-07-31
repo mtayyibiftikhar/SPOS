@@ -15,8 +15,10 @@ export type ReceiptSecondaryLanguage = Exclude<Locale, "en">;
 export type TaxMode = "inclusive" | "exclusive";
 export type PromotionScope = "bill" | "products" | "services" | "selected";
 export type RolePermissionKey =
+  | "dashboard"
   | "billing"
   | "customers"
+  | "accounts"
   | "products"
   | "inventory"
   | "timeClock"
@@ -25,6 +27,14 @@ export type RolePermissionKey =
   | "reports"
   | "settings"
   | "backup";
+
+export interface ShopAccessRole {
+  id: string;
+  name: string;
+  permissions: RolePermissionKey[];
+  createdAt: string;
+  updatedAt: string;
+}
 export type InventoryAdjustmentType = "add" | "remove" | "sale" | "refund";
 export type PurchaseOrderStatus = "draft" | "ordered" | "partially_received" | "received" | "cancelled";
 export type ExpensePaymentMethod = "cash" | "card" | "bank";
@@ -535,6 +545,8 @@ export interface POSSettings {
   attendanceRequireLocation?: boolean;
   attendanceRequireSelfie?: boolean;
   rolePermissions?: Partial<Record<Exclude<UserRole, "super_admin">, RolePermissionKey[]>>;
+  accessRoles?: ShopAccessRole[];
+  userAccessRoleIds?: Record<string, string>;
 }
 
 export interface PrinterSettings {

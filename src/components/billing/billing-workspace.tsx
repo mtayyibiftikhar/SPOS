@@ -41,6 +41,7 @@ import {
 import { paymentMethodLabelKeys } from "@/lib/i18n";
 import { combinePhoneNumber, DEFAULT_PHONE_COUNTRY_CODE, sanitizePhoneDigits, splitPhoneNumber } from "@/lib/phone";
 import { cn, formatCurrency } from "@/lib/utils";
+import { hasShopPermission } from "@/lib/access-control";
 import type { CheckoutBillInput, Customer, DiscountType, PaymentMethod, Product } from "@/types/pos";
 
 type WorkflowStep = "build" | "customer" | "payment";
@@ -1707,7 +1708,7 @@ export function BillingWorkspace() {
             </Button>
 
             {!currentBusinessDay ? (
-              session?.role === "shop_admin" ? (
+              hasShopPermission(session, currentSettings?.pos, "dashboard") ? (
                 <Button
                   className="h-10 rounded-[14px] bg-slate-950 px-4 text-white hover:bg-slate-900"
                   onClick={handleStartDay}

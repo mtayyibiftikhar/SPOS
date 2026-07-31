@@ -16,6 +16,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBusinessDate, formatCurrency, formatDateTime } from "@/lib/utils";
+import { hasShopPermission } from "@/lib/access-control";
 
 type Feedback = {
   kind: "success" | "error";
@@ -165,6 +166,7 @@ export function CashControlPanel() {
     closeBusinessDay,
     createExpense,
     currentBusinessDay,
+    currentSettings,
     currentShift,
     currentShop,
     forceCloseShiftAndStart,
@@ -176,8 +178,8 @@ export function CashControlPanel() {
     state,
     t
   } = usePosApp();
-  const canManageDay = session?.role === "shop_admin";
-  const canUseShift = session?.role === "shop_admin" || session?.role === "cashier";
+  const canManageDay = hasShopPermission(session, currentSettings?.pos, "dashboard");
+  const canUseShift = hasShopPermission(session, currentSettings?.pos, "timeClock") || hasShopPermission(session, currentSettings?.pos, "billing");
   const timeZone = currentShop?.timezone ?? "Asia/Riyadh";
   const currency = currentShop?.currency ?? "SAR";
   const todayBusinessDate = getBusinessDateInTimezone(timeZone);

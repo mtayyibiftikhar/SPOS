@@ -17,11 +17,11 @@ import {
   WalletCards
 } from "lucide-react";
 import { mainNavItems } from "@/lib/constants";
-import { userRoleLabelKeys } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { usePosApp } from "@/components/providers/app-provider";
 import { Button } from "@/components/ui/button";
 import { ResilientImage } from "@/components/ui/resilient-image";
+import { getSessionAccessRoleName, hasShopPermission, permissionForPath } from "@/lib/access-control";
 
 const icons = {
   "/dashboard": LayoutGrid,
@@ -50,11 +50,15 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       .slice(0, 2)
       .map((part) => part.charAt(0).toUpperCase())
       .join("") || "SP";
+  const visibleNavItems = mainNavItems.filter((item) => {
+    const permission = permissionForPath(item.href);
+    return !permission || hasShopPermission(session, currentSettings?.pos, permission);
+  });
 
   return (
     <aside className="flex h-full flex-col">
       <Link
-        href="/billing"
+        href={visibleNavItems[0]?.href ?? "/dashboard"}
         className={cn(
           "block rounded-[26px] bg-[radial-gradient(circle_at_16%_16%,rgba(16,185,129,0.16),transparent_34%),linear-gradient(145deg,#070b1a_0%,#102a2b_100%)] text-white shadow-[0_18px_34px_rgba(15,23,42,0.16)] transition hover:-translate-y-0.5 hover:shadow-[0_22px_42px_rgba(15,23,42,0.2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400",
           isBillingRoute ? "px-3 py-3" : "px-4 py-4"
@@ -87,7 +91,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </Link>
 
       <nav className={cn("mt-5", isBillingRoute ? "space-y-2" : "space-y-2.5")}>
-        {mainNavItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const isActive =
             item.href === "/settings" ? pathname.startsWith("/settings") : pathname === item.href;
           const Icon = icons[item.href as keyof typeof icons];
@@ -123,7 +127,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <div className="rounded-3xl border border-slate-200 bg-white px-4 py-4 shadow-[0_14px_34px_rgba(15,23,42,0.05)]">
           <p className="truncate text-sm font-semibold text-slate-950">{session?.name ?? t("common.notAvailable")}</p>
           <p className="mt-1 truncate text-xs uppercase tracking-[0.18em] text-slate-500">
-            {session?.role ? t(userRoleLabelKeys[session.role]) : ""}
+            {session ? getSessionAccessRoleName(session, currentSettings?.pos) : ""}
           </p>
           <Button className="mt-4 h-10 w-full justify-center gap-2 rounded-[16px]" onClick={logout} variant="secondary">
             <LogOut className="h-4 w-4" />

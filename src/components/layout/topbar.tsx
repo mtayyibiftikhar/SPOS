@@ -5,11 +5,12 @@ import { usePathname } from "next/navigation";
 import { usePosApp } from "@/components/providers/app-provider";
 import { LocaleSwitcher } from "@/components/shared/locale-switcher";
 import { mainNavItems } from "@/lib/constants";
+import { hasShopPermission, permissionForPath } from "@/lib/access-control";
 import { cn } from "@/lib/utils";
 
 export function Topbar({ minimal = false }: { minimal?: boolean }) {
   const pathname = usePathname();
-  const { t } = usePosApp();
+  const { currentSettings, session, t } = usePosApp();
 
   return (
     <div
@@ -19,7 +20,10 @@ export function Topbar({ minimal = false }: { minimal?: boolean }) {
       )}
     >
       <nav className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
-        {mainNavItems.map((item) => {
+        {mainNavItems.filter((item) => {
+          const permission = permissionForPath(item.href);
+          return !permission || hasShopPermission(session, currentSettings?.pos, permission);
+        }).map((item) => {
           const active = item.href === "/settings" ? pathname.startsWith("/settings") : pathname === item.href;
 
           return (

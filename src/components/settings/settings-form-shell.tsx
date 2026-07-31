@@ -1,8 +1,10 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { SettingsSectionNav } from "@/components/settings/settings-section-nav";
 import { usePosApp } from "@/components/providers/app-provider";
+import { hasShopPermission, permissionForPath } from "@/lib/access-control";
 
 export function SettingsFormShell({
   title,
@@ -15,8 +17,10 @@ export function SettingsFormShell({
   adminOnly?: boolean;
   children: React.ReactNode;
 }) {
-  const { session } = usePosApp();
-  const canManageSettings = session?.role === "shop_admin" || session?.role === "super_admin";
+  const { currentSettings, session } = usePosApp();
+  const pathname = usePathname();
+  const requiredPermission = permissionForPath(pathname) ?? "settings";
+  const canManageSettings = hasShopPermission(session, currentSettings?.pos, requiredPermission);
 
   if (adminOnly && !canManageSettings) {
     return (

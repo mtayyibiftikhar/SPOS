@@ -36,6 +36,7 @@ import { ResilientImage } from "@/components/ui/resilient-image";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn, formatCurrency } from "@/lib/utils";
+import { hasShopPermission } from "@/lib/access-control";
 import type { Product } from "@/types/pos";
 
 type ProductView = "overview" | "editor" | "categories" | "catalog" | "quick" | "data";
@@ -255,6 +256,7 @@ export function ProductWorkspace() {
   const searchParams = useSearchParams();
   const {
     addCategory,
+    currentSettings,
     currentShopId,
     deleteCategory,
     deleteProduct,
@@ -265,7 +267,7 @@ export function ProductWorkspace() {
     t,
     updateCategory
   } = usePosApp();
-  const isAdmin = session?.role === "shop_admin";
+  const isAdmin = hasShopPermission(session, currentSettings?.pos, "products");
   const shopProducts = state.products.filter((product) => product.shopId === currentShopId);
   const shopCategories = state.categories.filter((category) => category.shopId === currentShopId);
   const activeProductKey = state.productKeys.find(
