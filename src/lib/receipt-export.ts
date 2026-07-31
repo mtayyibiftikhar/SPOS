@@ -429,6 +429,140 @@ export function buildReceiptFileName(receiptNumber: string) {
   return `${slug || "receipt"}.pdf`;
 }
 
+export type UnifiedReceiptPdfInput = {
+  receiptNumber: string;
+  receiptSize: ReceiptSize;
+  shopName: string;
+  shopAddress?: string | null;
+  shopPhone?: string | null;
+  shopVatNumber?: string | null;
+  shopLogoUrl?: string | null;
+  receiptType?: string;
+  metadata: Array<{ label: string; value: string }>;
+  customer?: {
+    name: string;
+    phone?: string | null;
+    email?: string | null;
+    whatsapp?: string | null;
+    vatNumber?: string | null;
+    address?: string | null;
+  } | null;
+  itemsLabel?: string;
+  items: Array<{
+    name: string;
+    quantity: string;
+    unitPrice: string;
+    total: string;
+    detail?: string;
+  }>;
+  totals: Array<{ label: string; value: string; strong?: boolean }>;
+  note?: { label: string; value: string };
+  footerText?: string | null;
+  qrCodeUrl?: string;
+  qrCaption?: string;
+  ownerBrand?: {
+    companyName: BrandProfile["companyName"];
+    receiptImprintEnabled: BrandProfile["receiptImprintEnabled"];
+    logoUrl?: BrandProfile["logoUrl"];
+    receiptImprintText?: BrandProfile["receiptImprintText"];
+    website?: BrandProfile["website"];
+    address?: BrandProfile["address"];
+    supportPhone?: BrandProfile["supportPhone"];
+    supportEmail?: BrandProfile["supportEmail"];
+  };
+  fileName?: string;
+};
+
+export function buildUnifiedReceiptPdfDocument(input: UnifiedReceiptPdfInput): ReceiptPdfDocument {
+  const elements: PdfElement[] = [];
+  const headerLines = [input.shopName, input.shopAddress, input.shopPhone, input.shopVatNumber ? `VAT No. ${input.shopVatNumber}` : undefined]
+    .map((line) => normalizeCanvasText(line ?? undefined))
+    .filter(Boolean);
+
+  if (input.receiptType) {
+    elements.push({ type: "text", text: input.receiptType.toUpperCase(), align: "center", bold: true, size: 11, spacingAfter: 8 });
+  }
+
+  appendRule(elements, { spacingAfter: 8 });
+  input.metadata.forEach((entry, index) => {
+    appendPair(elements, entry.label, entry.value, {
+      valueBold: index === 0,
+      size: 9.5,
+      spacingAfter: index === input.metadata.length - 1 ? 8 : 4
+    });
+  });
+
+  if (input.customer) {
+    appendRule(elements, { spacingAfter: 8 });
+    elements.push({ type: "text", text: "Customer", bold: true, size: 10, spacingAfter: 4 });
+    const customerLines = [
+      input.customer.name,
+      input.customer.phone ? `Phone ${input.customer.phone}` : undefined,
+      input.customer.email ? `Email ${input.customer.email}` : undefined,
+      input.customer.whatsapp ? `WhatsApp ${input.customer.whatsapp}` : undefined,
+      input.customer.vatNumber ? `VAT No. ${input.customer.vatNumber}` : undefined,
+      input.customer.address ? `Address ${input.customer.address}` : undefined
+    ].filter((line): line is string => Boolean(line));
+    customerLines.forEach((line, index) => appendWrappedText(elements, line, {
+      bold: index === 0,
+      size: index === 0 ? 10 : 9.5,
+      spacingAfter: index === customerLines.length - 1 ? 8 : 4
+    }, input.receiptSize));
+  }
+
+  appendRule(elements, { spacingAfter: 8 });
+  elements.push({ type: "text", text: input.itemsLabel ?? "Items", bold: true, size: 10, spacingAfter: 6 });
+  input.items.forEach((item, index) => {
+    appendWrappedText(elements, item.name || "Item", { bold: true, size: 10.2, spacingAfter: 4 }, input.receiptSize);
+    appendPair(elements, `Qty ${item.quantity} x ${item.unitPrice}`, item.total, { size: 9, spacingAfter: item.detail ? 5 : 11 });
+    if (item.detail) {
+      appendWrappedText(elements, item.detail, { size: 8.5, spacingAfter: 11 }, input.receiptSize);
+    }
+    if (index < input.items.length - 1) appendRule(elements, { spacingBefore: 1, spacingAfter: 8 });
+  });
+
+  appendRule(elements, { spacingAfter: 8 });
+  input.totals.forEach((entry, index) => appendPair(elements, entry.label, entry.value, {
+    labelBold: entry.strong,
+    valueBold: entry.strong,
+    size: entry.strong ? 11 : 9.5,
+    spacingAfter: index === input.totals.length - 1 ? 8 : 4
+  }));
+
+  if (input.note?.value) {
+    appendRule(elements, { spacingAfter: 8 });
+    appendWrappedText(elements, `${input.note.label}: ${input.note.value}`, { size: 9, spacingAfter: 8 }, input.receiptSize);
+  }
+
+  if (input.footerText) {
+    appendRule(elements, { spacingAfter: 8 });
+    appendWrappedText(elements, input.footerText, { align: "center", size: 9, spacingAfter: 0 }, input.receiptSize);
+  }
+
+  const ownerImprintLines = input.ownerBrand?.receiptImprintEnabled
+    ? [
+        normalizeCanvasText(input.ownerBrand.receiptImprintText || `Powered by ${input.ownerBrand.companyName}`),
+        normalizeCanvasText(input.ownerBrand.companyName),
+        normalizeCanvasText(input.ownerBrand.website),
+        normalizeCanvasText(input.ownerBrand.address),
+        normalizeCanvasText(input.ownerBrand.supportPhone ? `Support ${input.ownerBrand.supportPhone}` : undefined),
+        normalizeCanvasText(input.ownerBrand.supportEmail)
+      ].filter(Boolean)
+    : [];
+
+  return {
+    fileName: input.fileName ?? buildReceiptFileName(input.receiptNumber),
+    receiptSize: input.receiptSize,
+    headerLines,
+    logoUrl: input.shopLogoUrl ? getPosAssetDeliveryUrl(input.shopLogoUrl) : undefined,
+    ownerLogoUrl: ownerImprintLines.length && input.ownerBrand?.logoUrl ? getPosAssetDeliveryUrl(input.ownerBrand.logoUrl) : undefined,
+    ownerImprintLines,
+    qrCaption: input.qrCaption ?? "Digital receipt",
+    qrCodeUrl: input.qrCodeUrl,
+    elements
+  };
+}
+
 export function buildReceiptPdfDocument({
   bill,
   items,

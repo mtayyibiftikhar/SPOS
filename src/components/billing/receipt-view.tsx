@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { ResilientImage } from "@/components/ui/resilient-image";
 import { ReceiptBrandHeader } from "@/components/billing/receipt-brand-header";
+import { UnifiedReceipt } from "@/components/billing/unified-receipt";
 import { Textarea } from "@/components/ui/textarea";
 import { customerMatchesSearch, isWalkInCustomerName } from "@/lib/billing";
 import { buildQrCodeImageUrl } from "@/lib/qr-code";
@@ -534,9 +535,64 @@ export function ReceiptView({ billId }: { billId: string }) {
       ) : null}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px] print:block">
-        <Card
-          className="receipt-paper mx-auto w-full max-w-3xl p-6 sm:p-8 print:mx-0 print:max-w-none print:rounded-none print:border-0 print:bg-white print:p-0 print:shadow-none"
+        <UnifiedReceipt
           id="receipt-print-area"
+          shop={{
+            name: receiptBrand,
+            logoUrl: posSettings?.logoUrl,
+            address: posSettings?.address ?? shop?.address,
+            phone: posSettings?.phone ?? shop?.phone,
+            vatNumber: posSettings?.vatNumber
+          }}
+          metadata={[
+            { label: t("common.receiptNumber"), value: bill.number },
+            { label: t("common.paymentMethod"), value: t(paymentMethodLabelKeys[bill.paymentMethod]) },
+            { label: t("common.dateTime"), value: formatDateTime(bill.createdAt, locale) },
+            { label: t("common.status"), value: t(billStatusLabelKeys[bill.status]) },
+            ...(receiptSettings?.showCashier ? [{ label: t("common.cashier"), value: cashier?.name ?? t("common.notAvailable") }] : []),
+            { label: t("common.dueAmount"), value: formatCurrency(bill.dueAmount, shop?.currency ?? "SAR", locale) }
+          ]}
+          customer={receiptSettings?.showCustomer ? {
+            name: bill.customerName || t("billing.walkInCustomer"),
+            phone: bill.customerPhone,
+            email: bill.customerEmail,
+            whatsapp: bill.customerWhatsapp,
+            vatNumber: bill.customerVatNumber,
+            address: bill.customerAddress
+          } : null}
+          customerLabel={t("common.customer")}
+          itemLabels={{ items: t("common.items"), quantity: t("common.quantity"), unitPrice: t("common.salePrice"), total: t("common.total") }}
+          items={items.map((item) => ({
+            id: item.id,
+            name: renderReceiptItemName(item),
+            quantity: item.quantity,
+            unitPrice: formatCurrency(item.unitPrice, shop?.currency ?? "SAR", locale),
+            total: formatCurrency(item.lineTotal, shop?.currency ?? "SAR", locale),
+            detail: item.discountAmount > 0 ? `${t("common.itemDiscounts")}: -${formatCurrency(item.discountAmount, shop?.currency ?? "SAR", locale)}` : undefined
+          }))}
+          totals={[
+            { label: t("common.subtotal"), value: formatCurrency(bill.subtotal, shop?.currency ?? "SAR", locale) },
+            ...((bill.itemDiscountAmount ?? 0) > 0 ? [{ label: t("common.itemDiscounts"), value: `-${formatCurrency(bill.itemDiscountAmount ?? 0, shop?.currency ?? "SAR", locale)}` }] : []),
+            { label: t("common.discount"), value: formatCurrency(bill.discountAmount, shop?.currency ?? "SAR", locale) },
+            ...(receiptSettings?.showTax ? [{ label: bill.taxName ?? t("common.tax"), value: formatCurrency(bill.taxAmount, shop?.currency ?? "SAR", locale) }] : []),
+            { label: t("common.total"), value: formatCurrency(bill.total, shop?.currency ?? "SAR", locale), emphasis: "strong" as const },
+            { label: t("common.paidAmount"), value: formatCurrency(bill.paidAmount, shop?.currency ?? "SAR", locale) },
+            { label: t("common.dueAmount"), value: formatCurrency(bill.dueAmount, shop?.currency ?? "SAR", locale) }
+          ]}
+          statusBanner={refundState && refundState.totalRefundAmount > 0 ? (
+            <div className={refundState.isFullyRefunded ? "my-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-center text-red-800" : "my-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-center text-amber-900"}>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em]">{refundState.isFullyRefunded ? t("refund.fullRefunded") : t("refund.partialRefunded")}</p>
+              <p className="mt-1 font-semibold">{t("refund.totalRefunded")}: {formatCurrency(refundState.totalRefundAmount, shop?.currency ?? "SAR", locale)}</p>
+            </div>
+          ) : null}
+          footerText={receiptSettings?.footerText}
+          qr={receiptQrImageUrl ? { imageUrl: receiptQrImageUrl, href: digitalReceiptUrl, code: bill.number, title: t("receipt.qrTitle"), description: t("receipt.qrDesc") } : undefined}
+          ownerBrand={{ enabled: state.brand.receiptImprintEnabled, companyName: state.brand.companyName, logoUrl: state.brand.logoUrl, imprintText: state.brand.receiptImprintText, website: state.brand.website, address: state.brand.address, supportPhone: state.brand.supportPhone, supportEmail: state.brand.supportEmail }}
+        />
+
+        <Card
+          className="hidden"
+          id="legacy-receipt-print-area"
         >
           <ReceiptBrandHeader
             address={posSettings?.address ?? shop?.address}

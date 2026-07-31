@@ -34,6 +34,7 @@ export function ReceiptBrandHeader({
         <ResilientImage
           src={resolvedLogoUrl}
           alt={`${shopName} logo`}
+          cacheKey={`receipt-shop-logo:${shopName}`}
           className="max-h-20 max-w-[12rem] object-contain"
           fallback={
             <div className="flex h-12 w-12 items-center justify-center rounded-[18px] bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.18),_transparent_42%),linear-gradient(160deg,#0f172a_0%,#172036_100%)] font-display text-lg font-semibold tracking-[0.18em] text-white shadow-[0_16px_30px_rgba(15,23,42,0.16)]">
