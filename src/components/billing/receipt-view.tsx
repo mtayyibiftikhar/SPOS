@@ -163,20 +163,20 @@ export function ReceiptView({ billId }: { billId: string }) {
       return;
     }
 
-    setReturnCountdown(10);
-
+    let secondsRemaining = 10;
+    setReturnCountdown(secondsRemaining);
     const interval = window.setInterval(() => {
-      setReturnCountdown((current) => (current === null ? null : Math.max(0, current - 1)));
-    }, 1000);
-    const timer = window.setTimeout(() => {
-      router.push("/billing");
-    }, 10000);
+      secondsRemaining -= 1;
+      setReturnCountdown(Math.max(0, secondsRemaining));
 
-    return () => {
-      window.clearInterval(interval);
-      window.clearTimeout(timer);
-    };
-  }, [bill, isFreshReceipt, router]);
+      if (secondsRemaining <= 0) {
+        window.clearInterval(interval);
+        router.replace("/billing");
+      }
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [bill?.id, isFreshReceipt, router]);
 
   if (!isHydrated || (!bill && !receiptLookupTimedOut)) {
     return (
@@ -508,21 +508,17 @@ export function ReceiptView({ billId }: { billId: string }) {
           </Button>
         ) : (
           <>
-            <Button asChild variant="secondary">
-              <Link href="/billing">
-                <span className="inline-flex items-center gap-2">
-                  <ArrowLeft className="h-4 w-4" />
-                  {t("receipt.backToBilling")}
-                </span>
-              </Link>
+            <Button onClick={() => router.replace("/billing")} type="button" variant="secondary">
+              <span className="inline-flex items-center gap-2">
+                <ArrowLeft className="h-4 w-4" />
+                {t("receipt.backToBilling")}
+              </span>
             </Button>
-            <Button asChild variant="secondary">
-              <Link href="/bills">
-                <span className="inline-flex items-center gap-2">
-                  {t("receipt.backToBills")}
-                  <ArrowRight className="h-4 w-4" />
-                </span>
-              </Link>
+            <Button onClick={() => router.replace("/bills")} type="button" variant="secondary">
+              <span className="inline-flex items-center gap-2">
+                {t("receipt.backToBills")}
+                <ArrowRight className="h-4 w-4" />
+              </span>
             </Button>
           </>
         )}

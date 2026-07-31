@@ -8,6 +8,7 @@ import { usePosApp } from "@/components/providers/app-provider";
 import { AttendanceGate } from "@/components/attendance/attendance-gate";
 import { cn, formatDateTime } from "@/lib/utils";
 import { hasShopPermission, permissionForPath } from "@/lib/access-control";
+import { shouldShowGlobalSaveFeedback } from "@/lib/save-feedback";
 
 function getBlockedStatus(license: ReturnType<typeof usePosApp>["currentLicense"]) {
   if (!license) {
@@ -42,6 +43,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const routePermission = permissionForPath(pathname);
   const canOpenRoute = !routePermission || hasShopPermission(session, currentSettings?.pos, routePermission);
   const isBillingRoute = pathname === "/billing" && canOpenRoute;
+  const showSaveFeedback = shouldShowGlobalSaveFeedback(pathname);
   const supportSession =
     session?.supportSessionId
       ? state.supportSessions.find((entry) => entry.id === session.supportSessionId && !entry.endedAt)
@@ -166,7 +168,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </main>
       </div>
-      {saveFeedback ? (
+      {saveFeedback && showSaveFeedback ? (
         <div
           aria-live="polite"
           className="fixed bottom-5 right-5 z-[90] flex items-center gap-2 rounded-full border border-emerald-200 bg-white/96 px-4 py-3 text-sm font-bold text-emerald-800 shadow-[0_20px_55px_rgba(15,23,42,0.16)] backdrop-blur print:hidden"
