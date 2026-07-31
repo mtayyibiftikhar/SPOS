@@ -57,6 +57,10 @@ export type CriticalShopMutation =
     }
   | { type: "end_shift"; payload: { countedCash: number; note?: string } }
   | {
+      type: "end_all_shifts";
+      payload: { countedCashByShift: Record<string, number>; note?: string };
+    }
+  | {
       type: "settle_customer_account";
       payload: {
         amount: number;
@@ -325,6 +329,74 @@ function endShiftMutation(
             }
           : shift
       )
+    }
+  };
+}
+
+function endAllShiftsMutation(
+  state: Partial<DemoAppState>,
+  payload: Extract<CriticalShopMutation, { type: "end_all_shifts" }>["payload"],
+  context: MutationContext
+) {
+  if (!contextHasPermission(state, context, "dashboard")) {
+    return { result: { ok: false, message: "Only an authorized admin can close all shifts." }, state };
+  }
+
+  const openDay = getActiveBusinessDay(state.businessDays ?? [], context.shopId);
+  if (!openDay) return { result: { ok: false, message: "No open business day was found." }, state };
+  const openShifts = (state.shifts ?? []).filter(
+    (shift) => shift.shopId === context.shopId && shift.businessDate === openDay.businessDate && !shift.endedAt
+  );
+  if (!openShifts.length) return { result: { ok: true, message: "There are no open shifts." }, state };
+
+  for (const shift of openShifts) {
+    const countedCash = payload.countedCashByShift[shift.id];
+    if (!Number.isFinite(countedCash) || countedCash < 0) {
+      return { result: { ok: false, message: "Enter counted cash for every open shift." }, state };
+    }
+  }
+
+  const summaries = new Map(openShifts.map((shift) => [shift.id, calculateShiftSummary({
+    shift,
+    bills: state.bills ?? [],
+    cashMovements: state.cashMovements ?? [],
+    customerAccountPayments: state.customerAccountPayments ?? [],
+    refunds: state.refunds ?? []
+  })]));
+  const endedAt = new Date().toISOString();
+
+  return {
+    result: { ok: true, message: `${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"} closed.` },
+    state: {
+      ...state,
+      shifts: (state.shifts ?? []).map((shift) => {
+        const summary = summaries.get(shift.id);
+        if (!summary) return shift;
+        const countedCash = Math.round(payload.countedCashByShift[shift.id] * 100) / 100;
+        return {
+          ...shift,
+          countedCash,
+          expectedCash: summary.expectedCash,
+          difference: Math.round((countedCash - summary.expectedCash) * 100) / 100,
+          note: payload.note?.trim() || "Closed by admin during day-end reconciliation.",
+          forcedClosedBy: context.userId,
+          forceClosedAt: endedAt,
+          forceCloseReason: "Day-end reconciliation",
+          endedAt
+        };
+      }),
+      auditLogs: [
+        {
+          id: createId("audit"),
+          shopId: context.shopId,
+          actorId: context.userId,
+          action: "shift.close_all_for_day_end",
+          targetId: openDay.id,
+          detail: `Closed ${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"} during day-end reconciliation.`,
+          createdAt: endedAt
+        },
+        ...(state.auditLogs ?? [])
+      ]
     }
   };
 }
@@ -917,6 +989,7 @@ export function applyCriticalShopMutation(
   if (mutation.type === "close_business_day") return closeBusinessDayMutation(state, mutation.payload, context);
   if (mutation.type === "start_shift") return startShiftMutation(state, mutation.payload, context);
   if (mutation.type === "end_shift") return endShiftMutation(state, mutation.payload, context);
+  if (mutation.type === "end_all_shifts") return endAllShiftsMutation(state, mutation.payload, context);
   if (mutation.type === "create_bill") return createBillMutation(state, mutation.payload, context);
   if (mutation.type === "create_refund") return createRefundMutation(state, mutation.payload, context);
   return settleCustomerMutation(state, mutation.payload, context);

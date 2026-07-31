@@ -69,6 +69,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[18px] bg-white/10 ring-1 ring-white/15">
             <ResilientImage
                 alt={shopName}
+                cacheKey={`shop-logo:${currentShop?.id ?? "active"}`}
                 className="h-full w-full object-contain p-1"
                 src={shopLogo}
                 fallback={<span className="text-sm font-semibold tracking-[0.12em] text-white">{logoFallback}</span>}

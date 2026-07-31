@@ -1,6 +1,7 @@
 "use client";
 
 import { usePosApp } from "@/components/providers/app-provider";
+import { ResilientImage } from "@/components/ui/resilient-image";
 
 export function BrandedLoadingScreen({ message }: { message?: string }) {
   const { state } = usePosApp();
@@ -11,18 +12,20 @@ export function BrandedLoadingScreen({ message }: { message?: string }) {
     <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_34%),radial-gradient(circle_at_bottom_right,_rgba(245,158,11,0.14),_transparent_36%),linear-gradient(180deg,#f8fbf9_0%,#eef5f1_100%)] p-6">
       <div className="w-full max-w-md rounded-[32px] border border-white/80 bg-white/92 p-7 text-center shadow-[0_30px_90px_rgba(15,23,42,0.12)] backdrop-blur">
         <div className="mx-auto flex h-20 w-20 items-center justify-center overflow-hidden rounded-[28px] bg-slate-950 text-white shadow-[0_20px_44px_rgba(15,23,42,0.18)]">
-          {state.brand.logoUrl ? (
-            <img alt={state.brand.companyName} className="h-full w-full object-cover" src={state.brand.logoUrl} />
-          ) : (
-            <span className="font-display text-2xl font-semibold tracking-[0.18em]">
+          <ResilientImage
+            alt={state.brand.companyName}
+            cacheKey="brand-logo"
+            className="h-full w-full object-cover"
+            src={state.brand.logoUrl}
+            fallback={<span className="font-display text-2xl font-semibold tracking-[0.18em]">
               {state.brand.posName
                 .split(/\s+/)
                 .filter(Boolean)
                 .slice(0, 2)
                 .map((part) => part.charAt(0).toUpperCase())
                 .join("") || "POS"}
-            </span>
-          )}
+            </span>}
+          />
         </div>
 
         <p className="mt-6 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">

@@ -491,6 +491,41 @@ test("ending a shift records authoritative expected cash and variance", () => {
   assert.ok(closed.state.shifts?.[0].endedAt);
 });
 
+test("admin closes every open shift with an explicit drawer count", () => {
+  const state = openState({
+    shifts: [
+      {
+        id: "shift_one",
+        shopId: SHOP_ID,
+        businessDayId: "day_1",
+        businessDate: BUSINESS_DATE,
+        cashierId: USER_ID,
+        openingCash: 10,
+        startedAt: NOW
+      },
+      {
+        id: "shift_two",
+        shopId: SHOP_ID,
+        businessDayId: "day_1",
+        businessDate: BUSINESS_DATE,
+        cashierId: ADMIN_ID,
+        openingCash: 20,
+        startedAt: NOW
+      }
+    ]
+  });
+  const closed = applyCriticalShopMutation(
+    state,
+    { type: "end_all_shifts", payload: { countedCashByShift: { shift_one: 10, shift_two: 19 } } },
+    { role: "shop_admin", shopId: SHOP_ID, userId: ADMIN_ID }
+  );
+
+  assert.equal(closed.result.ok, true);
+  assert.equal(closed.state.shifts?.every((shift) => Boolean(shift.endedAt)), true);
+  assert.equal(closed.state.shifts?.find((shift) => shift.id === "shift_two")?.difference, -1);
+  assert.equal(closed.state.auditLogs?.[0].action, "shift.close_all_for_day_end");
+});
+
 test("business day cannot close with an open shift and records totals after shifts close", () => {
   const state = openState({ bills: [bill()] });
   const blocked = applyCriticalShopMutation(

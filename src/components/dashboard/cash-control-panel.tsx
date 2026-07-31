@@ -163,7 +163,9 @@ export function CashControlPanel() {
   const {
     addCashMovement,
     autoCloseAndStartNextBusinessDay,
+    closeAllOpenShifts,
     closeBusinessDay,
+    confirmAutoDayClose,
     createExpense,
     currentBusinessDay,
     currentSettings,
@@ -187,6 +189,7 @@ export function CashControlPanel() {
   const [openingNote, setOpeningNote] = useState("");
   const [dayCountedCash, setDayCountedCash] = useState("");
   const [dayCloseNote, setDayCloseNote] = useState("");
+  const [adminShiftCounts, setAdminShiftCounts] = useState<Record<string, string>>({});
   const [openingCash, setOpeningCash] = useState("");
   const [shiftCountedCash, setShiftCountedCash] = useState("");
   const [shiftNote, setShiftNote] = useState("");
@@ -210,6 +213,8 @@ export function CashControlPanel() {
   const [shiftFeedback, setShiftFeedback] = useState<Feedback>(null);
   const [movementFeedback, setMovementFeedback] = useState<Feedback>(null);
   const [expenseFeedback, setExpenseFeedback] = useState<Feedback>(null);
+  const [autoCloseCountedCash, setAutoCloseCountedCash] = useState("");
+  const [autoCloseNote, setAutoCloseNote] = useState("");
 
   useEffect(() => {
     if (!currentBusinessDay) {
@@ -252,6 +257,32 @@ export function CashControlPanel() {
     });
   }, [currentShift, state.bills, state.cashMovements, state.customerAccountPayments, state.refunds]);
 
+  const pendingAutoDayClose = useMemo(() => state.dayCloses
+    .filter((entry) => entry.shopId === currentShop?.id && entry.note === "Auto rollover pending admin confirmation.")
+    .sort((left, right) => right.closedAt.localeCompare(left.closedAt))[0] ?? null,
+  [currentShop?.id, state.dayCloses]);
+
+  const pendingAutoDaySummary = useMemo(() => {
+    if (!pendingAutoDayClose || !currentShop) return null;
+    return calculateBusinessDaySummary({
+      businessDate: pendingAutoDayClose.businessDate,
+      shopId: currentShop.id,
+      timeZone: currentShop.timezone,
+      bills: state.bills,
+      cashMovements: state.cashMovements,
+      customerAccountPayments: state.customerAccountPayments,
+      expenses: state.expenses,
+      shifts: state.shifts,
+      refunds: state.refunds
+    });
+  }, [currentShop, pendingAutoDayClose, state.bills, state.cashMovements, state.customerAccountPayments, state.expenses, state.refunds, state.shifts]);
+
+  useEffect(() => {
+    if (!pendingAutoDayClose) return;
+    setAutoCloseCountedCash(String(pendingAutoDayClose.countedCash));
+    setAutoCloseNote("");
+  }, [pendingAutoDayClose]);
+
   const latestClosedShift = useMemo(
     () => getLatestClosedShift(state.shifts, currentShop?.id ?? null, session?.id ?? null),
     [currentShop?.id, session?.id, state.shifts]
@@ -283,6 +314,24 @@ export function CashControlPanel() {
         !shift.endedAt
     );
   }, [currentBusinessDay, currentShop, state.shifts]);
+
+  const openShiftSummaries = useMemo(() => new Map(openShiftsForDay.map((shift) => [
+    shift.id,
+    calculateShiftSummary({
+      shift,
+      bills: state.bills,
+      cashMovements: state.cashMovements,
+      customerAccountPayments: state.customerAccountPayments,
+      refunds: state.refunds
+    })
+  ])), [openShiftsForDay, state.bills, state.cashMovements, state.customerAccountPayments, state.refunds]);
+
+  useEffect(() => {
+    setAdminShiftCounts((current) => Object.fromEntries(openShiftsForDay.map((shift) => [
+      shift.id,
+      current[shift.id] ?? String(openShiftSummaries.get(shift.id)?.expectedCash ?? 0)
+    ])));
+  }, [openShiftSummaries, openShiftsForDay]);
 
   const deviceShiftLimit = useMemo(() => {
     if (!currentShop) {
@@ -476,6 +525,25 @@ export function CashControlPanel() {
     }
   };
 
+  const handleCloseAllShifts = async () => {
+    const countedCashByShift = Object.fromEntries(openShiftsForDay.map((shift) => [
+      shift.id,
+      Number(adminShiftCounts[shift.id])
+    ]));
+    if (Object.values(countedCashByShift).some((value) => !Number.isFinite(value) || value < 0)) {
+      setDayFeedback({ kind: "error", message: "Enter the counted drawer cash for every open shift." });
+      return;
+    }
+    const result = await closeAllOpenShifts({
+      countedCashByShift,
+      note: dayCloseNote || "Closed by admin from day-end reconciliation."
+    });
+    setDayFeedback({
+      kind: result.ok ? "success" : "error",
+      message: result.message ?? (result.ok ? "All shifts are closed. Review the day totals and close the day." : "Unable to close open shifts.")
+    });
+  };
+
   const handleAutoRollover = async () => {
     const result = await autoCloseAndStartNextBusinessDay({
       note: dayCloseNote || "Auto rollover from cash control.",
@@ -492,6 +560,13 @@ export function CashControlPanel() {
       setDayCloseNote("");
       setActiveControl("day");
     }
+  };
+
+  const handleConfirmAutoDayClose = () => {
+    if (!pendingAutoDayClose) return;
+    const countedCash = Number(autoCloseCountedCash);
+    const result = confirmAutoDayClose({ dayCloseId: pendingAutoDayClose.id, countedCash, note: autoCloseNote });
+    setDayFeedback({ kind: result.ok ? "success" : "error", message: result.message ?? "Unable to confirm the previous day." });
   };
 
   const handleStartShift = async () => {
@@ -826,6 +901,10 @@ export function CashControlPanel() {
               <div className="rounded-3xl border border-line bg-white p-5">
                 <div className="space-y-3">
                   <SummaryRow
+                    label={t("cashControl.openingCash")}
+                    value={formatCurrency(activeDaySummary.openingCash, currency, locale)}
+                  />
+                  <SummaryRow
                     label={t("cashControl.totalSales")}
                     value={formatCurrency(activeDaySummary.totalSales, currency, locale)}
                     emphasis
@@ -860,6 +939,22 @@ export function CashControlPanel() {
                     value={formatCurrency(activeDaySummary.refunds, currency, locale)}
                   />
                   <SummaryRow
+                    label="Cash refunds paid"
+                    value={formatCurrency(activeDaySummary.cashRefunds, currency, locale)}
+                  />
+                  <SummaryRow
+                    label="Card refunds processed"
+                    value={formatCurrency(activeDaySummary.cardRefunds, currency, locale)}
+                  />
+                  <SummaryRow
+                    label={t("cashControl.cashIn")}
+                    value={formatCurrency(activeDaySummary.cashIn, currency, locale)}
+                  />
+                  <SummaryRow
+                    label={t("cashControl.cashOut")}
+                    value={formatCurrency(activeDaySummary.cashOut, currency, locale)}
+                  />
+                  <SummaryRow
                     label={t("cashControl.expenses")}
                     value={formatCurrency(activeDaySummary.expenses, currency, locale)}
                   />
@@ -872,7 +967,64 @@ export function CashControlPanel() {
                     value={formatCurrency(activeDaySummary.expectedCash, currency, locale)}
                     emphasis
                   />
+                  <SummaryRow
+                    label="Expected card settlement"
+                    value={formatCurrency(activeDaySummary.expectedCard, currency, locale)}
+                    emphasis
+                  />
                 </div>
+                <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-950">
+                  Expected cash = first opening float per drawer + cash sales + cash account payments + cash in - cash out - cash refunds. Card receipts never increase drawer cash.
+                </div>
+                <Button className="mt-4" variant="secondary" onClick={() => {
+                  setActiveControl("expenses");
+                  setActiveExpensePanel("recordExpense");
+                }}>
+                  Record an expense or drawer cash-out
+                </Button>
+              </div>
+            ) : null}
+
+            {canManageDay && openShiftsForDay.length > 0 ? (
+              <div className="rounded-[28px] border border-amber-200 bg-amber-50 p-5">
+                <h3 className="font-display text-xl font-semibold text-amber-950">Reconcile and close all open shifts</h3>
+                <p className="mt-2 text-sm leading-6 text-amber-900/80">
+                  Count each physical drawer. Expected card is shown for checking against the card terminal and is not part of counted cash.
+                </p>
+                <div className="mt-4 space-y-3">
+                  {openShiftsForDay.map((shift) => {
+                    const summary = openShiftSummaries.get(shift.id);
+                    const cashier = state.users.find((user) => user.id === shift.cashierId);
+                    return (
+                      <div key={shift.id} className="grid gap-3 rounded-2xl border border-amber-200 bg-white p-4 md:grid-cols-[minmax(0,1fr)_auto_auto_minmax(150px,0.6fr)] md:items-end">
+                        <div>
+                          <p className="font-semibold text-slate-950">{cashier?.name ?? "Unknown cashier"}</p>
+                          <p className="mt-1 text-xs text-slate-500">{shift.deviceBrowserInfo ?? "Default drawer"}</p>
+                        </div>
+                        <div className="text-sm">
+                          <p className="text-slate-500">Expected cash</p>
+                          <p className="font-semibold text-slate-950">{formatCurrency(summary?.expectedCash ?? 0, currency, locale)}</p>
+                        </div>
+                        <div className="text-sm">
+                          <p className="text-slate-500">Expected card</p>
+                          <p className="font-semibold text-slate-950">{formatCurrency(summary?.expectedCard ?? 0, currency, locale)}</p>
+                        </div>
+                        <label className="text-sm font-medium text-slate-700">
+                          Counted cash
+                          <Input
+                            className="mt-2"
+                            inputMode="decimal"
+                            value={adminShiftCounts[shift.id] ?? ""}
+                            onChange={(event) => setAdminShiftCounts((current) => ({ ...current, [shift.id]: event.target.value }))}
+                          />
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
+                <Button className="mt-4 w-full" onClick={() => void handleCloseAllShifts()}>
+                  Confirm counts and close all shifts
+                </Button>
               </div>
             ) : null}
 
@@ -962,6 +1114,10 @@ export function CashControlPanel() {
                   value={formatCurrency(activeShiftSummary.cashSales, currency, locale)}
                 />
                 <SummaryRow
+                  label={t("cashControl.cardSales")}
+                  value={formatCurrency(activeShiftSummary.cardSales, currency, locale)}
+                />
+                <SummaryRow
                   label="Account payments received"
                   value={formatCurrency(activeShiftSummary.accountPaymentsReceived, currency, locale)}
                   emphasis
@@ -983,11 +1139,27 @@ export function CashControlPanel() {
                   value={formatCurrency(activeShiftSummary.cashOut, currency, locale)}
                 />
                 <SummaryRow
+                  label="Cash refunds paid"
+                  value={formatCurrency(activeShiftSummary.cashRefunds, currency, locale)}
+                />
+                <SummaryRow
+                  label="Card refunds processed"
+                  value={formatCurrency(activeShiftSummary.cardRefunds, currency, locale)}
+                />
+                <SummaryRow
                   label={t("cashControl.expectedCash")}
                   value={formatCurrency(activeShiftSummary.expectedCash, currency, locale)}
                   emphasis
                 />
+                <SummaryRow
+                  label="Expected card settlement"
+                  value={formatCurrency(activeShiftSummary.expectedCard, currency, locale)}
+                  emphasis
+                />
               </div>
+              <p className="mt-4 rounded-2xl bg-slate-50 p-4 text-xs leading-5 text-slate-600">
+                Count only physical drawer cash. Compare expected card with the card terminal total; do not add card receipts to counted cash.
+              </p>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -1384,6 +1556,39 @@ export function CashControlPanel() {
       </Card>
         ) : null}
       </div>
+
+      {canManageDay && pendingAutoDayClose && pendingAutoDaySummary ? (
+        <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div aria-modal="true" className="my-6 w-full max-w-2xl rounded-[30px] border border-white/70 bg-white p-6 shadow-[0_30px_100px_rgba(15,23,42,0.38)]" role="dialog">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">Previous business day needs confirmation</p>
+            <h2 className="mt-2 font-display text-2xl font-semibold text-slate-950">
+              Review {formatBusinessDate(pendingAutoDayClose.businessDate, locale)}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Auto rollover kept operations moving and filled the expected values. Confirm the real drawer count now so reports record any shortage or excess honestly.
+            </p>
+            <div className="mt-5 grid gap-3 rounded-3xl border border-slate-200 bg-slate-50 p-5 sm:grid-cols-2">
+              <SummaryRow label="Net sales" value={formatCurrency(pendingAutoDaySummary.netSales, currency, locale)} />
+              <SummaryRow label="Expected cash" value={formatCurrency(pendingAutoDaySummary.expectedCash, currency, locale)} emphasis />
+              <SummaryRow label="Cash sales" value={formatCurrency(pendingAutoDaySummary.cashSales, currency, locale)} />
+              <SummaryRow label="Expected card" value={formatCurrency(pendingAutoDaySummary.expectedCard, currency, locale)} emphasis />
+              <SummaryRow label="Cash refunds" value={formatCurrency(pendingAutoDaySummary.cashRefunds, currency, locale)} />
+              <SummaryRow label="Cash out" value={formatCurrency(pendingAutoDaySummary.cashOut, currency, locale)} />
+            </div>
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <label className="text-sm font-medium text-slate-700">
+                Actual counted cash
+                <Input className="mt-2" inputMode="decimal" value={autoCloseCountedCash} onChange={(event) => setAutoCloseCountedCash(event.target.value)} />
+              </label>
+              <label className="text-sm font-medium text-slate-700 sm:col-span-2">
+                Confirmation note
+                <Textarea className="mt-2" value={autoCloseNote} onChange={(event) => setAutoCloseNote(event.target.value)} />
+              </label>
+            </div>
+            <Button className="mt-5 w-full" onClick={handleConfirmAutoDayClose}>Confirm previous day close</Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

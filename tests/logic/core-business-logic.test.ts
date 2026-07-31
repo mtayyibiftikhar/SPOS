@@ -257,6 +257,7 @@ test("business-day summary includes all shifts for the date and keeps expenses s
       shopId: SHOP_ID,
       businessDate: BUSINESS_DATE,
       cashierId: "user_1",
+      deviceActivationId: "drawer_1",
       openingCash: 50,
       startedAt: "2026-07-14T07:00:00.000Z"
     },
@@ -265,6 +266,7 @@ test("business-day summary includes all shifts for the date and keeps expenses s
       shopId: SHOP_ID,
       businessDate: BUSINESS_DATE,
       cashierId: "user_2",
+      deviceActivationId: "drawer_2",
       openingCash: 25,
       startedAt: "2026-07-14T09:00:00.000Z"
     }
@@ -297,6 +299,77 @@ test("business-day summary includes all shifts for the date and keeps expenses s
   assert.equal(summary.totalSales, 160);
   assert.equal(summary.expenses, 30);
   assert.equal(summary.expectedCash, 175);
+});
+
+test("business-day opening cash is counted once across sequential shifts on the same drawer", () => {
+  const shifts: Shift[] = [
+    {
+      id: "morning",
+      shopId: SHOP_ID,
+      businessDate: BUSINESS_DATE,
+      cashierId: "user_1",
+      deviceActivationId: "drawer_1",
+      openingCash: 10,
+      startedAt: "2026-07-14T07:00:00.000Z",
+      endedAt: "2026-07-14T12:00:00.000Z"
+    },
+    {
+      id: "evening",
+      shopId: SHOP_ID,
+      businessDate: BUSINESS_DATE,
+      cashierId: "user_2",
+      deviceActivationId: "drawer_1",
+      openingCash: 10,
+      startedAt: "2026-07-14T12:05:00.000Z"
+    }
+  ];
+
+  const summary = calculateBusinessDaySummary({
+    businessDate: BUSINESS_DATE,
+    shopId: SHOP_ID,
+    timeZone: "Asia/Riyadh",
+    bills: [],
+    cashMovements: [],
+    shifts,
+    refunds: []
+  });
+
+  assert.equal(summary.openingCash, 10);
+  assert.equal(summary.expectedCash, 10);
+});
+
+test("card account payments are reported without inflating the cash drawer", () => {
+  const shift: Shift = {
+    id: "shift_card_account",
+    shopId: SHOP_ID,
+    businessDate: BUSINESS_DATE,
+    cashierId: "user_1",
+    openingCash: 10,
+    startedAt: "2026-07-14T07:00:00.000Z"
+  };
+  const payment: CustomerAccountPayment = {
+    id: "account_card_4",
+    shopId: SHOP_ID,
+    customerId: "customer_1",
+    number: "PAY-000004",
+    businessDate: BUSINESS_DATE,
+    shiftId: shift.id,
+    amount: 4,
+    method: "card",
+    createdBy: "user_1",
+    createdAt: "2026-07-14T09:00:00.000Z"
+  };
+
+  const summary = calculateShiftSummary({
+    shift,
+    bills: [],
+    cashMovements: [],
+    customerAccountPayments: [payment],
+    refunds: []
+  });
+
+  assert.equal(summary.expectedCash, 10);
+  assert.equal(summary.expectedCard, 4);
 });
 
 test("account settlements update cash control without inflating sales", () => {

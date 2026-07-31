@@ -335,6 +335,7 @@ type CriticalShopMutation =
       };
     }
   | { type: "end_shift"; payload: { countedCash: number; note?: string } }
+  | { type: "end_all_shifts"; payload: { countedCashByShift: Record<string, number>; note?: string } }
   | {
       type: "settle_customer_account";
       payload: {
@@ -836,6 +837,7 @@ interface AppContextValue {
   createRefund: (payload: CreateRefundInput) => Promise<{ ok: boolean; refundId?: string; message?: string }>;
   startBusinessDay: (payload: { businessDate?: string; openingNote?: string }) => Promise<{ ok: boolean; message?: string }>;
   closeBusinessDay: (payload: { countedCash: number; note?: string }) => Promise<{ ok: boolean; message?: string }>;
+  confirmAutoDayClose: (payload: { dayCloseId: string; countedCash: number; note?: string }) => { ok: boolean; message?: string };
   autoCloseAndStartNextBusinessDay: (payload?: { note?: string; startShift?: boolean }) => Promise<{ ok: boolean; message?: string }>;
   clockIn: (payload?: {
     location?: AttendanceLocation;
@@ -880,6 +882,7 @@ interface AppContextValue {
     shiftId: string;
   }) => { ok: boolean; message?: string };
   endShift: (payload: { countedCash: number; note?: string }) => Promise<{ ok: boolean; message?: string }>;
+  closeAllOpenShifts: (payload: { countedCashByShift: Record<string, number>; note?: string }) => Promise<{ ok: boolean; message?: string }>;
   addCashMovement: (payload: { type: "cash_in" | "cash_out"; amount: number; reason: string }) => { ok: boolean; message?: string };
   createExpense: (payload: {
     amount: number;
@@ -2775,7 +2778,7 @@ export function AppProvider({
               expectedCash: summary.expectedCash,
               countedCash: summary.expectedCash,
               cashDifference: 0,
-              note: "Auto close used expected cash because rollover setting was enabled.",
+              note: "Auto rollover pending admin confirmation.",
               closedAt: automatedAt
             },
             ...current.dayCloses
@@ -7118,6 +7121,48 @@ export function AppProvider({
 
         return result;
       },
+      confirmAutoDayClose: ({ dayCloseId, countedCash, note }) => {
+        if (!currentShopId || !session || !hasShopPermission(session, currentSettings?.pos, "dashboard")) {
+          return { ok: false, message: "Only an authorized admin can confirm day-end totals." };
+        }
+        const normalizedCash = Math.round(countedCash * 100) / 100;
+        if (!Number.isFinite(normalizedCash) || normalizedCash < 0) {
+          return { ok: false, message: "Enter a valid counted cash amount." };
+        }
+        let result: { ok: boolean; message?: string } = { ok: false, message: "Day close not found." };
+        setState((current) => {
+          const dayClose = current.dayCloses.find((entry) => entry.id === dayCloseId && entry.shopId === currentShopId);
+          if (!dayClose) return current;
+          result = { ok: true, message: "Previous day totals confirmed." };
+          return {
+            ...current,
+            shifts: current.shifts.map((shift) =>
+              shift.shopId === currentShopId &&
+              shift.businessDate > dayClose.businessDate &&
+              shift.startedAt === dayClose.closedAt &&
+              shift.note?.startsWith("Auto started")
+                ? { ...shift, openingCash: normalizedCash }
+                : shift
+            ),
+            dayCloses: current.dayCloses.map((entry) => entry.id === dayCloseId ? {
+              ...entry,
+              countedCash: normalizedCash,
+              cashDifference: Math.round((normalizedCash - entry.expectedCash) * 100) / 100,
+              note: note?.trim() || "Auto rollover reviewed and confirmed by admin."
+            } : entry),
+            auditLogs: [{
+              id: createId("audit"),
+              shopId: currentShopId,
+              actorId: session.id,
+              action: "day_close.confirm_auto_rollover",
+              targetId: dayCloseId,
+              detail: `Confirmed auto-closed business day ${dayClose.businessDate}.`,
+              createdAt: new Date().toISOString()
+            }, ...current.auditLogs]
+          };
+        });
+        return result;
+      },
       autoCloseAndStartNextBusinessDay: async (payload) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
@@ -7302,7 +7347,7 @@ export function AppProvider({
                 expectedCash: summary.expectedCash,
                 countedCash: summary.expectedCash,
                 cashDifference: 0,
-                note: payload?.note?.trim() || "Auto close used expected cash for open shifts.",
+                note: "Auto rollover pending admin confirmation.",
                 closedAt
               },
               ...current.dayCloses
@@ -8066,6 +8111,78 @@ export function AppProvider({
           };
         });
 
+        return result;
+      },
+      closeAllOpenShifts: async ({ countedCashByShift, note }) => {
+        if (!currentShopId || !session) {
+          return { ok: false, message: "Session unavailable." };
+        }
+
+        if (!hasShopPermission(session, currentSettings?.pos, "dashboard")) {
+          return { ok: false, message: "Only an authorized admin can close all shifts." };
+        }
+
+        if (!shouldUseSharedStateEndpoint()) {
+          return commitCriticalShopMutationToCloud({
+            type: "end_all_shifts",
+            payload: { countedCashByShift, note }
+          });
+        }
+
+        let result: { ok: boolean; message?: string } = { ok: false, message: "Unable to close open shifts." };
+        setState((current) => {
+          const openDay = getActiveBusinessDay(current.businessDays, currentShopId);
+          if (!openDay) {
+            result = { ok: false, message: "No open business day was found." };
+            return current;
+          }
+          const openShifts = current.shifts.filter(
+            (shift) => shift.shopId === currentShopId && shift.businessDate === openDay.businessDate && !shift.endedAt
+          );
+          for (const shift of openShifts) {
+            if (!Number.isFinite(countedCashByShift[shift.id]) || countedCashByShift[shift.id] < 0) {
+              result = { ok: false, message: "Enter counted cash for every open shift." };
+              return current;
+            }
+          }
+          const summaries = new Map(openShifts.map((shift) => [shift.id, calculateShiftSummary({
+            shift,
+            bills: current.bills,
+            cashMovements: current.cashMovements,
+            customerAccountPayments: current.customerAccountPayments,
+            refunds: current.refunds
+          })]));
+          const endedAt = new Date().toISOString();
+          result = { ok: true, message: `${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"} closed.` };
+          return {
+            ...current,
+            shifts: current.shifts.map((shift) => {
+              const summary = summaries.get(shift.id);
+              if (!summary) return shift;
+              const countedCash = Math.round(countedCashByShift[shift.id] * 100) / 100;
+              return {
+                ...shift,
+                countedCash,
+                expectedCash: summary.expectedCash,
+                difference: Math.round((countedCash - summary.expectedCash) * 100) / 100,
+                note: note?.trim() || "Closed by admin during day-end reconciliation.",
+                forcedClosedBy: session.id,
+                forceClosedAt: endedAt,
+                forceCloseReason: "Day-end reconciliation",
+                endedAt
+              };
+            }),
+            auditLogs: [{
+              id: createId("audit"),
+              shopId: currentShopId,
+              actorId: session.id,
+              action: "shift.close_all_for_day_end",
+              targetId: openDay.id,
+              detail: `Closed ${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"} during day-end reconciliation.`,
+              createdAt: endedAt
+            }, ...current.auditLogs]
+          };
+        });
         return result;
       },
       addCashMovement: ({ type, amount, reason }) => {
