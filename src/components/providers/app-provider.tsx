@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type {
   AttendanceLocation,
@@ -735,7 +735,8 @@ interface AppContextValue {
   endSupportSession: () => void;
   updateSettings: <TSection extends SettingsSection>(
     section: TSection,
-    values: Partial<ShopSettingsBundle[TSection]>
+    values: Partial<ShopSettingsBundle[TSection]>,
+    options?: { feedback?: boolean }
   ) => void;
   createSupportTicket: (payload: {
     subject: string;
@@ -2025,10 +2026,30 @@ export function AppProvider({
   const [cloudLoadedShopIds, setCloudLoadedShopIds] = useState<Record<string, boolean>>({});
   const [autoRolloverTick, setAutoRolloverTick] = useState(0);
   const [saveFeedback, setSaveFeedback] = useState<{ savedAt: string } | null>(null);
-  const hasCompletedInitialPersist = useRef(false);
+  const saveFeedbackTimerRef = useRef<number | null>(null);
   const lastSharedStateRaw = useRef<string | null>(null);
   const lastLocalStateRaw = useRef<string | null>(null);
   const lastSharedStateWriteAt = useRef(0);
+
+  const announceExplicitSave = useCallback(() => {
+    const savedAt = new Date().toISOString();
+
+    if (saveFeedbackTimerRef.current !== null) {
+      window.clearTimeout(saveFeedbackTimerRef.current);
+    }
+
+    setSaveFeedback({ savedAt });
+    saveFeedbackTimerRef.current = window.setTimeout(() => {
+      setSaveFeedback((current) => (current?.savedAt === savedAt ? null : current));
+      saveFeedbackTimerRef.current = null;
+    }, 2200);
+  }, []);
+
+  useEffect(() => () => {
+    if (saveFeedbackTimerRef.current !== null) {
+      window.clearTimeout(saveFeedbackTimerRef.current);
+    }
+  }, []);
   const cloudRevisionByShop = useRef<Record<string, number>>({});
   const cloudBaseStateByShop = useRef<Record<string, ShopCloudStatePatch>>({});
   const cloudSyncInFlightByShop = useRef<Record<string, boolean>>({});
@@ -2152,19 +2173,6 @@ export function AppProvider({
       }).catch(() => undefined);
     }
 
-    if (!hasCompletedInitialPersist.current) {
-      hasCompletedInitialPersist.current = true;
-      return;
-    }
-
-    const savedAt = new Date().toISOString();
-    setSaveFeedback({ savedAt });
-
-    const timer = window.setTimeout(() => {
-      setSaveFeedback((current) => (current?.savedAt === savedAt ? null : current));
-    }, 2200);
-
-    return () => window.clearTimeout(timer);
   }, [isHydrated, state]);
 
   useEffect(() => {
@@ -5273,7 +5281,7 @@ export function AppProvider({
           };
         });
       },
-      updateSettings: (section, values) => {
+      updateSettings: (section, values, options) => {
         if (!currentShopId) {
           return;
         }
@@ -5313,6 +5321,10 @@ export function AppProvider({
 
           return nextState;
         });
+
+        if (options?.feedback !== false) {
+          announceExplicitSave();
+        }
       },
       createSupportTicket: ({ subject, message, preferredChannel }) => {
         void subject;
@@ -5427,6 +5439,7 @@ export function AppProvider({
           };
         }));
 
+        if (result.ok) announceExplicitSave();
         return result;
       },
       deleteCustomer: (customerId) => {
@@ -5514,6 +5527,7 @@ export function AppProvider({
           };
         });
 
+        if (result.ok) announceExplicitSave();
         return result;
       },
       settleCustomerAccount: async ({ customerId, amount, method, note, billIds }) => {
@@ -5765,6 +5779,7 @@ export function AppProvider({
           };
         }));
 
+        if (result.ok) announceExplicitSave();
         return result;
       },
       updateCategory: (categoryId, payload) => {
@@ -5815,6 +5830,7 @@ export function AppProvider({
           };
         }));
 
+        if (result.ok) announceExplicitSave();
         return result;
       },
       deleteCategory: (categoryId) => {
@@ -5852,6 +5868,7 @@ export function AppProvider({
           };
         }));
 
+        if (result.ok) announceExplicitSave();
         return result;
       },
       saveProduct: (payload) => {
@@ -5940,6 +5957,7 @@ export function AppProvider({
           };
         }));
 
+        if (result.ok) announceExplicitSave();
         return result;
       },
       importProducts: (rows) => {
@@ -6025,6 +6043,7 @@ export function AppProvider({
           };
         }));
 
+        if (result.ok) announceExplicitSave();
         return result;
       },
       adjustInventory: ({ productId, type, quantity, reason, supplierId, expiryDate, costPrice }) => {
@@ -6147,6 +6166,7 @@ export function AppProvider({
           };
         });
 
+        if (result.ok) announceExplicitSave();
         return result;
       },
       saveSupplier: ({ id, name, phone, email, vatNumber, contactPerson, address, defaultPaymentMethod, accountBalance }) => {
@@ -6253,6 +6273,7 @@ export function AppProvider({
           };
         });
 
+        if (result.ok) announceExplicitSave();
         return result;
       },
       deleteSupplier: (supplierId) => {
@@ -6299,6 +6320,7 @@ export function AppProvider({
           };
         });
 
+        if (result.ok) announceExplicitSave();
         return result;
       },
       createPurchaseOrder: ({ number, supplierId, supplierName, expectedAt, note, paymentMethod, paymentStatus, paidAmount, items }) => {
@@ -6474,6 +6496,7 @@ export function AppProvider({
           };
         });
 
+        if (result.ok) announceExplicitSave();
         return result;
       },
       receivePurchaseOrder: (purchaseOrderId, payload = {}) => {
@@ -6699,6 +6722,7 @@ export function AppProvider({
           };
         });
 
+        if (result.ok) announceExplicitSave();
         return result;
       },
       cancelPurchaseOrder: (purchaseOrderId) => {
@@ -6771,6 +6795,7 @@ export function AppProvider({
           };
         });
 
+        if (result.ok) announceExplicitSave();
         return result;
       },
       deleteProduct: (productId, reason) => {
@@ -6805,6 +6830,7 @@ export function AppProvider({
             ]
           };
         });
+        announceExplicitSave();
       },
       restoreDeletedProduct: (deletedProductId) => {
         setState((current) => {
@@ -6830,6 +6856,7 @@ export function AppProvider({
             ]
           };
         });
+        announceExplicitSave();
       },
       permanentlyDeleteProduct: (deletedProductId) => {
         setState((current) => {
@@ -6844,6 +6871,7 @@ export function AppProvider({
             deletedProducts: current.deletedProducts.filter((item) => item.id !== deletedProductId)
           };
         });
+        announceExplicitSave();
       },
       saveShopUser: async ({ id, email, name, password, phone, role }) => {
         if (!currentShopId || !session) {
@@ -6887,6 +6915,7 @@ export function AppProvider({
             users: [savedUser, ...current.users.filter((entry) => entry.id !== savedUser.id)]
           }));
 
+          announceExplicitSave();
           return { ok: true, userId: savedUser.id };
         } catch {
           return { ok: false, message: "Unable to reach the shop user service." };
@@ -6919,6 +6948,7 @@ export function AppProvider({
             users: current.users.map((entry) => (entry.id === savedUser.id ? savedUser : entry))
           }));
 
+          announceExplicitSave();
           return { ok: true };
         } catch {
           return { ok: false, message: "Unable to reach the shop user service." };
@@ -6957,6 +6987,7 @@ export function AppProvider({
               }
             };
           });
+          announceExplicitSave();
           return { ok: true };
         } catch {
           return { ok: false, message: "Unable to reach the shop user service." };
@@ -9296,6 +9327,7 @@ export function AppProvider({
       }
     }),
     [
+      announceExplicitSave,
       currentAttendance,
       currentBusinessDay,
       currentDeviceActivation,

@@ -73,7 +73,7 @@ export default function ShopSettingsPage() {
       });
 
       setLogoUrl(upload.url);
-      updateSettings("pos", { logoUrl: upload.url });
+      updateSettings("pos", { logoUrl: upload.url }, { feedback: false });
       if (previousLogoUrl && previousLogoUrl !== upload.url) {
         void deleteShopLogoAsset(previousLogoUrl).catch(() => undefined);
       }
@@ -106,7 +106,7 @@ export default function ShopSettingsPage() {
         userId: session?.id
       });
       setLogoUrl("");
-      updateSettings("pos", { logoUrl: "" });
+      updateSettings("pos", { logoUrl: "" }, { feedback: false });
 
       const result = currentLogoUrl ? await deleteShopLogoAsset(currentLogoUrl) : { deleted: false };
 
