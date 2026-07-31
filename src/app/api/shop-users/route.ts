@@ -253,3 +253,62 @@ export async function PATCH(request: Request) {
     );
   }
 }
+
+export async function DELETE(request: Request) {
+  let body: ShopUserPayload;
+
+  try {
+    body = (await request.json()) as ShopUserPayload;
+  } catch {
+    return NextResponse.json({ ok: false, message: "Invalid shop user payload." }, { status: 400 });
+  }
+
+  const userId = body.id?.trim() ?? "";
+  if (!userId) return NextResponse.json({ ok: false, message: "User is required." }, { status: 400 });
+
+  try {
+    const authorization = await authorizeShopAdmin(request);
+    if (!authorization) {
+      return NextResponse.json({ ok: false, message: "Shop user management is not authorized." }, { status: 401 });
+    }
+
+    const { session, supabase } = authorization;
+    if (userId === session.userId) {
+      return NextResponse.json({ ok: false, message: "You cannot delete your own admin account." }, { status: 400 });
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("id, shop_id, name, email, phone, role, is_active, last_login_at, created_at")
+      .eq("id", userId)
+      .eq("shop_id", session.shopId)
+      .neq("role", "super_admin")
+      .maybeSingle();
+    if (profileError) throw profileError;
+    if (!profile) return NextResponse.json({ ok: false, message: "Shop user was not found." }, { status: 404 });
+
+    const { data: archived, error: updateError } = await supabase
+      .from("profiles")
+      .update({ is_active: false })
+      .eq("id", userId)
+      .eq("shop_id", session.shopId)
+      .select("id, shop_id, name, email, phone, role, is_active, last_login_at, created_at")
+      .single();
+    if (updateError) throw updateError;
+
+    await supabase.from("audit_logs").insert({
+      action: "shop.user.archive",
+      actor_id: session.userId,
+      detail: `Removed shop access for ${profile.email}; historical report identity retained.`,
+      shop_id: session.shopId,
+      target_id: userId
+    });
+
+    return NextResponse.json({ ok: true, user: mapShopUser(archived as ShopProfile) });
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, message: error instanceof Error ? error.message : "Unable to delete shop user." },
+      { status: 500 }
+    );
+  }
+}

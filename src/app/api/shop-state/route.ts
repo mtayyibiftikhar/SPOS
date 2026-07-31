@@ -137,7 +137,8 @@ async function withAuthoritativeAccessControl(
           ...submittedSettings.pos,
           accessRoles: authoritativePos.accessRoles,
           rolePermissions: authoritativePos.rolePermissions,
-          userAccessRoleIds: authoritativePos.userAccessRoleIds
+          userAccessRoleIds: authoritativePos.userAccessRoleIds,
+          archivedUserIds: authoritativePos.archivedUserIds
         }
       }
     }
@@ -501,7 +502,8 @@ async function loadOwnerControlledShopState(
                     ?.attendanceRequireSelfie ?? false,
                 rolePermissions: currentState.settingsByShop?.[shop.id]?.pos.rolePermissions,
                 accessRoles: currentState.settingsByShop?.[shop.id]?.pos.accessRoles,
-                userAccessRoleIds: currentState.settingsByShop?.[shop.id]?.pos.userAccessRoleIds
+                userAccessRoleIds: currentState.settingsByShop?.[shop.id]?.pos.userAccessRoleIds,
+                archivedUserIds: currentState.settingsByShop?.[shop.id]?.pos.archivedUserIds
               },
               printer:
                 settings?.printer_settings ??

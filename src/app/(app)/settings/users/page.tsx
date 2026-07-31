@@ -47,12 +47,13 @@ const emptyUserForm: UserFormState = {
 };
 
 export default function UsersPage() {
-  const { currentSettings, currentUsers, locale, session, setUserActive, saveShopUser, t, updateSettings } = usePosApp();
+  const { currentSettings, currentUsers, deleteShopUser, locale, session, setUserActive, saveShopUser, t, updateSettings } = usePosApp();
   const [view, setView] = useState<UsersView>("list");
   const [query, setQuery] = useState("");
   const [userForm, setUserForm] = useState<UserFormState>(emptyUserForm);
   const [isSavingUser, setIsSavingUser] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [roleDraft, setRoleDraft] = useState<ShopAccessRole[]>(() => getAccessRoles(currentSettings?.pos));
   const [newRoleName, setNewRoleName] = useState("");
   const [feedback, setFeedback] = useState<{
@@ -65,20 +66,24 @@ export default function UsersPage() {
     () => new Map(accessRoles.map((role) => [role.id, role.name])),
     [accessRoles]
   );
+  const visibleUsers = useMemo(() => {
+    const archived = new Set(currentSettings?.pos.archivedUserIds ?? []);
+    return currentUsers.filter((user) => !archived.has(user.id));
+  }, [currentSettings?.pos.archivedUserIds, currentUsers]);
 
   const filteredUsers = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
     if (!normalizedQuery) {
-      return currentUsers;
+      return visibleUsers;
     }
 
-    return currentUsers.filter((user) =>
+    return visibleUsers.filter((user) =>
       [user.name, user.email, user.phone, user.role]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(normalizedQuery))
     );
-  }, [currentUsers, query]);
+  }, [query, visibleUsers]);
 
   const resetForm = () => {
     setUserForm(emptyUserForm);
@@ -164,6 +169,16 @@ export default function UsersPage() {
     });
   };
 
+  const handleDeleteUser = async (user: User) => {
+    if (!window.confirm(`Delete ${user.name}? Login access will be removed, but historical sales and reports will keep the user's name.`)) return;
+    setDeletingUserId(user.id);
+    const result = await deleteShopUser(user.id);
+    setDeletingUserId(null);
+    setFeedback(result.ok
+      ? { tone: "success", message: `${user.name} was deleted. Historical report records were retained.` }
+      : { tone: "error", message: result.message ?? "Unable to delete user." });
+  };
+
   const openRoleAccess = () => {
     setFeedback(null);
     setRoleDraft(getAccessRoles(currentSettings?.pos));
@@ -198,7 +213,7 @@ export default function UsersPage() {
   };
 
   const removeRole = (roleId: string) => {
-    const assigned = currentUsers.some(
+    const assigned = visibleUsers.some(
       (user) => user.role !== "shop_admin" && getUserAccessRoleId(user, currentSettings?.pos) === roleId
     );
     if (assigned) {
@@ -247,18 +262,18 @@ export default function UsersPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="p-5">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Total users</p>
-          <p className="mt-4 font-display text-4xl font-semibold text-ink">{currentUsers.length}</p>
+          <p className="mt-4 font-display text-4xl font-semibold text-ink">{visibleUsers.length}</p>
         </Card>
         <Card className="p-5">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Active access</p>
           <p className="mt-4 font-display text-4xl font-semibold text-ink">
-            {currentUsers.filter((user) => user.isActive).length}
+            {visibleUsers.filter((user) => user.isActive).length}
           </p>
         </Card>
         <Card className="p-5">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Admins</p>
           <p className="mt-4 font-display text-4xl font-semibold text-ink">
-            {currentUsers.filter((user) => user.role === "shop_admin").length}
+            {visibleUsers.filter((user) => user.role === "shop_admin").length}
           </p>
         </Card>
       </div>
@@ -356,6 +371,17 @@ export default function UsersPage() {
                         <span className="inline-flex items-center gap-2">
                           <UserMinus className="h-4 w-4" />
                           {user.isActive ? t("users.removeAccess") : t("users.restoreAccess")}
+                        </span>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={deletingUserId === user.id || user.id === session?.id}
+                        onClick={() => void handleDeleteUser(user)}
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <Trash2 className="h-4 w-4" />
+                          Delete
                         </span>
                       </Button>
                     </div>
@@ -515,17 +541,37 @@ export default function UsersPage() {
         </Button>
       </div>
 
-      <div className="mt-6 rounded-[28px] border border-line bg-shell/60 p-4">
-        <p className="text-sm font-semibold text-ink">Create a new role</p>
-        <p className="mt-1 text-xs text-slate-500">Name the role, then enable the POS sections it can use.</p>
-        <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+      <div className="mt-6 overflow-hidden rounded-[28px] border border-slate-800 bg-[linear-gradient(135deg,#07111f_0%,#102a2b_100%)] p-5 text-white shadow-[0_20px_50px_rgba(15,23,42,0.16)]">
+        <div className="flex items-start gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-emerald-400/15 text-emerald-300 ring-1 ring-emerald-300/20">
+            <KeyRound className="h-5 w-5" />
+          </span>
+          <div>
+            <p className="font-display text-xl font-semibold">Create a custom role</p>
+            <p className="mt-1 text-sm text-white/65">Give it a clear name, then choose exactly which POS sections it can access.</p>
+          </div>
+        </div>
+        <form
+          className="mt-5 flex flex-col gap-3 sm:flex-row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            addRole();
+          }}
+        >
           <Input
-            placeholder="Example: Supervisor or Stock Controller"
+            className="h-12 flex-1 border-white/15 bg-white text-slate-950 placeholder:text-slate-400"
+            placeholder="Supervisor, Stock Controller, Accountant..."
             value={newRoleName}
             onChange={(event) => setNewRoleName(event.target.value)}
           />
-          <Button disabled={!canManageUsers || !newRoleName.trim()} onClick={addRole}>Create role</Button>
-        </div>
+          <Button
+            className="h-12 min-w-40 rounded-2xl bg-emerald-500 px-6 text-white hover:bg-emerald-400"
+            disabled={!canManageUsers || !newRoleName.trim()}
+            type="submit"
+          >
+            <UserPlus className="mr-2 h-4 w-4" />Create role
+          </Button>
+        </form>
       </div>
 
       <div className="mt-6 grid gap-4 xl:grid-cols-3">

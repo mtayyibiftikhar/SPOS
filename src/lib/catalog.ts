@@ -1,7 +1,7 @@
 import type { Product, ProductCategory, User } from "@/types/pos";
 
-function normalizeName(value: string) {
-  return value.trim().toLowerCase();
+export function normalizeCatalogName(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
 
 function normalizeDigits(value: string) {
@@ -14,7 +14,7 @@ export function findCategoryNameConflict(
   name: string,
   excludeId?: string
 ) {
-  const normalized = normalizeName(name);
+  const normalized = normalizeCatalogName(name);
 
   if (!normalized) {
     return null;
@@ -24,7 +24,7 @@ export function findCategoryNameConflict(
     categories.find(
       (category) =>
         category.shopId === shopId &&
-        normalizeName(category.name) === normalized &&
+        normalizeCatalogName(category.name) === normalized &&
         category.id !== excludeId
     ) ?? null
   );
@@ -34,6 +34,28 @@ export function normalizeBarcode(value?: string) {
   const digits = normalizeDigits(value ?? "");
 
   return digits.length > 0 ? digits.slice(0, 13) : undefined;
+}
+
+export function unwrapSpreadsheetText(value: string) {
+  const candidate = value.trim();
+  const formulaText = candidate.match(/^="([\s\S]*)"$/);
+  if (formulaText) return formulaText[1].replace(/""/g, '"').trim();
+  return candidate.startsWith("'") ? candidate.slice(1).trim() : candidate;
+}
+
+export function normalizeSpreadsheetBarcode(value: string) {
+  const candidate = unwrapSpreadsheetText(value);
+  if (/^\d{1,13}$/.test(candidate)) return candidate;
+
+  if (/^\d+(?:\.\d+)?e[+-]?\d+$/i.test(candidate)) {
+    const numeric = Number(candidate);
+    if (Number.isSafeInteger(numeric)) {
+      const expanded = numeric.toFixed(0);
+      if (/^\d{1,13}$/.test(expanded)) return expanded;
+    }
+  }
+
+  return undefined;
 }
 
 export function findBarcodeConflict(

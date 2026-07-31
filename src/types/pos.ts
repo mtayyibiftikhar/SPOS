@@ -547,6 +547,7 @@ export interface POSSettings {
   rolePermissions?: Partial<Record<Exclude<UserRole, "super_admin">, RolePermissionKey[]>>;
   accessRoles?: ShopAccessRole[];
   userAccessRoleIds?: Record<string, string>;
+  archivedUserIds?: string[];
 }
 
 export interface PrinterSettings {

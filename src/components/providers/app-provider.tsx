@@ -813,6 +813,7 @@ interface AppContextValue {
     password?: string;
   }) => Promise<{ ok: boolean; message?: string; userId?: string }>;
   setUserActive: (userId: string, isActive: boolean) => Promise<{ ok: boolean; message?: string }>;
+  deleteShopUser: (userId: string) => Promise<{ ok: boolean; message?: string }>;
   createBill: (payload: CheckoutBillInput) => Promise<{ ok: boolean; billId?: string; message?: string }>;
   updateBillCustomerContact: (payload: {
     billId: string;
@@ -922,7 +923,8 @@ function mergeSettingsByShop(storedSettings: DemoAppState["settingsByShop"] | un
             support: ["reports", "settings"]
           },
         accessRoles: storedBundle?.pos?.accessRoles ?? defaultBundle?.pos?.accessRoles,
-        userAccessRoleIds: storedBundle?.pos?.userAccessRoleIds ?? defaultBundle?.pos?.userAccessRoleIds ?? {}
+        userAccessRoleIds: storedBundle?.pos?.userAccessRoleIds ?? defaultBundle?.pos?.userAccessRoleIds ?? {},
+        archivedUserIds: storedBundle?.pos?.archivedUserIds ?? defaultBundle?.pos?.archivedUserIds ?? []
       },
       printer: {
         ...(defaultBundle?.printer ?? {}),
@@ -2412,6 +2414,11 @@ export function AppProvider({
             return;
           }
 
+          if (response.status === 401 && session?.workspace === "shop") {
+            setState((current) => ({ ...current, session: null }));
+            return;
+          }
+
           if (!shouldUseSharedStateEndpoint() && response.status === 404) {
             setState((current) => removeShopFromLocalState(current, cloudSyncShopId));
           }
@@ -2488,6 +2495,11 @@ export function AppProvider({
               ...markShopLicenseBlocked(current, cloudSyncShopId, payload.licenseStatus!, payload.message),
               session: current.session
             }));
+            return;
+          }
+
+          if (response.status === 401 && session?.workspace === "shop") {
+            setState((current) => ({ ...current, session: null }));
             return;
           }
 
@@ -6811,6 +6823,44 @@ export function AppProvider({
             users: current.users.map((entry) => (entry.id === savedUser.id ? savedUser : entry))
           }));
 
+          return { ok: true };
+        } catch {
+          return { ok: false, message: "Unable to reach the shop user service." };
+        }
+      },
+      deleteShopUser: async (userId) => {
+        if (!currentShopId || !session) return { ok: false, message: "Session unavailable." };
+        if (session.role !== "shop_admin") return { ok: false, message: "Only the shop admin can delete users." };
+
+        try {
+          const response = await fetch("/api/shop-users", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: userId })
+          });
+          const payload = (await response.json()) as { message?: string; ok?: boolean; user?: User };
+          if (!response.ok || !payload.ok || !payload.user) {
+            return { ok: false, message: payload.message ?? "Unable to delete user." };
+          }
+
+          const archivedUser = payload.user;
+          setState((current) => {
+            const settings = current.settingsByShop[currentShopId];
+            const archivedUserIds = Array.from(new Set([...(settings.pos.archivedUserIds ?? []), userId]));
+            const userAccessRoleIds = { ...(settings.pos.userAccessRoleIds ?? {}) };
+            delete userAccessRoleIds[userId];
+            return {
+              ...current,
+              users: current.users.map((entry) => entry.id === userId ? archivedUser : entry),
+              settingsByShop: {
+                ...current.settingsByShop,
+                [currentShopId]: {
+                  ...settings,
+                  pos: { ...settings.pos, archivedUserIds, userAccessRoleIds }
+                }
+              }
+            };
+          });
           return { ok: true };
         } catch {
           return { ok: false, message: "Unable to reach the shop user service." };

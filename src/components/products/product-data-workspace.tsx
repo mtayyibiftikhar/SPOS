@@ -13,12 +13,11 @@ import { usePosApp } from "@/components/providers/app-provider";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { downloadCsv, normalizeCsvHeader, parseCsv } from "@/lib/csv";
-import { normalizeBarcode } from "@/lib/catalog";
+import { normalizeBarcode, normalizeCatalogName, normalizeSpreadsheetBarcode, unwrapSpreadsheetText } from "@/lib/catalog";
 import { hasShopPermission } from "@/lib/access-control";
 import type { Product, ProductCategory } from "@/types/pos";
 
 const HEADERS = [
-  "product_id",
   "english_name",
   "arabic_name",
   "urdu_name",
@@ -41,7 +40,6 @@ type PreviewRow = {
   line: number;
   data: ProductCsvRow;
   errors: string[];
-  product?: Product;
   barcodes: string[];
 };
 
@@ -63,12 +61,17 @@ function nonNegativeInteger(value: string) {
 }
 
 function strictBarcode(value: string) {
-  const candidate = value.trim();
-  return /^\d{1,13}$/.test(candidate) ? normalizeBarcode(candidate) : undefined;
+  return normalizeSpreadsheetBarcode(value);
 }
 
 function splitBarcodes(primary: string, additional: string) {
-  return [primary, ...additional.split("|")].map((value) => value.trim()).filter(Boolean);
+  return [unwrapSpreadsheetText(primary), ...unwrapSpreadsheetText(additional).split("|")]
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function excelText(value: string) {
+  return value ? `="${value.replace(/"/g, '""')}"` : "";
 }
 
 function productRows(products: Product[], categories: ProductCategory[]) {
@@ -80,7 +83,6 @@ function productRows(products: Product[], categories: ProductCategory[]) {
         new Set([product.barcode, ...(product.barcodes ?? [])].filter((value): value is string => Boolean(value)))
       );
       return [
-        product.id,
         product.name.en,
         product.name.ar,
         product.name.ur,
@@ -88,8 +90,8 @@ function productRows(products: Product[], categories: ProductCategory[]) {
         product.categoryId ? categoryById.get(product.categoryId) ?? "" : "",
         product.salePrice,
         product.costPrice,
-        barcodes[0] ?? "",
-        barcodes.slice(1).join("|"),
+        excelText(barcodes[0] ?? ""),
+        excelText(barcodes.slice(1).join("|")),
         product.stockQuantity,
         product.reorderLevel,
         product.taxable,
@@ -117,7 +119,6 @@ export function ProductDataWorkspace() {
     downloadCsv("product-import-template.csv", [
       [...HEADERS],
       [
-        "",
         "Sample coffee",
         "",
         "",
@@ -125,8 +126,8 @@ export function ProductDataWorkspace() {
         "Drinks",
         12,
         6,
-        "6281234567890",
-        "6281234567891|6281234567892",
+        excelText("6281234567890"),
+        excelText("6281234567891|6281234567892"),
         20,
         5,
         true,
@@ -172,21 +173,13 @@ export function ProductDataWorkspace() {
     });
 
     const fileBarcodeOwners = new Map<string, number>();
-    const fileProductOwners = new Map<string, number>();
     const parsed = rows.slice(1).map((values, rowIndex): PreviewRow => {
       const data = Object.fromEntries(
         HEADERS.map((header, index) => [header, values[index]?.trim() ?? ""])
       ) as ProductCsvRow;
       const errors: string[] = [];
-      const product = data.product_id ? products.find((entry) => entry.id === data.product_id) : undefined;
 
       if (values.length !== HEADERS.length) errors.push(`Expected ${HEADERS.length} columns but found ${values.length}.`);
-      if (data.product_id && !product) errors.push("Product ID does not belong to this shop.");
-      if (data.product_id) {
-        const previousLine = fileProductOwners.get(data.product_id);
-        if (previousLine !== undefined) errors.push(`Product ID is repeated on line ${previousLine}.`);
-        else fileProductOwners.set(data.product_id, rowIndex + 2);
-      }
       if (!data.english_name) errors.push("English name is required.");
       if (!(data.type === "product" || data.type === "service")) errors.push("Type must be product or service.");
       if (nonNegativeNumber(data.sale_price) === null) errors.push("Sale price must be zero or greater.");
@@ -211,7 +204,7 @@ export function ProductDataWorkspace() {
         }
         barcodes.push(barcode);
         const existingOwner = existingBarcodeOwners.get(barcode);
-        if (existingOwner && existingOwner !== product?.id) {
+        if (existingOwner) {
           errors.push(`Barcode ${barcode} already belongs to another product.`);
         }
         const previousLine = fileBarcodeOwners.get(barcode);
@@ -222,7 +215,7 @@ export function ProductDataWorkspace() {
         }
       });
 
-      return { line: rowIndex + 2, data, errors: Array.from(new Set(errors)), product, barcodes };
+      return { line: rowIndex + 2, data, errors: Array.from(new Set(errors)), barcodes };
     });
 
     setPreview(parsed);
@@ -235,11 +228,12 @@ export function ProductDataWorkspace() {
 
   const importProducts = () => {
     if (!isAdmin || preview.length === 0 || invalidRows > 0) return;
-    const categoryIds = new Map(categories.map((category) => [category.name.trim().toLowerCase(), category.id]));
+    const categoryIds = new Map(categories.map((category) => [normalizeCatalogName(category.name), category.id]));
 
     for (const row of preview) {
       const categoryName = row.data.category.trim();
-      let categoryId = categoryName ? categoryIds.get(categoryName.toLowerCase()) : undefined;
+      const normalizedCategoryName = normalizeCatalogName(categoryName);
+      let categoryId = categoryName ? categoryIds.get(normalizedCategoryName) : undefined;
       if (categoryName && !categoryId) {
         const result = addCategory({ name: categoryName, description: "", imageUrl: "" });
         if (!result.ok || !result.categoryId) {
@@ -247,12 +241,11 @@ export function ProductDataWorkspace() {
           return;
         }
         categoryId = result.categoryId;
-        categoryIds.set(categoryName.toLowerCase(), categoryId);
+        categoryIds.set(normalizedCategoryName, categoryId);
       }
 
       const isService = row.data.type === "service";
       const result = saveProduct({
-        id: row.product?.id,
         kind: isService ? "service" : "product",
         categoryId,
         barcode: row.barcodes[0],
@@ -293,7 +286,7 @@ export function ProductDataWorkspace() {
         <DataAction
           icon={FileSpreadsheet}
           title="Download import schema"
-          text="Use this exact CSV structure. Separate additional barcodes with a vertical bar (|)."
+          text="The POS assigns product IDs. Barcode cells are Excel-safe; separate additional barcodes with a vertical bar (|). New category names are created automatically."
           action="Download schema"
           onClick={downloadTemplate}
         />
@@ -359,7 +352,7 @@ export function ProductDataWorkspace() {
                       <td className="p-4 font-semibold">{row.line}</td>
                       <td className="p-4">
                         <strong>{row.data.english_name || "Unnamed"}</strong>
-                        <div className="text-xs text-slate-500">{row.product ? "Update existing" : "Create new"}</div>
+                        <div className="text-xs text-slate-500">Create new - POS assigns the product ID</div>
                       </td>
                       <td className="p-4 capitalize">{row.data.type}</td>
                       <td className="p-4">{row.data.category || "No category"}</td>
