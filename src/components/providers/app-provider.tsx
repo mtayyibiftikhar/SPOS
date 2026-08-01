@@ -81,7 +81,7 @@ import {
   normalizeBarcode,
   normalizeCatalogName
 } from "@/lib/catalog";
-import { calculateBillRefundState } from "@/lib/refunds";
+import { buildRefundCustomerHistory, calculateBillRefundState } from "@/lib/refunds";
 import {
   calculateScheduledAttendanceClosure,
   DEFAULT_SHIFT_END_TIME,
@@ -823,6 +823,8 @@ interface AppContextValue {
     paymentMethod: DemoAppState["purchaseOrders"][number]["paymentMethod"];
   }) => { ok: boolean; message?: string; appliedAmount?: number };
   cancelPurchaseOrder: (purchaseOrderId: string) => { ok: boolean; message?: string };
+  returnPurchaseOrder: (purchaseOrderId: string) => { ok: boolean; message?: string };
+  deletePurchaseOrder: (purchaseOrderId: string) => { ok: boolean; message?: string };
   deleteProduct: (productId: string, reason: string) => void;
   restoreDeletedProduct: (deletedProductId: string) => void;
   permanentlyDeleteProduct: (deletedProductId: string) => void;
@@ -6107,7 +6109,7 @@ export function AppProvider({
           message: "Unable to adjust inventory."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const accessBlock = getShopAccessBlock(current, currentShopId);
 
           if (accessBlock) {
@@ -6196,7 +6198,7 @@ export function AppProvider({
                 : entry
             )
           };
-        });
+        }));
 
         if (result.ok) announceExplicitSave();
         return result;
@@ -6322,7 +6324,7 @@ export function AppProvider({
           message: "Unable to remove supplier."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const accessBlock = getShopAccessBlock(current, currentShopId);
 
           if (accessBlock) {
@@ -6339,18 +6341,28 @@ export function AppProvider({
             return current;
           }
 
-          if (current.purchaseOrders.some((order) => order.supplierId === supplierId)) {
-            result = { ok: false, message: "Supplier has purchase orders and cannot be removed." };
+          if (supplier.deletedAt) {
+            result = { ok: false, message: "Supplier is already archived." };
             return current;
           }
 
+          if (current.purchaseOrders.some((order) => order.supplierId === supplierId && !order.deletedAt)) {
+            result = { ok: false, message: "Archive this supplier's purchase orders before removing the supplier." };
+            return current;
+          }
+
+          const deletedAt = new Date().toISOString();
           result = { ok: true };
 
           return {
             ...current,
-            suppliers: current.suppliers.filter((entry) => entry.id !== supplierId)
+            suppliers: current.suppliers.map((entry) =>
+              entry.id === supplierId
+                ? { ...entry, deletedAt, deletedBy: session.id, updatedAt: deletedAt }
+                : entry
+            )
           };
-        });
+        }));
 
         if (result.ok) announceExplicitSave();
         return result;
@@ -6935,6 +6947,174 @@ export function AppProvider({
                     : supplier
                 )
               : current.suppliers
+          };
+        }));
+
+        if (result.ok) announceExplicitSave();
+        return result;
+      },
+      returnPurchaseOrder: (purchaseOrderId) => {
+        if (!currentShopId || !session) return { ok: false, message: "Session unavailable." };
+        if (!hasShopPermission(session, currentSettings?.pos, "inventory")) {
+          return { ok: false, message: "Only the shop admin can return received purchase orders." };
+        }
+
+        let result: { ok: boolean; message?: string } = { ok: false, message: "Unable to return purchase order." };
+
+        flushSync(() => setState((current) => {
+          const accessBlock = getShopAccessBlock(current, currentShopId);
+          if (accessBlock) {
+            result = { ok: false, message: accessBlock };
+            return current;
+          }
+
+          const order = current.purchaseOrders.find(
+            (entry) => entry.id === purchaseOrderId && entry.shopId === currentShopId && !entry.deletedAt
+          );
+          if (!order) {
+            result = { ok: false, message: "Purchase order not found." };
+            return current;
+          }
+          const items = current.purchaseOrderItems.filter((item) => item.purchaseOrderId === order.id);
+          const receivedTotal = getPurchaseOrderValuation(items).receivedTotal;
+          if (order.status !== "received" && !(order.status === "cancelled" && receivedTotal > 0)) {
+            result = { ok: false, message: "This purchase order has no received stock to return." };
+            return current;
+          }
+          const quantitiesByProduct = items.reduce<Record<string, number>>((totals, item) => {
+            totals[item.productId] = roundPurchaseMoney((totals[item.productId] ?? 0) + (item.receivedQuantity ?? 0));
+            return totals;
+          }, {});
+          const batchQuantitiesByProduct = current.inventoryBatches
+            .filter((batch) => batch.purchaseOrderId === order.id)
+            .reduce<Record<string, number>>((totals, batch) => {
+              totals[batch.productId] = roundPurchaseMoney((totals[batch.productId] ?? 0) + batch.remainingQuantity);
+              return totals;
+            }, {});
+          const productsById = new Map(current.products.map((product) => [product.id, product]));
+          const cannotReturn = Object.entries(quantitiesByProduct).some(([productId, quantity]) => {
+            const product = productsById.get(productId);
+            return !product || product.stockQuantity < quantity || (batchQuantitiesByProduct[productId] ?? 0) < quantity;
+          });
+
+          if (cannotReturn) {
+            result = {
+              ok: false,
+              message: "This PO cannot be returned because some received units were already sold, removed, or consumed. Adjust those movements first."
+            };
+            return current;
+          }
+
+          const returnedAt = new Date().toISOString();
+          const previousTotal = order.totalAmount ?? getPurchaseOrderValuation(items).receivedTotal;
+          const adjustments = Object.entries(quantitiesByProduct).flatMap(([productId, quantity]) => {
+            const product = productsById.get(productId);
+            if (!product || quantity <= 0) return [];
+            return [{
+              id: createId("inv_adj"),
+              shopId: currentShopId,
+              productId,
+              type: "remove" as const,
+              quantity,
+              beforeQuantity: product.stockQuantity,
+              afterQuantity: roundPurchaseMoney(product.stockQuantity - quantity),
+              reason: `PO returned ${order.number}`,
+              supplierId: order.supplierId,
+              referenceId: order.id,
+              createdBy: session.id,
+              createdAt: returnedAt
+            }];
+          });
+
+          result = { ok: true };
+          return {
+            ...current,
+            inventoryAdjustments: [...adjustments, ...current.inventoryAdjustments],
+            inventoryBatches: current.inventoryBatches.map((batch) =>
+              batch.purchaseOrderId === order.id ? { ...batch, remainingQuantity: 0 } : batch
+            ),
+            products: current.products.map((product) =>
+              quantitiesByProduct[product.id]
+                ? { ...product, stockQuantity: roundPurchaseMoney(product.stockQuantity - quantitiesByProduct[product.id]), updatedAt: returnedAt }
+                : product
+            ),
+            purchaseOrderItems: current.purchaseOrderItems.map((item) =>
+              item.purchaseOrderId === order.id
+                ? {
+                    ...item,
+                    returnedAmount: item.receivedAmount ?? (item.receivedQuantity ?? 0) * item.costPrice,
+                    returnedQuantity: item.receivedQuantity ?? 0
+                  }
+                : item
+            ),
+            purchaseOrders: current.purchaseOrders.map((entry) =>
+              entry.id === order.id
+                ? {
+                    ...entry,
+                    paymentStatus: getPurchasePaymentStatus(0, entry.paidAmount ?? 0),
+                    returnedAt,
+                    returnedBy: session.id,
+                    status: "returned",
+                    totalAmount: 0
+                  }
+                : entry
+            ),
+            suppliers: order.supplierId
+              ? current.suppliers.map((supplier) =>
+                  supplier.id === order.supplierId
+                    ? {
+                        ...supplier,
+                        accountBalance: reconcileSupplierBalance(supplier.accountBalance ?? 0, previousTotal, 0),
+                        updatedAt: returnedAt
+                      }
+                    : supplier
+                )
+              : current.suppliers
+          };
+        }));
+
+        if (result.ok) announceExplicitSave();
+        return result;
+      },
+      deletePurchaseOrder: (purchaseOrderId) => {
+        if (!currentShopId || !session) return { ok: false, message: "Session unavailable." };
+        if (!hasShopPermission(session, currentSettings?.pos, "inventory")) {
+          return { ok: false, message: "Only the shop admin can archive purchase orders." };
+        }
+
+        let result: { ok: boolean; message?: string } = { ok: false, message: "Unable to archive purchase order." };
+        flushSync(() => setState((current) => {
+          const accessBlock = getShopAccessBlock(current, currentShopId);
+          if (accessBlock) {
+            result = { ok: false, message: accessBlock };
+            return current;
+          }
+          const order = current.purchaseOrders.find(
+            (entry) => entry.id === purchaseOrderId && entry.shopId === currentShopId && !entry.deletedAt
+          );
+          if (!order) {
+            result = { ok: false, message: "Purchase order not found." };
+            return current;
+          }
+          if (order.status !== "cancelled" && order.status !== "returned") {
+            result = { ok: false, message: "Cancel an unreceived PO, or return a received PO, before archiving it." };
+            return current;
+          }
+          const receivedTotal = getPurchaseOrderValuation(
+            current.purchaseOrderItems.filter((item) => item.purchaseOrderId === order.id)
+          ).receivedTotal;
+          if (order.status === "cancelled" && receivedTotal > 0) {
+            result = { ok: false, message: "Return the received stock on this cancelled PO before archiving it." };
+            return current;
+          }
+
+          const deletedAt = new Date().toISOString();
+          result = { ok: true };
+          return {
+            ...current,
+            purchaseOrders: current.purchaseOrders.map((entry) =>
+              entry.id === order.id ? { ...entry, deletedAt, deletedBy: session.id } : entry
+            )
           };
         }));
 
@@ -9501,6 +9681,7 @@ export function AppProvider({
                     customerAddress: refundCustomer.address,
                     customerVatNumber: refundCustomer.vatNumber,
                     customerWhatsapp: refundCustomer.whatsapp,
+                    customerHistory: buildRefundCustomerHistory(entry, refundCustomer, returnDate),
                     status: fullyRefunded ? "refunded" : entry.status
                   }
                 : entry

@@ -15,7 +15,7 @@ import { applySettlementToBills } from "../../src/lib/customer-accounts";
 import { getLedgerControlTotals, buildSaleLedgerEntries } from "../../src/lib/accounting";
 import { sanitizeNumericInput } from "../../src/lib/numeric-input";
 import { combinePhoneNumber, sanitizePhoneDigits, sanitizePhoneInput, splitPhoneNumber } from "../../src/lib/phone";
-import { calculateBillRefundState, calculateSalesReportSummary, formatRefundReceiptNumber } from "../../src/lib/refunds";
+import { buildRefundCustomerHistory, calculateBillRefundState, calculateSalesReportSummary, formatRefundReceiptNumber } from "../../src/lib/refunds";
 import { createPublicReceiptToken } from "../../src/lib/public-receipts";
 import { clearShopDataScope } from "../../src/lib/shop-data-reset";
 import type {
@@ -504,6 +504,28 @@ test("refund state tracks partial quantities and prevents a second full refund",
 test("refund receipt numbers stay stable and customer friendly", () => {
   assert.equal(formatRefundReceiptNumber("refund_a1b2c3d4e5f6"), "REF-C3D4E5F6");
   assert.equal(formatRefundReceiptNumber("x"), "REF-0000000X");
+});
+
+test("refund customer reassignment retains the original and replacement customer audit", () => {
+  const originalBill = bill({
+    customerId: "customer_original",
+    customerName: "Original Customer",
+    customerPhone: "+966500000001"
+  });
+  const replacement = {
+    id: "customer_replacement",
+    shopId: SHOP_ID,
+    name: "Replacement Customer",
+    phone: "+966500000002",
+    createdAt: BUSINESS_DATE
+  } satisfies Customer;
+
+  const history = buildRefundCustomerHistory(originalBill, replacement, "2026-07-14T12:00:00.000Z");
+
+  assert.deepEqual(history.map((entry) => [entry.source, entry.customerId, entry.name]), [
+    ["sale", "customer_original", "Original Customer"],
+    ["refund_reassignment", "customer_replacement", "Replacement Customer"]
+  ]);
 });
 
 test("a return today adjusts today's report without rewriting yesterday's sale", () => {

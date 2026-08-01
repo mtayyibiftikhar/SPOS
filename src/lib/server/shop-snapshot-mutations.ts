@@ -23,7 +23,7 @@ import {
 } from "@/lib/cash-control";
 import { applySettlementToBills, getCustomerAccountMetrics } from "@/lib/customer-accounts";
 import { createPublicReceiptToken } from "@/lib/public-receipts";
-import { calculateBillRefundState, calculateRefundQuote } from "@/lib/refunds";
+import { buildRefundCustomerHistory, calculateBillRefundState, calculateRefundQuote } from "@/lib/refunds";
 import { calculateScheduledAttendanceClosure } from "@/lib/attendance";
 import { createId } from "@/lib/utils";
 import { hasShopPermission } from "@/lib/access-control";
@@ -1037,6 +1037,7 @@ function createRefundMutation(
           customerAddress: refundCustomer.address,
           customerVatNumber: refundCustomer.vatNumber,
           customerWhatsapp: refundCustomer.whatsapp,
+          customerHistory: buildRefundCustomerHistory(entry, refundCustomer, createdAt),
           dueAmount: fullyRefunded ? 0 : dueAmount,
           status: fullyRefunded ? "refunded" : dueAmount > 0 ? "due" : entry.status
         };

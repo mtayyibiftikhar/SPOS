@@ -656,6 +656,11 @@ export function ReceiptView({ billId }: { billId: string }) {
               {bill.customerWhatsapp ? <p>{t("common.whatsapp")}: {bill.customerWhatsapp}</p> : null}
               {bill.customerVatNumber ? <p>{t("common.vatNumber")}: {bill.customerVatNumber}</p> : null}
               {bill.customerAddress ? <p>{t("common.address")}: {bill.customerAddress}</p> : null}
+              {bill.customerHistory?.some((entry) => entry.source === "sale" && entry.name !== bill.customerName) ? (
+                <p className="mt-2 text-xs text-slate-500">
+                  Originally billed to {bill.customerHistory.find((entry) => entry.source === "sale" && entry.name !== bill.customerName)?.name}
+                </p>
+              ) : null}
             </div>
           ) : null}
 

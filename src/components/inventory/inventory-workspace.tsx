@@ -32,6 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { createStructuredReportPdfBlob, downloadBlob } from "@/lib/report-export";
+import { downloadCsv } from "@/lib/csv";
 import { sanitizePhoneInput } from "@/lib/phone";
 import { getBusinessDateInTimezone } from "@/lib/cash-control";
 import { getPurchaseOrderValuation } from "@/lib/purchasing";
@@ -43,7 +44,7 @@ type InventoryView = "overview" | "add" | "adjust" | "order" | "suppliers" | "da
 type AdjustMode = "item" | "supplier" | "category";
 type PurchaseOrderStep = "items" | "supplier";
 type PurchaseOrderTab = "create" | "history" | "reorder";
-type PurchaseOrderFilter = "open" | "completed" | "cancelled";
+type PurchaseOrderFilter = "open" | "completed" | "cancelled" | "returned" | "archived";
 type SupplierView = "list" | "form" | "detail";
 
 type RestockLine = {
@@ -175,8 +176,10 @@ export function InventoryWorkspace() {
     currentShopId,
     currentSettings,
     deleteSupplier,
+    deletePurchaseOrder,
     locale,
     receivePurchaseOrder,
+    returnPurchaseOrder,
     saveProduct,
     saveSupplier,
     session,
@@ -221,20 +224,21 @@ export function InventoryWorkspace() {
       }, {}),
     [physicalProducts]
   );
-  const suppliers = useMemo(
+  const allShopSuppliers = useMemo(
     () =>
       state.suppliers
         .filter((supplier) => supplier.shopId === currentShopId)
         .sort((left, right) => left.name.localeCompare(right.name)),
     [currentShopId, state.suppliers]
   );
+  const suppliers = useMemo(() => allShopSuppliers.filter((supplier) => !supplier.deletedAt), [allShopSuppliers]);
   const supplierById = useMemo(
     () =>
-      suppliers.reduce<Record<string, Supplier>>((accumulator, supplier) => {
+      allShopSuppliers.reduce<Record<string, Supplier>>((accumulator, supplier) => {
         accumulator[supplier.id] = supplier;
         return accumulator;
       }, {}),
-    [suppliers]
+    [allShopSuppliers]
   );
   const categoryById = useMemo(
     () =>
@@ -244,13 +248,15 @@ export function InventoryWorkspace() {
       }, {}),
     [categories]
   );
-  const purchaseOrders = useMemo(
+  const allPurchaseOrders = useMemo(
     () =>
       state.purchaseOrders
         .filter((order) => order.shopId === currentShopId)
         .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
     [currentShopId, state.purchaseOrders]
   );
+  const purchaseOrders = useMemo(() => allPurchaseOrders.filter((order) => !order.deletedAt), [allPurchaseOrders]);
+  const archivedPurchaseOrders = useMemo(() => allPurchaseOrders.filter((order) => Boolean(order.deletedAt)), [allPurchaseOrders]);
   const purchaseOrderItemsByOrderId = useMemo(
     () =>
       state.purchaseOrderItems.reduce<Record<string, PurchaseOrderItem[]>>((accumulator, item) => {
@@ -278,6 +284,7 @@ export function InventoryWorkspace() {
     [physicalProducts]
   );
   const stockValue = physicalProducts.reduce((sum, product) => sum + product.stockQuantity * product.costPrice, 0);
+  const totalUnitsOnHand = physicalProducts.reduce((sum, product) => sum + Math.max(0, product.stockQuantity), 0);
   const productSupplierIds = useMemo(() => {
     const map = physicalProducts.reduce<Record<string, string[]>>((accumulator, product) => {
       accumulator[product.id] = [];
@@ -450,6 +457,7 @@ export function InventoryWorkspace() {
         ? "partial"
         : "unpaid";
   const filteredPurchaseOrders = purchaseOrders.filter((order) => {
+    if (poFilter === "archived") return false;
     if (poFilter === "completed") {
       return order.status === "received";
     }
@@ -458,8 +466,10 @@ export function InventoryWorkspace() {
       return order.status === "cancelled";
     }
 
+    if (poFilter === "returned") return order.status === "returned";
+
     return order.status === "ordered" || order.status === "partially_received";
-  });
+  }).concat(poFilter === "archived" ? archivedPurchaseOrders : []);
   const reorderOrders = purchaseOrders.filter((order) => {
     const query = reorderSearch.trim().toLowerCase();
 
@@ -650,6 +660,45 @@ export function InventoryWorkspace() {
 
     setRestockLines([]);
     setFeedback({ tone: "success", message: "Inventory received and stock updated." });
+  };
+
+  const printRestockBarcodes = () => {
+    const labels = restockLines.flatMap((line) => {
+      const product = productById[line.productId];
+      const barcode = product?.barcode;
+      const quantity = Math.min(200, Math.max(0, Math.floor(Number(line.quantity || 0))));
+
+      if (!product || !barcode || quantity <= 0) return [];
+
+      return Array.from({ length: quantity }, () => ({
+        barcode,
+        name: getProductName(product, locale),
+        price: formatCurrency(product.salePrice, currency, locale)
+      }));
+    });
+
+    if (labels.length === 0) {
+      setFeedback({ tone: "error", message: "Add a received quantity for a product with a barcode first." });
+      return;
+    }
+
+    const popup = window.open("", "_blank", "width=900,height=700");
+    if (!popup) {
+      setFeedback({ tone: "error", message: "Allow popups to print barcode labels." });
+      return;
+    }
+
+    popup.document.write(`<!doctype html><html><head><title>Received inventory barcodes</title><style>
+      @page { size: A4; margin: 8mm; }
+      body { margin: 0; font-family: Arial, sans-serif; color: #0f172a; }
+      .sheet { display: grid; grid-template-columns: repeat(3, 50mm); grid-auto-rows: 25mm; gap: 3mm; }
+      .label { border: 1px dashed #94a3b8; border-radius: 3mm; padding: 2mm; display: flex; flex-direction: column; justify-content: center; align-items: center; overflow: hidden; text-align: center; }
+      .name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 700; }
+      .bars { margin-top: 1mm; font-family: "Libre Barcode 39", "Courier New", monospace; font-size: 28px; letter-spacing: 1px; line-height: 1; }
+      .code { font-size: 9px; letter-spacing: .08em; }
+      .price { margin-top: 1mm; font-size: 9px; font-weight: 700; }
+    </style></head><body><div class="sheet">${labels.map((label) => `<div class="label"><div class="name">${escapeHtml(label.name)}</div><div class="bars">*${escapeHtml(label.barcode)}*</div><div class="code">${escapeHtml(label.barcode)}</div><div class="price">${escapeHtml(label.price)}</div></div>`).join("")}</div><script>window.onload=()=>window.print();</script></body></html>`);
+    popup.document.close();
   };
 
   const holdRestockCart = () => {
@@ -846,12 +895,7 @@ export function InventoryWorkspace() {
       return {
         label: getProductName(product, locale),
         value: formatCurrency(product.stockQuantity * product.costPrice, currency, locale),
-        detail: [
-          `Barcode: ${product.barcode ?? "No barcode"}`,
-          `Category: ${product.categoryId ? categoryById[product.categoryId] ?? "No category" : "No category"}`,
-          `Supplier: ${supplierNames || GENERAL_SUPPLIER_NAME}`,
-          `Stock: ${product.stockQuantity} | Reorder: ${product.reorderLevel} | Cost: ${formatCurrency(product.costPrice, currency, locale)}`
-        ].join(" | ")
+        detail: `On hand ${product.stockQuantity} · Unit cost ${formatCurrency(product.costPrice, currency, locale)} · Reorder at ${product.reorderLevel} · ${supplierNames || GENERAL_SUPPLIER_NAME}`
       };
     });
     const blob = await createStructuredReportPdfBlob({
@@ -862,7 +906,8 @@ export function InventoryWorkspace() {
         {
           title: "Inventory summary",
           rows: [
-            { label: "Products", value: String(physicalProducts.length) },
+            { label: "Product lines", value: String(physicalProducts.length) },
+            { label: "Units on hand", value: String(totalUnitsOnHand) },
             { label: "Stock value", value: formatCurrency(stockValue, currency, locale) },
             { label: "Low stock", value: String(lowStockProducts.length) },
             { label: "Suppliers", value: String(suppliers.length) }
@@ -890,7 +935,7 @@ export function InventoryWorkspace() {
         }
       ],
       shopName: currentShop?.name ?? "Simple POS",
-      subtitle: "Stock value, reorder levels, supplier, and category inventory record.",
+      subtitle: "Clear on-hand quantity, stock value, reorder point, and latest supplier record.",
       title: "Inventory Report"
     });
 
@@ -1122,6 +1167,73 @@ export function InventoryWorkspace() {
     setFeedback({ tone: result.ok ? "success" : "error", message: result.ok ? "Purchase order cancelled." : result.message ?? "Unable to cancel purchase order." });
   };
 
+  const returnOrder = (purchaseOrderId: string) => {
+    const result = returnPurchaseOrder(purchaseOrderId);
+    setFeedback({
+      tone: result.ok ? "success" : "error",
+      message: result.ok ? "Purchase order returned and received stock reversed." : result.message ?? "Unable to return purchase order."
+    });
+  };
+
+  const archiveOrder = (purchaseOrderId: string) => {
+    const result = deletePurchaseOrder(purchaseOrderId);
+    setFeedback({
+      tone: result.ok ? "success" : "error",
+      message: result.ok ? "Purchase order archived. Its audit record was retained." : result.message ?? "Unable to archive purchase order."
+    });
+  };
+
+  const downloadSuppliers = () => {
+    downloadCsv(
+      `suppliers-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        ["Supplier", "Contact person", "Phone", "Email", "VAT number", "Address", "Payment method", "Account balance"],
+        ...suppliers.map((supplier) => [
+          supplier.name,
+          supplier.contactPerson,
+          supplier.phone,
+          supplier.email,
+          supplier.vatNumber,
+          supplier.address,
+          supplier.defaultPaymentMethod,
+          supplier.accountBalance ?? 0
+        ])
+      ]
+    );
+    setFeedback({ tone: "success", message: "Supplier list downloaded." });
+  };
+
+  const downloadDeletedPurchasingAudit = () => {
+    const archivedSuppliers = allShopSuppliers.filter((supplier) => supplier.deletedAt);
+    downloadCsv(
+      `deleted-purchasing-audit-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        ["Record type", "Reference", "Name", "Status", "Total", "Paid", "Deleted at", "Deleted by"],
+        ...archivedSuppliers.map((supplier) => [
+          "Supplier",
+          supplier.id,
+          supplier.name,
+          "archived",
+          "",
+          "",
+          supplier.deletedAt,
+          supplier.deletedBy
+        ]),
+        ...archivedPurchaseOrders.map((order) => [
+          "Purchase order",
+          order.number,
+          order.supplierName,
+          order.status,
+          order.totalAmount ?? 0,
+          order.paidAmount ?? 0,
+          order.deletedAt,
+          order.deletedBy
+        ])
+      ]
+    );
+    setFeedback({ tone: "success", message: "Deleted supplier and PO audit downloaded." });
+  };
+
   const reorderFromOrder = (order: PurchaseOrder) => {
     const savedItems = purchaseOrderItemsByOrderId[order.id] ?? [];
 
@@ -1255,8 +1367,9 @@ export function InventoryWorkspace() {
 
       {activeView === "overview" ? (
         <div className="space-y-5">
-          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <MetricCard label="Stock items" value={physicalProducts.length} />
+          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+            <MetricCard label="Product lines" value={physicalProducts.length} />
+            <MetricCard label="Units on hand" value={totalUnitsOnHand} />
             <MetricCard label="Stock value" tone="green" value={formatCurrency(stockValue, currency, locale)} />
             <div
               className={cn(
@@ -1476,26 +1589,38 @@ export function InventoryWorkspace() {
                     }
 
                     return (
-                      <div key={line.lineId} className="grid gap-3 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-[minmax(0,1fr)_120px_140px_180px_auto] lg:items-center">
-                        <div>
-                          <p className="font-semibold text-slate-950">{getProductName(product, locale)}</p>
-                          <p className="mt-1 text-xs text-slate-500">{product.barcode ?? "No barcode"} | current stock {product.stockQuantity}</p>
-                        </div>
-                        <Input inputMode="decimal" value={line.quantity} onChange={(event) => updateRestockLine(line.lineId, { quantity: event.target.value })} />
-                        <Input inputMode="decimal" value={line.costPrice} onChange={(event) => updateRestockLine(line.lineId, { costPrice: event.target.value })} />
-                        <Select value={line.supplierId} onChange={(event) => updateRestockLine(line.lineId, { supplierId: event.target.value })}>
-                          <option value="">{GENERAL_SUPPLIER_NAME}</option>
-                          {suppliers.map((supplier) => (
-                            <option key={supplier.id} value={supplier.id}>
-                              {supplier.name}
-                            </option>
-                          ))}
-                        </Select>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold text-slate-950">{formatCurrency(quantity * cost, currency, locale)}</span>
-                          <Button className="h-10 w-10 rounded-full p-0" variant="danger" onClick={() => setRestockLines((current) => current.filter((entry) => entry.lineId !== line.lineId))}>
+                      <div key={line.lineId} className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-950">{getProductName(product, locale)}</p>
+                            <p className="mt-1 text-xs text-slate-500">{product.barcode ?? "No barcode"} · Current stock {product.stockQuantity}</p>
+                          </div>
+                          <Button className="h-10 w-10 shrink-0 rounded-full p-0" variant="danger" onClick={() => setRestockLines((current) => current.filter((entry) => entry.lineId !== line.lineId))}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
+                        </div>
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                          <label className="space-y-1 text-xs font-semibold text-slate-500">
+                            <span>Receive quantity</span>
+                            <Input inputMode="decimal" value={line.quantity} onChange={(event) => updateRestockLine(line.lineId, { quantity: event.target.value })} />
+                          </label>
+                          <label className="space-y-1 text-xs font-semibold text-slate-500">
+                            <span>Unit cost</span>
+                            <Input inputMode="decimal" value={line.costPrice} onChange={(event) => updateRestockLine(line.lineId, { costPrice: event.target.value })} />
+                          </label>
+                          <label className="space-y-1 text-xs font-semibold text-slate-500 sm:col-span-2 xl:col-span-1">
+                            <span>Supplier</span>
+                            <Select value={line.supplierId} onChange={(event) => updateRestockLine(line.lineId, { supplierId: event.target.value })}>
+                              <option value="">{GENERAL_SUPPLIER_NAME}</option>
+                              {suppliers.map((supplier) => (
+                                <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
+                              ))}
+                            </Select>
+                          </label>
+                        </div>
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 text-sm">
+                          <span className="text-slate-500">New stock <strong className="text-slate-950">{product.stockQuantity + quantity}</strong></span>
+                          <span className="text-slate-500">Line total <strong className="text-slate-950">{formatCurrency(quantity * cost, currency, locale)}</strong></span>
                         </div>
                       </div>
                     );
@@ -1521,7 +1646,11 @@ export function InventoryWorkspace() {
                 </p>
                 <p className="mt-2 text-sm text-slate-600">{restockLines.length} items ready</p>
               </div>
-              <div className="mt-5 grid gap-3">
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <Button disabled={restockLines.length === 0} variant="secondary" onClick={printRestockBarcodes}>
+                  <Barcode className="mr-2 h-4 w-4" />
+                  Print barcodes
+                </Button>
                 <Button disabled={!isManager || restockLines.length === 0} onClick={submitRestockCart}>
                   Receive inventory
                 </Button>
@@ -1908,10 +2037,10 @@ export function InventoryWorkspace() {
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-5">
                 <div>
                   <SectionEyebrow>Purchase orders</SectionEyebrow>
-                  <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">Open, completed, and cancelled POs</h2>
+                  <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">Purchase order history and audit</h2>
                 </div>
-                <div className="grid grid-cols-3 gap-2 rounded-[20px] border border-slate-200 bg-slate-50 p-1">
-                  {(["open", "completed", "cancelled"] as PurchaseOrderFilter[]).map((filter) => (
+                <div className="grid grid-cols-2 gap-2 rounded-[20px] border border-slate-200 bg-slate-50 p-1 sm:grid-cols-5">
+                  {(["open", "completed", "cancelled", "returned", "archived"] as PurchaseOrderFilter[]).map((filter) => (
                     <Button key={filter} variant={poFilter === filter ? "primary" : "ghost"} onClick={() => setPoFilter(filter)}>
                       {filter}
                     </Button>
@@ -1951,17 +2080,31 @@ export function InventoryWorkspace() {
                             </div>
                           </div>
                           <div className="flex flex-wrap gap-2">
-                            <Badge variant={order.status === "received" ? "success" : order.status === "cancelled" ? "warning" : "neutral"}>{order.status}</Badge>
-                            <Badge variant={order.paymentStatus === "paid" ? "success" : order.paymentStatus === "partial" ? "warning" : "neutral"}>{order.paymentStatus ?? "unpaid"}</Badge>
+                            <Badge variant={order.status === "received" ? "success" : order.status === "cancelled" || order.status === "returned" ? "warning" : "neutral"}>{order.deletedAt ? "archived" : order.status}</Badge>
+                            <Badge variant={supplierCredit > 0 ? "warning" : order.paymentStatus === "paid" ? "success" : order.paymentStatus === "partial" ? "warning" : "neutral"}>
+                              {supplierCredit > 0 ? "supplier credit" : order.paymentStatus ?? "unpaid"}
+                            </Badge>
                             <Button size="sm" variant="secondary" onClick={() => printPurchaseOrder(order.id)}>
                               <Printer className="mr-2 h-4 w-4" />
                               Print
                             </Button>
-                            {order.status !== "received" && order.status !== "cancelled" ? (
+                            {!order.deletedAt && (order.status === "ordered" || order.status === "partially_received") ? (
                               <>
                                 <Button size="sm" onClick={() => startReceivingOrder(order.id)}>Receive</Button>
                                 <Button size="sm" variant="danger" onClick={() => cancelOrder(order.id)}>Cancel</Button>
                               </>
+                            ) : null}
+                            {!order.deletedAt && (order.status === "received" || (order.status === "cancelled" && valuation.receivedTotal > 0)) ? (
+                              <Button size="sm" variant="danger" onClick={() => returnOrder(order.id)}>
+                                <RotateCcw className="mr-2 h-4 w-4" />
+                                Return stock
+                              </Button>
+                            ) : null}
+                            {!order.deletedAt && (order.status === "returned" || (order.status === "cancelled" && valuation.receivedTotal <= 0)) ? (
+                              <Button size="sm" variant="danger" onClick={() => archiveOrder(order.id)}>
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Archive
+                              </Button>
                             ) : null}
                           </div>
                         </div>
@@ -2075,8 +2218,22 @@ export function InventoryWorkspace() {
           {supplierView === "list" ? (
             <Card className="overflow-hidden p-0">
               <div className="border-b border-slate-200 p-5">
-                <SectionEyebrow>Suppliers</SectionEyebrow>
-                <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">Supplier directory</h2>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <SectionEyebrow>Suppliers</SectionEyebrow>
+                    <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-slate-950">Supplier directory</h2>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="secondary" onClick={downloadSuppliers}>
+                      <FileText className="mr-2 h-4 w-4" />
+                      Download suppliers
+                    </Button>
+                    <Button variant="secondary" onClick={downloadDeletedPurchasingAudit}>
+                      <History className="mr-2 h-4 w-4" />
+                      Deleted audit
+                    </Button>
+                  </div>
+                </div>
                 <label className="relative mt-5 block">
                   <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <Input className="pl-11" placeholder="Search supplier, phone, email, VAT" value={supplierSearch} onChange={(event) => setSupplierSearch(event.target.value)} />

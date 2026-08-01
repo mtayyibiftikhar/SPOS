@@ -36,7 +36,7 @@ export interface ShopAccessRole {
   updatedAt: string;
 }
 export type InventoryAdjustmentType = "add" | "remove" | "sale" | "refund";
-export type PurchaseOrderStatus = "draft" | "ordered" | "partially_received" | "received" | "cancelled";
+export type PurchaseOrderStatus = "draft" | "ordered" | "partially_received" | "received" | "cancelled" | "returned";
 export type ExpensePaymentMethod = "cash" | "card" | "bank";
 export type SupplierPaymentMethod = "cash" | "card" | "bank" | "credit";
 export type PurchasePaymentStatus = "unpaid" | "partial" | "paid";
@@ -254,6 +254,8 @@ export interface Supplier {
   accountBalance?: number;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string;
+  deletedBy?: string;
 }
 
 export interface PurchaseOrder {
@@ -272,6 +274,10 @@ export interface PurchaseOrder {
   expectedAt?: string;
   receivedAt?: string;
   receivedBy?: string;
+  returnedAt?: string;
+  returnedBy?: string;
+  deletedAt?: string;
+  deletedBy?: string;
   createdBy: string;
   createdAt: string;
 }
@@ -284,6 +290,8 @@ export interface PurchaseOrderItem {
   quantity: number;
   receivedQuantity?: number;
   receivedAmount?: number;
+  returnedQuantity?: number;
+  returnedAmount?: number;
   costPrice: number;
   initialCostPrice?: number;
   expiryDate?: string;
@@ -344,6 +352,15 @@ export interface Bill {
   customerAddress?: string;
   customerVatNumber?: string;
   customerWhatsapp?: string;
+  customerHistory?: Array<{
+    customerId?: string;
+    name: string;
+    phone?: string;
+    email?: string;
+    vatNumber?: string;
+    assignedAt: string;
+    source: "sale" | "refund_reassignment";
+  }>;
   subtotal: number;
   itemDiscountAmount?: number;
   discountType: DiscountType;

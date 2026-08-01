@@ -1,11 +1,44 @@
 import type {
   Bill,
   BillItem,
+  Customer,
   Expense,
   PaymentMethod,
   Refund,
   RefundItem
 } from "@/types/pos";
+
+export function buildRefundCustomerHistory(bill: Bill, customer: Customer, assignedAt: string) {
+  const history = [...(bill.customerHistory ?? [])];
+  const currentName = bill.customerName?.trim();
+  const changedCustomer = bill.customerId !== customer.id || currentName !== customer.name.trim();
+
+  if (!changedCustomer) return history;
+
+  if (currentName && !history.some((entry) => entry.customerId === bill.customerId && entry.name === currentName)) {
+    history.push({
+      assignedAt: bill.createdAt,
+      customerId: bill.customerId,
+      email: bill.customerEmail,
+      name: currentName,
+      phone: bill.customerPhone,
+      source: "sale",
+      vatNumber: bill.customerVatNumber
+    });
+  }
+
+  history.push({
+    assignedAt,
+    customerId: customer.id,
+    email: customer.email,
+    name: customer.name,
+    phone: customer.phone,
+    source: "refund_reassignment",
+    vatNumber: customer.vatNumber
+  });
+
+  return history;
+}
 
 export function formatRefundReceiptNumber(refundId: string) {
   const compactId = refundId.replace(/[^a-z0-9]/gi, "").toUpperCase();

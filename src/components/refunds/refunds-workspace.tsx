@@ -488,6 +488,11 @@ export function RefundsWorkspace() {
 
     return {
       ...entry,
+      refundedAmount: Math.abs(
+        refundState.relatedRefundItems
+          .filter((refundItem) => refundItem.billItemId === entry.item.id)
+          .reduce((sum, refundItem) => sum + refundItem.refundAmount, 0)
+      ),
       selectedQuantity
     };
   });
@@ -1134,8 +1139,23 @@ export function RefundsWorkspace() {
                 </div>
 
                 <div className="mt-5 space-y-3">
-                  {refundableItems.map((entry) => (
-                    <div key={entry.item.id} className="rounded-[28px] border border-line bg-white p-4">
+                  {refundableItems.map((entry) => {
+                    const billLineTotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
+                    const revenueScale = selectedBill && billLineTotal > 0 ? selectedBill.total / billLineTotal : 1;
+                    const selectedAmount = Math.round(
+                      (entry.item.lineTotal / Math.max(entry.item.quantity, 1)) * revenueScale * entry.selectedQuantity * 100
+                    ) / 100;
+                    const hasRefund = entry.refundedQuantity > 0;
+                    const isSelected = entry.selectedQuantity > 0;
+
+                    return (
+                      <div
+                        key={entry.item.id}
+                        className={cn(
+                          "rounded-[28px] border p-4 transition",
+                          isSelected || hasRefund ? "border-rose-200 bg-rose-50/70" : "border-line bg-white"
+                        )}
+                      >
                       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_140px] md:items-center">
                         <div>
                           <p className="font-semibold text-slate-950">{localizedName(entry.item.productName, locale)}</p>
@@ -1149,6 +1169,16 @@ export function RefundsWorkspace() {
                           <p className="mt-2 text-sm font-medium text-slate-700">
                             {formatCurrency(entry.item.unitPrice, currency, locale)}
                           </p>
+                          {hasRefund ? (
+                            <p className="mt-2 text-sm font-semibold text-rose-700">
+                              Refunded {entry.refundedQuantity} · -{formatCurrency(entry.refundedAmount, currency, locale)}
+                            </p>
+                          ) : null}
+                          {isSelected ? (
+                            <p className="mt-2 text-sm font-semibold text-rose-700">
+                              Refund now {entry.selectedQuantity} · -{formatCurrency(selectedAmount, currency, locale)}
+                            </p>
+                          ) : null}
                         </div>
                         <div>
                           <label className="mb-2 block text-sm font-medium text-ink">{t("refund.quantityLabel")}</label>
@@ -1182,8 +1212,9 @@ export function RefundsWorkspace() {
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                      </div>
+                    );
+                  })}
                 </div>
               </Card>
 
