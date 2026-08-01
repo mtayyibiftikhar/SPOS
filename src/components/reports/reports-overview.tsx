@@ -514,10 +514,10 @@ export function ReportsOverview() {
 
     periodRefunds.forEach((refund) => {
       const bill = billById.get(refund.originalBillId);
-      const key = bill?.customerId ?? bill?.customerPhone ?? "walk-in";
+      const key = refund.customerId ?? refund.customerPhone ?? bill?.customerId ?? bill?.customerPhone ?? "walk-in";
       const entry = rows.get(key) ?? {
-        name: bill?.customerName || "Walk-in Customer",
-        phone: bill?.customerPhone,
+        name: refund.customerName || bill?.customerName || "Customer",
+        phone: refund.customerPhone || bill?.customerPhone,
         billCount: 0,
         gross: 0,
         refunds: 0,

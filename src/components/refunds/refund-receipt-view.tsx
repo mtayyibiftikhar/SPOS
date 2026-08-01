@@ -53,6 +53,14 @@ export function RefundReceiptView({ refundId }: { refundId: string }) {
   const digitalReceiptUrl = bill?.publicToken ? buildPublicReceiptUrl(bill.publicToken) : undefined;
   const refundReceiptUrl = digitalReceiptUrl ? `${digitalReceiptUrl}?refund=${encodeURIComponent(refundId)}` : undefined;
   const receiptQrUrl = buildQrCodeImageUrl(refundReceiptUrl, 172);
+  const refundCustomer = {
+    name: refund?.customerName || bill?.customerName || "Customer",
+    phone: refund?.customerPhone || bill?.customerPhone,
+    email: refund?.customerEmail || bill?.customerEmail,
+    whatsapp: refund?.customerWhatsapp || bill?.customerWhatsapp,
+    vatNumber: refund?.customerVatNumber || bill?.customerVatNumber,
+    address: refund?.customerAddress || bill?.customerAddress
+  };
 
   useEffect(() => setReceiptHandoff(loadFreshRefundReceiptHandoff(refundId)), [refundId]);
   useEffect(() => {
@@ -110,7 +118,7 @@ export function RefundReceiptView({ refundId }: { refundId: string }) {
       { label: "Returned", value: formatDateTime(refund.returnDate, locale) },
       { label: "Processed by", value: cashier?.name ?? t("common.notAvailable") }
     ],
-    customer: { name: bill.customerName || t("billing.walkInCustomer"), phone: bill.customerPhone, email: bill.customerEmail, whatsapp: bill.customerWhatsapp, vatNumber: bill.customerVatNumber, address: bill.customerAddress },
+    customer: refundCustomer,
     itemsLabel: "Refunded items",
     items: items.map((item) => ({ name: getReceiptItemNameText(item.productName, settings?.receipt), quantity: String(item.quantity), unitPrice: money(Math.abs(item.unitPrice)), total: money(Math.abs(item.refundAmount)) })),
     totals: [
@@ -151,7 +159,7 @@ export function RefundReceiptView({ refundId }: { refundId: string }) {
           { label: "Returned", value: formatDateTime(refund.returnDate, locale) },
           { label: "Processed by", value: cashier?.name ?? t("common.notAvailable") }
         ]}
-        customer={{ name: bill.customerName || t("billing.walkInCustomer"), phone: bill.customerPhone, email: bill.customerEmail, whatsapp: bill.customerWhatsapp, vatNumber: bill.customerVatNumber, address: bill.customerAddress }}
+        customer={refundCustomer}
         itemLabels={{ items: "Refunded items", unitPrice: "Unit price", total: "Refund" }}
         items={items.map((item) => ({ id: item.id, name: getReceiptItemNameLines(item.productName, settings?.receipt).map((line) => <span className={line.isSecondary ? "mt-0.5 block text-sm font-medium text-slate-600" : "block"} dir={line.direction} key={`${item.id}-${line.text}`}>{line.text}</span>), quantity: item.quantity, unitPrice: money(Math.abs(item.unitPrice)), total: money(Math.abs(item.refundAmount)) }))}
         totals={[

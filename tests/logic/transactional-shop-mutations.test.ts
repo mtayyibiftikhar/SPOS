@@ -169,6 +169,8 @@ test("sequential authoritative sales receive unique numbers and reduce stock onc
   assert.equal(first.result.ok, true);
   assert.equal(second.result.ok, true);
   assert.deepEqual(second.state.bills?.map((entry) => entry.number), ["REC-000002", "REC-000001"]);
+  assert.equal(first.state.bills?.[0].shiftId, "shift_cashier");
+  assert.equal(second.state.bills?.[0].shiftId, "shift_cashier");
   assert.equal(second.state.products?.[0].stockQuantity, 2);
   assert.equal(second.state.inventoryAdjustments?.length, 2);
 });
@@ -333,6 +335,37 @@ test("consecutive partial refunds charge only the newly selected quantity", () =
   assert.equal(second.state.refunds?.[0].amount, -20);
   assert.equal(second.state.bills?.[0].status, "paid");
   assert.equal(second.state.refundItems?.reduce((sum, item) => sum + item.quantity, 0), 2);
+});
+
+test("walk-in refunds require and retain an identified customer", () => {
+  const walkInBill = bill({ customerId: undefined, customerName: "Walk-in Customer" });
+  const state = openState({ bills: [walkInBill], billItems: [billItem()] });
+  const payload = {
+    type: "create_refund" as const,
+    payload: {
+      billId: walkInBill.id,
+      payoutMethod: "cash" as const,
+      reason: "Customer return",
+      items: [{ billItemId: "bill_item_existing", quantity: 1 }]
+    }
+  };
+  const rejected = applyCriticalShopMutation(
+    state,
+    payload,
+    { role: "shop_admin", shopId: SHOP_ID, userId: ADMIN_ID }
+  );
+  const accepted = applyCriticalShopMutation(
+    state,
+    { ...payload, payload: { ...payload.payload, customerId: "customer_1" } },
+    { role: "shop_admin", shopId: SHOP_ID, userId: ADMIN_ID }
+  );
+
+  assert.equal(rejected.result.ok, false);
+  assert.match(rejected.result.message ?? "", /select or create a customer/i);
+  assert.equal(accepted.result.ok, true);
+  assert.equal(accepted.state.refunds?.[0].customerId, "customer_1");
+  assert.equal(accepted.state.refunds?.[0].customerName, "Aisha");
+  assert.equal(accepted.state.bills?.[0].customerId, undefined);
 });
 
 test("only one business day can be open for a shop", () => {

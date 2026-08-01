@@ -383,6 +383,13 @@ export interface Refund {
   originalSaleDate: string;
   businessDate?: string;
   shiftId?: string;
+  customerId?: string;
+  customerName?: string;
+  customerPhone?: string;
+  customerEmail?: string;
+  customerAddress?: string;
+  customerVatNumber?: string;
+  customerWhatsapp?: string;
   paymentMethod: PaymentMethod;
   createdBy: string;
   returnDate: string;
@@ -411,6 +418,7 @@ export interface RefundItemInput {
 
 export interface CreateRefundInput {
   billId: string;
+  customerId?: string;
   payoutMethod: PaymentMethod;
   reason: string;
   items: RefundItemInput[];

@@ -855,8 +855,12 @@ function createRefundMutation(
   const bill = bills.find((entry) => entry.id === payload.billId && entry.shopId === context.shopId);
   if (!bill) return { result: { ok: false, message: "The original bill could not be found." }, state };
   if (bill.status === "cancelled") return { result: { ok: false, message: "Cancelled bills cannot be refunded." }, state };
-  if (payload.payoutMethod === "account" && !bill.customerId) {
-    return { result: { ok: false, message: "Account adjustment refunds require a saved customer." }, state };
+  const refundCustomerId = payload.customerId ?? bill.customerId;
+  const refundCustomer = (state.customers ?? []).find(
+    (entry) => entry.id === refundCustomerId && entry.shopId === context.shopId
+  );
+  if (!refundCustomer) {
+    return { result: { ok: false, message: "Select or create a customer before issuing this refund." }, state };
   }
 
   const openDay = getActiveBusinessDay(state.businessDays ?? [], context.shopId);
@@ -946,6 +950,13 @@ function createRefundMutation(
     originalSaleDate: bill.businessDate ?? getBusinessDateInTimezone(shop?.timezone ?? "Asia/Riyadh", new Date(bill.createdAt)),
     businessDate: openDay.businessDate,
     shiftId: activeShift.id,
+    customerId: refundCustomer.id,
+    customerName: refundCustomer.name,
+    customerPhone: refundCustomer.phone,
+    customerEmail: refundCustomer.email,
+    customerAddress: refundCustomer.address,
+    customerVatNumber: refundCustomer.vatNumber,
+    customerWhatsapp: refundCustomer.whatsapp,
     paymentMethod: payload.payoutMethod,
     createdBy: context.userId,
     returnDate: createdAt,

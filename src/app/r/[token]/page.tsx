@@ -159,6 +159,14 @@ export default async function PublicReceiptPage({ params, searchParams }: Public
       { label: "Returned", value: formatDateTime(requestedRefund.returnDate, "en") },
       { label: "Processed by", value: users.find((entry) => entry.id === requestedRefund.createdBy)?.name ?? "Not available" }
     ];
+    customer = {
+      name: requestedRefund.customerName || bill.customerName || "Customer",
+      phone: requestedRefund.customerPhone || bill.customerPhone,
+      email: requestedRefund.customerEmail || bill.customerEmail,
+      whatsapp: requestedRefund.customerWhatsapp || bill.customerWhatsapp,
+      vatNumber: requestedRefund.customerVatNumber || bill.customerVatNumber,
+      address: requestedRefund.customerAddress || bill.customerAddress
+    };
     displayItems = selectedItems.map((item) => ({ id: item.id, name: getReceiptItemNameLines(item.productName, receiptSettings).map((line) => <span className={line.isSecondary ? "mt-0.5 block text-sm font-medium text-slate-600" : "block"} dir={line.direction} key={`${item.id}-${line.text}`}>{line.text}</span>), quantity: item.quantity, unitPrice: money(Math.abs(item.unitPrice)), total: money(Math.abs(item.refundAmount)) }));
     itemLabels = { items: "Refunded items", unitPrice: "Unit price", total: "Refund" };
     totals = [

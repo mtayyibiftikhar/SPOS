@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { getBusinessDateInTimezone } from "@/lib/cash-control";
+import { sanitizePhoneInput } from "@/lib/phone";
 import { billStatusLabelKeys, paymentMethodLabelKeys } from "@/lib/i18n";
 import { createStructuredReportPdfBlob, downloadBlob } from "@/lib/report-export";
 import { calculateBillRefundState, calculateRefundQuote } from "@/lib/refunds";
@@ -190,7 +191,7 @@ function buildRefundPrintHtml({
         <tr>
           <td>${escapeHtml(bill?.number ?? refund.originalBillId)}</td>
           <td>${escapeHtml(formatDateTime(refund.returnDate, locale))}</td>
-          <td>${escapeHtml(bill?.customerName || "Walk-in Customer")}</td>
+          <td>${escapeHtml(refund.customerName || bill?.customerName || "Customer")}</td>
           <td>${escapeHtml(itemText || "Items")}</td>
           <td>${escapeHtml(refund.reason)}</td>
           <td>${escapeHtml(formatCurrency(refund.amount, currency, locale))}</td>
@@ -260,7 +261,7 @@ function buildRefundPrintHtml({
 export function RefundsWorkspace() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { createRefund, currentShop, currentShopId, locale, session, state, t } = usePosApp();
+  const { createRefund, currentShop, currentShopId, locale, saveCustomer, session, state, t } = usePosApp();
   const initialBillId = searchParams.get("billId");
   const initialView = searchParams.get("view") === "history" ? "history" : "new";
   const [activeView, setActiveView] = useState<RefundView>(initialView);
@@ -273,6 +274,13 @@ export function RefundsWorkspace() {
   const [payoutMethod, setPayoutMethod] = useState<PaymentMethod>("cash");
   const [refundReason, setRefundReason] = useState("");
   const [refundQuantities, setRefundQuantities] = useState<Record<string, string>>({});
+  const [refundCustomerId, setRefundCustomerId] = useState("");
+  const [customerModalOpen, setCustomerModalOpen] = useState(false);
+  const [refundCustomerSearch, setRefundCustomerSearch] = useState("");
+  const [newCustomerName, setNewCustomerName] = useState("");
+  const [newCustomerPhone, setNewCustomerPhone] = useState("");
+  const [newCustomerEmail, setNewCustomerEmail] = useState("");
+  const [customerModalFeedback, setCustomerModalFeedback] = useState<string | null>(null);
   const [isRefunding, setIsRefunding] = useState(false);
   const [billPage, setBillPage] = useState(1);
   const [historyPage, setHistoryPage] = useState(1);
@@ -429,6 +437,24 @@ export function RefundsWorkspace() {
   }, [billSearch, customerSearch, productSearch, selectedRange.dateFrom, selectedRange.dateTo]);
 
   const selectedBill = bills.find((bill) => bill.id === selectedBillId) ?? null;
+  const shopCustomers = state.customers.filter((customer) => customer.shopId === currentShopId);
+  const selectedRefundCustomer = shopCustomers.find((customer) => customer.id === refundCustomerId) ?? null;
+  const matchingRefundCustomers = shopCustomers.filter((customer) => {
+    const query = normalizeQuery(refundCustomerSearch);
+    if (!query) return true;
+    return [customer.name, customer.phone, customer.email, customer.whatsapp]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(query);
+  });
+
+  useEffect(() => {
+    if (!selectedBill) return;
+    const customerExists = selectedBill.customerId && shopCustomers.some((customer) => customer.id === selectedBill.customerId);
+    setRefundCustomerId(customerExists ? selectedBill.customerId! : "");
+    if (!customerExists) setCustomerModalOpen(true);
+  }, [selectedBill?.id]);
 
   useEffect(() => {
     if (selectedBill) {
@@ -484,7 +510,7 @@ export function RefundsWorkspace() {
   }, 0);
   const payoutError = (() => {
     if (!selectedBill || !refundQuote || refundQuote.refundValue <= 0) return null;
-    if (payoutMethod === "account" && !selectedBill.customerId) {
+    if (payoutMethod === "account" && !refundCustomerId) {
       return "Account adjustment refunds require a saved customer.";
     }
     if ((payoutMethod === "cash" || payoutMethod === "card") && refundQuote.refundValue > refundQuote.refundablePaidAmount) {
@@ -522,7 +548,7 @@ export function RefundsWorkspace() {
       }
 
       if (query) {
-        const queryFields = [refund.id, refund.reason, bill?.number, bill?.customerName, bill?.customerPhone]
+        const queryFields = [refund.id, refund.reason, bill?.number, refund.customerName, refund.customerPhone, bill?.customerName]
           .filter(Boolean)
           .join(" ")
           .toLowerCase();
@@ -533,7 +559,7 @@ export function RefundsWorkspace() {
       }
 
       if (customerQuery) {
-        const customerFields = [bill?.customerName, bill?.customerPhone, bill?.customerEmail, bill?.customerWhatsapp]
+        const customerFields = [refund.customerName, refund.customerPhone, refund.customerEmail, refund.customerWhatsapp]
           .filter(Boolean)
           .join(" ")
           .toLowerCase();
@@ -629,6 +655,12 @@ export function RefundsWorkspace() {
       return;
     }
 
+    if (!selectedRefundCustomer) {
+      setCustomerModalOpen(true);
+      setCustomerModalFeedback("Select an existing customer or create one before issuing the refund.");
+      return;
+    }
+
     if (payoutError) {
       setFeedback({ tone: "error", message: translateRefundError(t, payoutError) });
       return;
@@ -639,6 +671,7 @@ export function RefundsWorkspace() {
 
     const result = await createRefund({
       billId: selectedBill.id,
+      customerId: selectedRefundCustomer.id,
       payoutMethod,
       reason: refundReason.trim(),
       items: selectedRefundItems.map((entry) => ({
@@ -669,6 +702,29 @@ export function RefundsWorkspace() {
     setRefundQuantities({});
     setRefundReason("");
     setPayoutMethod(bill.paymentMethod);
+    const customerExists = bill.customerId && shopCustomers.some((customer) => customer.id === bill.customerId);
+    setRefundCustomerId(customerExists ? bill.customerId! : "");
+    setCustomerModalOpen(!customerExists);
+    setRefundCustomerSearch("");
+    setCustomerModalFeedback(null);
+  };
+
+  const handleCreateRefundCustomer = () => {
+    const result = saveCustomer({
+      name: newCustomerName,
+      phone: newCustomerPhone,
+      email: newCustomerEmail
+    });
+    if (!result.ok || !result.customerId) {
+      setCustomerModalFeedback(result.message ?? "Unable to create customer.");
+      return;
+    }
+    setRefundCustomerId(result.customerId);
+    setNewCustomerName("");
+    setNewCustomerPhone("");
+    setNewCustomerEmail("");
+    setCustomerModalFeedback(null);
+    setCustomerModalOpen(false);
   };
 
   const toggleRefundSelection = (refundId: string) => {
@@ -708,7 +764,7 @@ export function RefundsWorkspace() {
     const rows = refundsToExport.slice(0, 80).map(({ bill, items: historyItems, refund }) => ({
       label: `${bill?.number ?? refund.originalBillId} | ${formatDateTime(refund.returnDate, "en")}`,
       value: formatCurrency(refund.amount, currency, "en"),
-      detail: `${bill?.customerName || "Walk-in Customer"} | ${refund.reason} | ${historyItems
+      detail: `${refund.customerName || bill?.customerName || "Customer"} | ${refund.reason} | ${historyItems
         .map((item) => `${localizedName(item.productName, "en")} x ${item.quantity}`)
         .join(", ")}`
     }));
@@ -1115,6 +1171,14 @@ export function RefundsWorkspace() {
 
               <Card className="h-fit p-6">
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-olive">{t("refund.summaryTitle")}</p>
+                <div className={`mt-4 rounded-[24px] border p-4 ${selectedRefundCustomer ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Refund customer</p>
+                  <p className="mt-2 font-semibold text-slate-950">{selectedRefundCustomer?.name ?? "Customer required"}</p>
+                  {selectedRefundCustomer?.phone ? <p className="mt-1 text-sm text-slate-600">{selectedRefundCustomer.phone}</p> : null}
+                  <Button className="mt-3" onClick={() => setCustomerModalOpen(true)} size="sm" variant="secondary">
+                    {selectedRefundCustomer ? "Change customer" : "Select or create customer"}
+                  </Button>
+                </div>
                 <div className="mt-4 grid gap-3">
                   {[
                     { label: t("refund.estimatedAmount"), value: formatCurrency(-estimatedRefundAmount, currency, locale) },
@@ -1324,7 +1388,7 @@ export function RefundsWorkspace() {
                           </Link>
                         </td>
                         <td className="px-4 py-4 text-slate-600">{formatDateTime(refund.returnDate, locale)}</td>
-                        <td className="px-4 py-4 text-slate-600">{bill?.customerName || t("billing.walkInCustomer")}</td>
+                        <td className="px-4 py-4 text-slate-600">{refund.customerName || bill?.customerName || "Customer"}</td>
                         <td className="px-4 py-4 text-slate-600">{refund.reason}</td>
                         <td className="px-4 py-4 font-semibold text-slate-950">{formatCurrency(refund.amount, currency, locale)}</td>
                         <td className="px-4 py-4 text-slate-600">
@@ -1360,6 +1424,59 @@ export function RefundsWorkspace() {
           </div>
         </Card>
       )}
+
+      {customerModalOpen ? (
+        <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div aria-modal="true" className="my-6 w-full max-w-3xl rounded-[30px] bg-white p-6 shadow-[0_30px_100px_rgba(15,23,42,0.35)]" role="dialog">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-700">Customer identification</p>
+                <h2 className="mt-2 text-2xl font-semibold text-slate-950">Assign this refund to a customer</h2>
+                <p className="mt-2 text-sm text-slate-600">Walk-in refunds are not permitted. Choose a saved customer or create one now.</p>
+              </div>
+              {selectedRefundCustomer ? <Button onClick={() => setCustomerModalOpen(false)} variant="secondary">Close</Button> : null}
+            </div>
+
+            <div className="mt-6 grid gap-6 lg:grid-cols-2">
+              <div>
+                <label className="relative block">
+                  <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <Input className="pl-11" placeholder="Search saved customers" value={refundCustomerSearch} onChange={(event) => setRefundCustomerSearch(event.target.value)} />
+                </label>
+                <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+                  {matchingRefundCustomers.map((customer) => (
+                    <button
+                      className="w-full rounded-2xl border border-slate-200 p-4 text-left transition hover:border-emerald-300 hover:bg-emerald-50"
+                      key={customer.id}
+                      onClick={() => {
+                        setRefundCustomerId(customer.id);
+                        setCustomerModalFeedback(null);
+                        setCustomerModalOpen(false);
+                      }}
+                      type="button"
+                    >
+                      <span className="block font-semibold text-slate-950">{customer.name}</span>
+                      <span className="mt-1 block text-sm text-slate-500">{customer.phone || customer.email || "Saved customer"}</span>
+                    </button>
+                  ))}
+                  {matchingRefundCustomers.length === 0 ? <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No matching customers.</p> : null}
+                </div>
+              </div>
+
+              <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+                <h3 className="font-semibold text-slate-950">Create customer</h3>
+                <div className="mt-4 space-y-3">
+                  <Input placeholder="Customer name" value={newCustomerName} onChange={(event) => setNewCustomerName(event.target.value)} />
+                  <Input inputMode="tel" placeholder="Phone" value={newCustomerPhone} onChange={(event) => setNewCustomerPhone(sanitizePhoneInput(event.target.value))} />
+                  <Input type="email" placeholder="Email (optional)" value={newCustomerEmail} onChange={(event) => setNewCustomerEmail(event.target.value)} />
+                  <Button className="w-full" disabled={!newCustomerName.trim()} onClick={handleCreateRefundCustomer}>Create and assign customer</Button>
+                </div>
+              </div>
+            </div>
+            {customerModalFeedback ? <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">{customerModalFeedback}</p> : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

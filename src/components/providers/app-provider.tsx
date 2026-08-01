@@ -9130,10 +9130,15 @@ export function AppProvider({
             return current;
           }
 
-          if (payload.payoutMethod === "account" && !bill.customerId) {
+          const refundCustomerId = payload.customerId ?? bill.customerId;
+          const refundCustomer = current.customers.find(
+            (entry) => entry.id === refundCustomerId && entry.shopId === currentShopId
+          );
+
+          if (!refundCustomer) {
             result = {
               ok: false,
-              message: "Account adjustment refunds require a saved customer."
+              message: "Select or create a customer before issuing this refund."
             };
 
             return current;
@@ -9298,6 +9303,13 @@ export function AppProvider({
             originalSaleDate,
             businessDate,
             shiftId: activeShift?.id,
+            customerId: refundCustomer.id,
+            customerName: refundCustomer.name,
+            customerPhone: refundCustomer.phone,
+            customerEmail: refundCustomer.email,
+            customerAddress: refundCustomer.address,
+            customerVatNumber: refundCustomer.vatNumber,
+            customerWhatsapp: refundCustomer.whatsapp,
             paymentMethod: payload.payoutMethod,
             createdBy: session.id,
             returnDate,

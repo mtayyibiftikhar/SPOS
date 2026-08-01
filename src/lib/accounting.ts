@@ -318,7 +318,7 @@ export function buildRefundLedgerEntries({
       referenceType: "refund",
       referenceId: refund.id,
       billId: bill.id,
-      customerId: bill.customerId,
+      customerId: refund.customerId ?? bill.customerId,
       refundId: refund.id,
       createdBy,
       createdAt: refund.returnDate
@@ -335,7 +335,7 @@ export function buildRefundLedgerEntries({
       referenceType: "refund",
       referenceId: refund.id,
       billId: bill.id,
-      customerId: bill.customerId,
+      customerId: refund.customerId ?? bill.customerId,
       refundId: refund.id,
       createdBy,
       createdAt: refund.returnDate
@@ -352,7 +352,7 @@ export function buildRefundLedgerEntries({
       referenceType: "refund",
       referenceId: refund.id,
       billId: bill.id,
-      customerId: bill.customerId,
+      customerId: refund.customerId ?? bill.customerId,
       refundId: refund.id,
       createdBy,
       createdAt: refund.returnDate
@@ -369,7 +369,7 @@ export function buildRefundLedgerEntries({
       referenceType: "refund",
       referenceId: refund.id,
       billId: bill.id,
-      customerId: bill.customerId,
+      customerId: refund.customerId ?? bill.customerId,
       refundId: refund.id,
       createdBy,
       createdAt: refund.returnDate
@@ -386,7 +386,7 @@ export function buildRefundLedgerEntries({
       referenceType: "refund",
       referenceId: refund.id,
       billId: bill.id,
-      customerId: bill.customerId,
+      customerId: refund.customerId ?? bill.customerId,
       refundId: refund.id,
       createdBy,
       createdAt: refund.returnDate
