@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { applyCriticalShopMutation } from "../../src/lib/server/shop-snapshot-mutations";
 import { getCustomerAccountMetrics } from "../../src/lib/customer-accounts";
+import { getBusinessDateInTimezone } from "../../src/lib/cash-control";
 import type { Bill, BillItem, Customer, DemoAppState, Product } from "../../src/types/pos";
 
 const SHOP_ID = "shop_transactional";
@@ -9,6 +10,7 @@ const USER_ID = "user_cashier";
 const ADMIN_ID = "user_admin";
 const BUSINESS_DATE = "2026-07-14";
 const NOW = "2026-07-14T08:00:00.000Z";
+const TODAY = getBusinessDateInTimezone("Asia/Riyadh", new Date());
 
 function product(overrides: Partial<Product> = {}): Product {
   return {
@@ -337,7 +339,7 @@ test("only one business day can be open for a shop", () => {
   const initial = openState({ businessDays: [], shifts: [] });
   const started = applyCriticalShopMutation(
     initial,
-    { type: "start_business_day", payload: { businessDate: BUSINESS_DATE, openingNote: "Morning" } },
+    { type: "start_business_day", payload: { businessDate: TODAY, openingNote: "Morning" } },
     { role: "shop_admin", shopId: SHOP_ID, userId: ADMIN_ID }
   );
   const duplicate = applyCriticalShopMutation(
@@ -348,13 +350,27 @@ test("only one business day can be open for a shop", () => {
 
   assert.equal(started.result.ok, true);
   assert.equal(started.state.businessDays?.length, 1);
-  assert.equal(started.state.businessDays?.[0].businessDate, BUSINESS_DATE);
+  assert.equal(started.state.businessDays?.[0].businessDate, TODAY);
   assert.equal(duplicate.result.ok, false);
   assert.match(duplicate.result.message ?? "", /close the current business day/i);
 });
 
+test("business day start rejects a date that is not today in the shop time zone", () => {
+  const initial = openState({ businessDays: [], shifts: [] });
+  const rejected = applyCriticalShopMutation(
+    initial,
+    { type: "start_business_day", payload: { businessDate: "2020-01-01" } },
+    { role: "shop_admin", shopId: SHOP_ID, userId: ADMIN_ID }
+  );
+
+  assert.equal(rejected.result.ok, false);
+  assert.match(rejected.result.message ?? "", /only start for today/i);
+  assert.equal(rejected.state.businessDays?.length, 0);
+});
+
 test("open shift capacity follows the active product-key device limit", () => {
   const state = openState({
+    businessDays: [{ id: "day_1", shopId: SHOP_ID, businessDate: TODAY, startedBy: ADMIN_ID, startedAt: NOW }],
     shifts: [],
     productKeys: [
       {
@@ -406,6 +422,7 @@ test("open shift capacity follows the active product-key device limit", () => {
 
 test("authoritative device capacity overrides a stale cached product-key limit", () => {
   const state = openState({
+    businessDays: [{ id: "day_1", shopId: SHOP_ID, businessDate: TODAY, startedBy: ADMIN_ID, startedAt: NOW }],
     shifts: [],
     productKeys: [
       {
@@ -481,7 +498,7 @@ test("ending a shift records authoritative expected cash and variance", () => {
   });
   const closed = applyCriticalShopMutation(
     state,
-    { type: "end_shift", payload: { countedCash: 90, note: "Counted" } },
+    { type: "end_shift", payload: { countedCash: 90, countedCard: 0, varianceReason: "Drawer was short.", note: "Counted" } },
     { role: "cashier", shopId: SHOP_ID, userId: USER_ID }
   );
 
@@ -489,6 +506,38 @@ test("ending a shift records authoritative expected cash and variance", () => {
   assert.equal(closed.state.shifts?.[0].expectedCash, 92);
   assert.equal(closed.state.shifts?.[0].difference, -2);
   assert.ok(closed.state.shifts?.[0].endedAt);
+});
+
+test("card-terminal variance requires a reason before a shift can close", () => {
+  const state = openState({
+    bills: [bill({ paymentMethod: "card", shiftId: "shift_cashier" })],
+    shifts: [{
+      id: "shift_cashier",
+      shopId: SHOP_ID,
+      businessDayId: "day_1",
+      businessDate: BUSINESS_DATE,
+      cashierId: USER_ID,
+      openingCash: 0,
+      startedAt: NOW
+    }]
+  });
+  const rejected = applyCriticalShopMutation(
+    state,
+    { type: "end_shift", payload: { countedCash: 0, countedCard: 75 } },
+    { role: "cashier", shopId: SHOP_ID, userId: USER_ID }
+  );
+  const accepted = applyCriticalShopMutation(
+    state,
+    { type: "end_shift", payload: { countedCash: 0, countedCard: 75, varianceReason: "Terminal settlement is short." } },
+    { role: "cashier", shopId: SHOP_ID, userId: USER_ID }
+  );
+
+  assert.equal(rejected.result.ok, false);
+  assert.match(rejected.result.message ?? "", /explain.*variance/i);
+  assert.equal(accepted.result.ok, true);
+  assert.equal(accepted.state.shifts?.[0].expectedCard, 80);
+  assert.equal(accepted.state.shifts?.[0].cardDifference, -5);
+  assert.equal(accepted.state.shifts?.[0].varianceReason, "Terminal settlement is short.");
 });
 
 test("admin closes every open shift with an explicit drawer count", () => {
@@ -516,7 +565,7 @@ test("admin closes every open shift with an explicit drawer count", () => {
   });
   const closed = applyCriticalShopMutation(
     state,
-    { type: "end_all_shifts", payload: { countedCashByShift: { shift_one: 10, shift_two: 19 } } },
+    { type: "end_all_shifts", payload: { countedCashByShift: { shift_one: 10, shift_two: 19 }, countedCardByShift: { shift_one: 0, shift_two: 0 }, varianceReasonByShift: { shift_two: "Drawer was short." } } },
     { role: "shop_admin", shopId: SHOP_ID, userId: ADMIN_ID }
   );
 
@@ -530,7 +579,7 @@ test("business day cannot close with an open shift and records totals after shif
   const state = openState({ bills: [bill()] });
   const blocked = applyCriticalShopMutation(
     state,
-    { type: "close_business_day", payload: { countedCash: 80 } },
+    { type: "close_business_day", payload: { countedCash: 80, countedCard: 0 } },
     { role: "shop_admin", shopId: SHOP_ID, userId: ADMIN_ID }
   );
   const allShiftsClosed = {
@@ -553,7 +602,7 @@ test("business day cannot close with an open shift and records totals after shif
   };
   const closed = applyCriticalShopMutation(
     allShiftsClosed,
-    { type: "close_business_day", payload: { countedCash: 80, note: "Balanced" } },
+    { type: "close_business_day", payload: { countedCash: 80, countedCard: 0, note: "Balanced" } },
     { role: "shop_admin", shopId: SHOP_ID, userId: ADMIN_ID }
   );
 

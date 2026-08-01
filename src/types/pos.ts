@@ -466,6 +466,10 @@ export interface Shift {
   countedCash?: number;
   expectedCash?: number;
   difference?: number;
+  countedCard?: number;
+  expectedCard?: number;
+  cardDifference?: number;
+  varianceReason?: string;
   note?: string;
   startedAt: string;
   forcedClosedBy?: string;
@@ -491,6 +495,10 @@ export interface DayClose {
   expectedCash: number;
   countedCash: number;
   cashDifference: number;
+  expectedCard?: number;
+  countedCard?: number;
+  cardDifference?: number;
+  varianceReason?: string;
   note?: string;
   closedAt: string;
 }
@@ -537,6 +545,8 @@ export interface POSSettings {
   email?: string;
   website?: string;
   currency: string;
+  country?: string;
+  timezone?: string;
   vatNumber?: string;
   receiptQrUrl?: string;
   autoDayRolloverEnabled?: boolean;

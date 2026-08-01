@@ -1502,6 +1502,7 @@ export function ReportsOverview() {
                 { label: "Net sales", value: formatCurrency(financialSummary?.netSales ?? 0, currency, locale) },
                 { label: "Net sales excluding VAT", value: formatCurrency(profitTaxView.netSalesExcludingTax, currency, locale) },
                 { label: "Profit adjustments", value: formatCurrency(-(financialSummary?.profitAdjustments ?? 0), currency, locale) },
+                { label: "Operating expenses", value: formatCurrency(-(financialSummary?.expenses ?? 0), currency, locale) },
                 { label: "Net profit before VAT payable", value: formatCurrency(profitTaxView.profitBeforeVatPayable, currency, locale) },
                 { label: "Net profit after VAT payable", value: formatCurrency(profitTaxView.profitAfterVatPayable, currency, locale) }
               ])}
@@ -1513,6 +1514,15 @@ export function ReportsOverview() {
                 { label: "Difference", value: formatCurrency(ledgerControlTotals.difference, currency, locale) },
                 { label: "Ledger rows", value: String(filteredLedgerEntries.length) }
               ])}
+            </ReportPanel>
+            <ReportPanel icon={<WalletCards className="h-5 w-5" />} title="Operating expenses by category">
+              {tableRows(Object.entries(periodExpenses.reduce<Record<string, number>>((totals, expense) => {
+                totals[expense.categoryName] = (totals[expense.categoryName] ?? 0) + expense.amount;
+                return totals;
+              }, {})).map(([label, amount]) => ({
+                label,
+                value: formatCurrency(-amount, currency, locale)
+              })))}
             </ReportPanel>
           </div>
         </div>
@@ -1541,7 +1551,7 @@ export function ReportsOverview() {
             {tableRows(shiftReportRows.map((row) => ({
               label: `${row.cashierName} | ${formatDateTime(row.shift.startedAt, locale)}`,
               value: formatCurrency(row.summary.expectedCash, currency, locale),
-              detail: `${row.shift.endedAt ? "Closed" : "Open"} | cash sales ${formatCurrency(row.summary.cashSales, currency, locale)} | account payments ${formatCurrency(row.summary.accountPaymentsReceived, currency, locale)} | difference ${formatCurrency(row.summary.difference ?? 0, currency, locale)}`
+              detail: `${row.shift.endedAt ? "Closed" : "Open"} | cash sales ${formatCurrency(row.summary.cashSales, currency, locale)} | cash variance ${formatCurrency(row.summary.difference ?? 0, currency, locale)} | card expected ${formatCurrency(row.summary.expectedCard, currency, locale)} | card variance ${formatCurrency(row.summary.cardDifference ?? 0, currency, locale)}`
             })))}
           </ReportPanel>
         </div>

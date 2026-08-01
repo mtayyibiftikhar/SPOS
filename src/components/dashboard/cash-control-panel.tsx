@@ -186,12 +186,19 @@ export function CashControlPanel() {
   const currency = currentShop?.currency ?? "SAR";
   const todayBusinessDate = getBusinessDateInTimezone(timeZone);
   const [businessDate, setBusinessDate] = useState(todayBusinessDate);
+  const [serverBusinessDate, setServerBusinessDate] = useState<string | null>(null);
   const [openingNote, setOpeningNote] = useState("");
   const [dayCountedCash, setDayCountedCash] = useState("");
+  const [dayCountedCard, setDayCountedCard] = useState("");
+  const [dayVarianceReason, setDayVarianceReason] = useState("");
   const [dayCloseNote, setDayCloseNote] = useState("");
   const [adminShiftCounts, setAdminShiftCounts] = useState<Record<string, string>>({});
+  const [adminShiftCardCounts, setAdminShiftCardCounts] = useState<Record<string, string>>({});
+  const [adminShiftVarianceReasons, setAdminShiftVarianceReasons] = useState<Record<string, string>>({});
   const [openingCash, setOpeningCash] = useState("");
   const [shiftCountedCash, setShiftCountedCash] = useState("");
+  const [shiftCountedCard, setShiftCountedCard] = useState("");
+  const [shiftVarianceReason, setShiftVarianceReason] = useState("");
   const [shiftNote, setShiftNote] = useState("");
   const [movementAmount, setMovementAmount] = useState("");
   const [movementReason, setMovementReason] = useState("");
@@ -214,16 +221,36 @@ export function CashControlPanel() {
   const [movementFeedback, setMovementFeedback] = useState<Feedback>(null);
   const [expenseFeedback, setExpenseFeedback] = useState<Feedback>(null);
   const [autoCloseCountedCash, setAutoCloseCountedCash] = useState("");
+  const [autoCloseCountedCard, setAutoCloseCountedCard] = useState("");
+  const [autoCloseVarianceReason, setAutoCloseVarianceReason] = useState("");
   const [autoCloseNote, setAutoCloseNote] = useState("");
 
   useEffect(() => {
+    let cancelled = false;
+    setServerBusinessDate(null);
+    void fetch(`/api/system-time?timezone=${encodeURIComponent(timeZone)}`, { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as { businessDate?: string };
+        if (!response.ok || !payload.businessDate) throw new Error("Online time verification failed.");
+        if (!cancelled) {
+          setServerBusinessDate(payload.businessDate);
+          if (!currentBusinessDay) setBusinessDate(payload.businessDate);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setServerBusinessDate(null);
+      });
+    return () => { cancelled = true; };
+  }, [currentBusinessDay, timeZone]);
+
+  useEffect(() => {
     if (!currentBusinessDay) {
-      setBusinessDate(todayBusinessDate);
+      if (serverBusinessDate) setBusinessDate(serverBusinessDate);
       return;
     }
 
     setBusinessDate(currentBusinessDay.businessDate);
-  }, [currentBusinessDay, todayBusinessDate]);
+  }, [currentBusinessDay, serverBusinessDate]);
 
   const activeDaySummary = useMemo(() => {
     if (!currentBusinessDay || !currentShop) {
@@ -280,6 +307,8 @@ export function CashControlPanel() {
   useEffect(() => {
     if (!pendingAutoDayClose) return;
     setAutoCloseCountedCash(String(pendingAutoDayClose.countedCash));
+    setAutoCloseCountedCard(String(pendingAutoDayClose.countedCard ?? pendingAutoDayClose.expectedCard ?? 0));
+    setAutoCloseVarianceReason("");
     setAutoCloseNote("");
   }, [pendingAutoDayClose]);
 
@@ -331,7 +360,20 @@ export function CashControlPanel() {
       shift.id,
       current[shift.id] ?? String(openShiftSummaries.get(shift.id)?.expectedCash ?? 0)
     ])));
+    setAdminShiftCardCounts((current) => Object.fromEntries(openShiftsForDay.map((shift) => [
+      shift.id,
+      current[shift.id] ?? String(openShiftSummaries.get(shift.id)?.expectedCard ?? 0)
+    ])));
   }, [openShiftSummaries, openShiftsForDay]);
+
+  const dayHasVariance = Boolean(activeDaySummary && (
+    Math.abs(Number(dayCountedCash || 0) - activeDaySummary.expectedCash) >= 0.01 ||
+    Math.abs(Number(dayCountedCard || 0) - activeDaySummary.expectedCard) >= 0.01
+  ));
+  const shiftHasVariance = Boolean(activeShiftSummary && (
+    Math.abs(Number(shiftCountedCash || 0) - activeShiftSummary.expectedCash) >= 0.01 ||
+    Math.abs(Number(shiftCountedCard || 0) - activeShiftSummary.expectedCard) >= 0.01
+  ));
 
   const deviceShiftLimit = useMemo(() => {
     if (!currentShop) {
@@ -481,6 +523,10 @@ export function CashControlPanel() {
   );
 
   const handleStartDay = async () => {
+    if (!serverBusinessDate || businessDate !== serverBusinessDate) {
+      setDayFeedback({ kind: "error", message: "Online date verification is required before starting the business day." });
+      return;
+    }
     const result = await startBusinessDay({
       businessDate,
       openingNote
@@ -499,9 +545,14 @@ export function CashControlPanel() {
   };
 
   const handleCloseDay = async () => {
+    if (!dayCountedCash.trim() || !dayCountedCard.trim()) {
+      setDayFeedback({ kind: "error", message: "Enter counted cash and the card terminal total before closing the day." });
+      return;
+    }
     const countedCash = Number(dayCountedCash || 0);
+    const countedCard = Number(dayCountedCard || 0);
 
-    if (Number.isNaN(countedCash) || countedCash < 0) {
+    if (!Number.isFinite(countedCash) || countedCash < 0 || !Number.isFinite(countedCard) || countedCard < 0) {
       setDayFeedback({
         kind: "error",
         message: t("cashControl.invalidCashValue")
@@ -511,6 +562,8 @@ export function CashControlPanel() {
 
     const result = await closeBusinessDay({
       countedCash,
+      countedCard,
+      varianceReason: dayVarianceReason,
       note: dayCloseNote
     });
 
@@ -521,6 +574,8 @@ export function CashControlPanel() {
 
     if (result.ok) {
       setDayCountedCash("");
+      setDayCountedCard("");
+      setDayVarianceReason("");
       setDayCloseNote("");
     }
   };
@@ -530,12 +585,22 @@ export function CashControlPanel() {
       shift.id,
       Number(adminShiftCounts[shift.id])
     ]));
+    const countedCardByShift = Object.fromEntries(openShiftsForDay.map((shift) => [
+      shift.id,
+      Number(adminShiftCardCounts[shift.id])
+    ]));
     if (Object.values(countedCashByShift).some((value) => !Number.isFinite(value) || value < 0)) {
       setDayFeedback({ kind: "error", message: "Enter the counted drawer cash for every open shift." });
       return;
     }
+    if (Object.values(countedCardByShift).some((value) => !Number.isFinite(value) || value < 0)) {
+      setDayFeedback({ kind: "error", message: "Enter the card terminal total for every open shift." });
+      return;
+    }
     const result = await closeAllOpenShifts({
       countedCashByShift,
+      countedCardByShift,
+      varianceReasonByShift: adminShiftVarianceReasons,
       note: dayCloseNote || "Closed by admin from day-end reconciliation."
     });
     setDayFeedback({
@@ -565,11 +630,22 @@ export function CashControlPanel() {
   const handleConfirmAutoDayClose = () => {
     if (!pendingAutoDayClose) return;
     const countedCash = Number(autoCloseCountedCash);
-    const result = confirmAutoDayClose({ dayCloseId: pendingAutoDayClose.id, countedCash, note: autoCloseNote });
+    const countedCard = Number(autoCloseCountedCard);
+    const result = confirmAutoDayClose({
+      dayCloseId: pendingAutoDayClose.id,
+      countedCash,
+      countedCard,
+      varianceReason: autoCloseVarianceReason,
+      note: autoCloseNote
+    });
     setDayFeedback({ kind: result.ok ? "success" : "error", message: result.message ?? "Unable to confirm the previous day." });
   };
 
   const handleStartShift = async () => {
+    if (!serverBusinessDate || currentBusinessDay?.businessDate !== serverBusinessDate) {
+      setShiftFeedback({ kind: "error", message: "Online date verification failed or the open business day is not today. Close or roll over the day first." });
+      return;
+    }
     const cash = Number(openingCash || 0);
 
     if (Number.isNaN(cash) || cash < 0) {
@@ -630,9 +706,14 @@ export function CashControlPanel() {
   };
 
   const handleEndShift = async () => {
+    if (!shiftCountedCash.trim() || !shiftCountedCard.trim()) {
+      setShiftFeedback({ kind: "error", message: "Enter counted cash and the card terminal total before closing the shift." });
+      return;
+    }
     const cash = Number(shiftCountedCash || 0);
+    const card = Number(shiftCountedCard || 0);
 
-    if (Number.isNaN(cash) || cash < 0) {
+    if (!Number.isFinite(cash) || cash < 0 || !Number.isFinite(card) || card < 0) {
       setShiftFeedback({
         kind: "error",
         message: t("cashControl.invalidCashValue")
@@ -642,6 +723,8 @@ export function CashControlPanel() {
 
     const result = await endShift({
       countedCash: cash,
+      countedCard: card,
+      varianceReason: shiftVarianceReason,
       note: shiftNote
     });
 
@@ -652,6 +735,8 @@ export function CashControlPanel() {
 
     if (result.ok) {
       setShiftCountedCash("");
+      setShiftCountedCard("");
+      setShiftVarianceReason("");
       setShiftNote("");
     }
   };
@@ -996,7 +1081,7 @@ export function CashControlPanel() {
                     const summary = openShiftSummaries.get(shift.id);
                     const cashier = state.users.find((user) => user.id === shift.cashierId);
                     return (
-                      <div key={shift.id} className="grid gap-3 rounded-2xl border border-amber-200 bg-white p-4 md:grid-cols-[minmax(0,1fr)_auto_auto_minmax(150px,0.6fr)] md:items-end">
+                      <div key={shift.id} className="grid gap-3 rounded-2xl border border-amber-200 bg-white p-4 md:grid-cols-2 xl:grid-cols-5 xl:items-end">
                         <div>
                           <p className="font-semibold text-slate-950">{cashier?.name ?? "Unknown cashier"}</p>
                           <p className="mt-1 text-xs text-slate-500">{shift.deviceBrowserInfo ?? "Default drawer"}</p>
@@ -1018,6 +1103,28 @@ export function CashControlPanel() {
                             onChange={(event) => setAdminShiftCounts((current) => ({ ...current, [shift.id]: event.target.value }))}
                           />
                         </label>
+                        <label className="text-sm font-medium text-slate-700">
+                          Card terminal total
+                          <Input
+                            className="mt-2"
+                            inputMode="decimal"
+                            value={adminShiftCardCounts[shift.id] ?? ""}
+                            onChange={(event) => setAdminShiftCardCounts((current) => ({ ...current, [shift.id]: event.target.value }))}
+                          />
+                        </label>
+                        {summary && (
+                          Math.abs(Number(adminShiftCounts[shift.id] ?? 0) - summary.expectedCash) >= 0.01 ||
+                          Math.abs(Number(adminShiftCardCounts[shift.id] ?? 0) - summary.expectedCard) >= 0.01
+                        ) ? (
+                          <label className="text-sm font-medium text-amber-900 md:col-span-2 xl:col-span-5">
+                            Variance reason (required)
+                            <Textarea
+                              className="mt-2 bg-white"
+                              value={adminShiftVarianceReasons[shift.id] ?? ""}
+                              onChange={(event) => setAdminShiftVarianceReasons((current) => ({ ...current, [shift.id]: event.target.value }))}
+                            />
+                          </label>
+                        ) : null}
                       </div>
                     );
                   })}
@@ -1034,6 +1141,16 @@ export function CashControlPanel() {
                   <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.countedCash")}</label>
                   <Input inputMode="decimal" value={dayCountedCash} onChange={(event) => setDayCountedCash(event.target.value)} />
                 </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-ink">Card terminal total</label>
+                  <Input inputMode="decimal" value={dayCountedCard} onChange={(event) => setDayCountedCard(event.target.value)} />
+                </div>
+                {dayHasVariance ? (
+                  <div className="sm:col-span-2">
+                    <label className="mb-2 block text-sm font-medium text-amber-800">Cash/card variance reason (required)</label>
+                    <Textarea value={dayVarianceReason} onChange={(event) => setDayVarianceReason(event.target.value)} />
+                  </div>
+                ) : null}
                 <div className="sm:col-span-2">
                   <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.closeNote")}</label>
                   <Textarea value={dayCloseNote} onChange={(event) => setDayCloseNote(event.target.value)} />
@@ -1061,13 +1178,14 @@ export function CashControlPanel() {
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.businessDate")}</label>
-              <Input type="date" value={businessDate} onChange={(event) => setBusinessDate(event.target.value)} />
+              <Input type="date" value={businessDate} readOnly />
+              <p className="mt-2 text-xs text-slate-500">{serverBusinessDate ? `Online verified for ${timeZone}. Past and future business days are blocked.` : "Checking online date… Day start is disabled until verified."}</p>
             </div>
             <div className="sm:col-span-2">
               <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.openingNote")}</label>
               <Textarea value={openingNote} onChange={(event) => setOpeningNote(event.target.value)} />
             </div>
-            <Button className="sm:col-span-2" onClick={handleStartDay}>
+            <Button className="sm:col-span-2" disabled={!serverBusinessDate} onClick={handleStartDay}>
               {t("cashControl.startDay")}
             </Button>
             <FeedbackText feedback={dayFeedback} />
@@ -1171,6 +1289,20 @@ export function CashControlPanel() {
                   onChange={(event) => setShiftCountedCash(event.target.value)}
                 />
               </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-ink">Card terminal total</label>
+                <Input
+                  inputMode="decimal"
+                  value={shiftCountedCard}
+                  onChange={(event) => setShiftCountedCard(event.target.value)}
+                />
+              </div>
+              {shiftHasVariance ? (
+                <div className="sm:col-span-2">
+                  <label className="mb-2 block text-sm font-medium text-amber-800">Cash/card variance reason (required)</label>
+                  <Textarea value={shiftVarianceReason} onChange={(event) => setShiftVarianceReason(event.target.value)} />
+                </div>
+              ) : null}
               <div className="sm:col-span-2">
                 <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.shiftNote")}</label>
                 <Textarea value={shiftNote} onChange={(event) => setShiftNote(event.target.value)} />
@@ -1305,6 +1437,9 @@ export function CashControlPanel() {
                     label={t("cashControl.countedCash")}
                     value={formatCurrency(latestClosedShiftSummary.countedCash ?? 0, currency, locale)}
                   />
+                  <SummaryRow label="Expected card" value={formatCurrency(latestClosedShiftSummary.expectedCard, currency, locale)} />
+                  <SummaryRow label="Card terminal total" value={formatCurrency(latestClosedShiftSummary.countedCard ?? 0, currency, locale)} />
+                  <SummaryRow label="Card variance" value={formatCurrency(latestClosedShiftSummary.cardDifference ?? 0, currency, locale)} />
                 </div>
               </div>
             ) : (
@@ -1580,6 +1715,19 @@ export function CashControlPanel() {
                 Actual counted cash
                 <Input className="mt-2" inputMode="decimal" value={autoCloseCountedCash} onChange={(event) => setAutoCloseCountedCash(event.target.value)} />
               </label>
+              <label className="text-sm font-medium text-slate-700">
+                Card terminal total
+                <Input className="mt-2" inputMode="decimal" value={autoCloseCountedCard} onChange={(event) => setAutoCloseCountedCard(event.target.value)} />
+              </label>
+              {(
+                Math.abs(Number(autoCloseCountedCash || 0) - pendingAutoDaySummary.expectedCash) >= 0.01 ||
+                Math.abs(Number(autoCloseCountedCard || 0) - pendingAutoDaySummary.expectedCard) >= 0.01
+              ) ? (
+                <label className="text-sm font-medium text-amber-800 sm:col-span-2">
+                  Cash/card variance reason (required)
+                  <Textarea className="mt-2" value={autoCloseVarianceReason} onChange={(event) => setAutoCloseVarianceReason(event.target.value)} />
+                </label>
+              ) : null}
               <label className="text-sm font-medium text-slate-700 sm:col-span-2">
                 Confirmation note
                 <Textarea className="mt-2" value={autoCloseNote} onChange={(event) => setAutoCloseNote(event.target.value)} />

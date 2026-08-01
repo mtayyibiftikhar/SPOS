@@ -6,12 +6,14 @@ import { Card } from "@/components/ui/card";
 import { SettingsFormShell } from "@/components/settings/settings-form-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { ResilientImage } from "@/components/ui/resilient-image";
 import { deleteImageAssetFromCloud, persistShopLogoUrl, resizeImageFileToDataUrl, uploadImageAssetToCloud } from "@/lib/image-upload";
 import { sanitizePhoneInput } from "@/lib/phone";
+import { BUSINESS_TIMEZONES } from "@/lib/business-timezones";
 
 export default function ShopSettingsPage() {
-  const { currentSettings, currentShopId, session, state, t, updateSettings } = usePosApp();
+  const { currentBusinessDay, currentSettings, currentShop, currentShopId, session, state, t, updateSettings } = usePosApp();
   const [shopName, setShopName] = useState(currentSettings?.pos.shopName ?? "");
   const [address, setAddress] = useState(currentSettings?.pos.address ?? "");
   const [phone, setPhone] = useState(currentSettings?.pos.phone ?? "");
@@ -20,11 +22,16 @@ export default function ShopSettingsPage() {
   const [currency, setCurrency] = useState(currentSettings?.pos.currency ?? "SAR");
   const [logoUrl, setLogoUrl] = useState(currentSettings?.pos.logoUrl ?? "");
   const [vatNumber, setVatNumber] = useState(currentSettings?.pos.vatNumber ?? "");
+  const [timezone, setTimezone] = useState(currentSettings?.pos.timezone ?? currentShop?.timezone ?? "Asia/Riyadh");
   const [logoFeedback, setLogoFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
 
   useEffect(() => {
     setLogoUrl(currentSettings?.pos.logoUrl ?? "");
   }, [currentSettings?.pos.logoUrl]);
+
+  useEffect(() => {
+    setTimezone(currentSettings?.pos.timezone ?? currentShop?.timezone ?? "Asia/Riyadh");
+  }, [currentSettings?.pos.timezone, currentShop?.timezone]);
 
   if (!currentSettings) {
     return null;
@@ -151,7 +158,9 @@ export default function ShopSettingsPage() {
               website: website.trim() || undefined,
               currency,
               logoUrl: logoUrl.trim(),
-              vatNumber: vatNumber.trim() || undefined
+              vatNumber: vatNumber.trim() || undefined,
+              country: BUSINESS_TIMEZONES.find((entry) => entry.timezone === timezone)?.country ?? currentShop?.country,
+              timezone
             });
             setLogoFeedback({ tone: "success", message: "Shop settings saved." });
           } catch (error) {
@@ -189,6 +198,15 @@ export default function ShopSettingsPage() {
         <div>
           <label className="mb-2 block text-sm font-medium text-ink">{t("settings.vatNumber")}</label>
           <Input value={vatNumber} onChange={(event) => setVatNumber(event.target.value)} />
+        </div>
+        <div>
+          <label className="mb-2 block text-sm font-medium text-ink">Business region and time zone</label>
+          <Select disabled={Boolean(currentBusinessDay)} value={timezone} onChange={(event) => setTimezone(event.target.value)}>
+            {BUSINESS_TIMEZONES.map((entry) => (
+              <option key={entry.timezone} value={entry.timezone}>{entry.country} ({entry.timezone})</option>
+            ))}
+          </Select>
+          <p className="mt-2 text-xs leading-5 text-slate-500">{currentBusinessDay ? "Close the current business day before changing its region." : "Day and shift dates are verified against online server time in this zone."}</p>
         </div>
         <div className="md:col-span-2 grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="space-y-5">

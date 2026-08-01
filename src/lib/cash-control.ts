@@ -21,7 +21,9 @@ export type ShiftCashSummary = {
   expectedCash: number;
   expectedCard: number;
   countedCash: number | null;
+  countedCard: number | null;
   difference: number | null;
+  cardDifference: number | null;
 };
 
 export type BusinessDaySummary = {
@@ -170,8 +172,11 @@ export function calculateShiftSummary({
   const expectedCash = roundMoney(shift.openingCash + cashSales + accountCashPayments + cashIn - cashOut - cashRefunds);
   const expectedCard = roundMoney(cardSales + accountCardPayments - cardRefunds);
   const countedCash = shift.countedCash ?? null;
+  const countedCard = shift.countedCard ?? null;
   const difference =
     countedCash === null || countedCash === undefined ? null : roundMoney(countedCash - expectedCash);
+  const cardDifference =
+    countedCard === null || countedCard === undefined ? null : roundMoney(countedCard - expectedCard);
 
   return {
     billCount: shiftBills.length,
@@ -190,7 +195,9 @@ export function calculateShiftSummary({
     expectedCash,
     expectedCard,
     countedCash,
-    difference
+    countedCard,
+    difference,
+    cardDifference
   };
 }
 

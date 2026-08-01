@@ -143,6 +143,8 @@ export function TimeClockWorkspace() {
   const [clockOutPassword, setClockOutPassword] = useState("");
   const [closeShiftOnClockOut, setCloseShiftOnClockOut] = useState(false);
   const [countedCash, setCountedCash] = useState("");
+  const [countedCard, setCountedCard] = useState("");
+  const [shiftVarianceReason, setShiftVarianceReason] = useState("");
   const [shiftClosingNote, setShiftClosingNote] = useState("");
   const [serverToday, setServerToday] = useState(today);
   const [remoteRecords, setRemoteRecords] = useState<AttendanceRecord[]>([]);
@@ -296,11 +298,16 @@ export function TimeClockWorkspace() {
     }
 
     if (closeShiftOnClockOut && currentShift) {
-      if (!countedCash.trim() || Number.isNaN(Number(countedCash)) || Number(countedCash) < 0) {
-        setFeedback({ tone: "error", message: "Enter counted register cash before closing the shift." });
+      if (!countedCash.trim() || !countedCard.trim() || Number.isNaN(Number(countedCash)) || Number(countedCash) < 0 || Number.isNaN(Number(countedCard)) || Number(countedCard) < 0) {
+        setFeedback({ tone: "error", message: "Enter counted register cash and the card terminal total before closing the shift." });
         return;
       }
-      const shiftResult = await endShift({ countedCash: Number(countedCash), note: shiftClosingNote });
+      const shiftResult = await endShift({
+        countedCash: Number(countedCash),
+        countedCard: Number(countedCard),
+        varianceReason: shiftVarianceReason,
+        note: shiftClosingNote
+      });
       if (!shiftResult.ok) {
         setFeedback({ tone: "error", message: shiftResult.message ?? "The shift could not be closed." });
         return;
@@ -535,7 +542,15 @@ export function TimeClockWorkspace() {
                   {closeShiftOnClockOut && shiftSummary ? (
                     <div className="grid gap-3 rounded-[22px] border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
                       <p className="text-sm text-slate-600">Expected cash <strong className="block text-slate-950">{formatCurrency(shiftSummary.expectedCash, currency, locale)}</strong></p>
+                      <p className="text-sm text-slate-600">Expected card <strong className="block text-slate-950">{formatCurrency(shiftSummary.expectedCard, currency, locale)}</strong></p>
                       <Input min="0" onChange={(event) => setCountedCash(event.target.value)} placeholder="Counted cash" step="0.01" type="number" value={countedCash} />
+                      <Input min="0" onChange={(event) => setCountedCard(event.target.value)} placeholder="Card terminal total" step="0.01" type="number" value={countedCard} />
+                      {(
+                        Math.abs(Number(countedCash || 0) - shiftSummary.expectedCash) >= 0.01 ||
+                        Math.abs(Number(countedCard || 0) - shiftSummary.expectedCard) >= 0.01
+                      ) ? (
+                        <Input className="sm:col-span-2" onChange={(event) => setShiftVarianceReason(event.target.value)} placeholder="Cash/card variance reason (required)" value={shiftVarianceReason} />
+                      ) : null}
                       <Input className="sm:col-span-2" onChange={(event) => setShiftClosingNote(event.target.value)} placeholder="Shift closing note (optional)" value={shiftClosingNote} />
                     </div>
                   ) : null}

@@ -325,7 +325,7 @@ type CriticalShopMutation =
   | { type: "create_bill"; payload: CheckoutBillInput }
   | { type: "create_refund"; payload: CreateRefundInput }
   | { type: "start_business_day"; payload: { businessDate?: string; openingNote?: string } }
-  | { type: "close_business_day"; payload: { countedCash: number; note?: string } }
+  | { type: "close_business_day"; payload: { countedCash: number; countedCard: number; note?: string; varianceReason?: string } }
   | {
       type: "start_shift";
       payload: {
@@ -334,8 +334,8 @@ type CriticalShopMutation =
         openingCash: number;
       };
     }
-  | { type: "end_shift"; payload: { countedCash: number; note?: string } }
-  | { type: "end_all_shifts"; payload: { countedCashByShift: Record<string, number>; note?: string } }
+  | { type: "end_shift"; payload: { countedCash: number; countedCard: number; note?: string; varianceReason?: string } }
+  | { type: "end_all_shifts"; payload: { countedCashByShift: Record<string, number>; countedCardByShift: Record<string, number>; note?: string; varianceReasonByShift?: Record<string, string> } }
   | {
       type: "settle_customer_account";
       payload: {
@@ -837,8 +837,8 @@ interface AppContextValue {
   }) => { ok: boolean; message?: string };
   createRefund: (payload: CreateRefundInput) => Promise<{ ok: boolean; refundId?: string; message?: string }>;
   startBusinessDay: (payload: { businessDate?: string; openingNote?: string }) => Promise<{ ok: boolean; message?: string }>;
-  closeBusinessDay: (payload: { countedCash: number; note?: string }) => Promise<{ ok: boolean; message?: string }>;
-  confirmAutoDayClose: (payload: { dayCloseId: string; countedCash: number; note?: string }) => { ok: boolean; message?: string };
+  closeBusinessDay: (payload: { countedCash: number; countedCard: number; note?: string; varianceReason?: string }) => Promise<{ ok: boolean; message?: string }>;
+  confirmAutoDayClose: (payload: { dayCloseId: string; countedCash: number; countedCard: number; note?: string; varianceReason?: string }) => { ok: boolean; message?: string };
   autoCloseAndStartNextBusinessDay: (payload?: { note?: string; startShift?: boolean }) => Promise<{ ok: boolean; message?: string }>;
   clockIn: (payload?: {
     location?: AttendanceLocation;
@@ -882,8 +882,8 @@ interface AppContextValue {
     openingCash: number;
     shiftId: string;
   }) => { ok: boolean; message?: string };
-  endShift: (payload: { countedCash: number; note?: string }) => Promise<{ ok: boolean; message?: string }>;
-  closeAllOpenShifts: (payload: { countedCashByShift: Record<string, number>; note?: string }) => Promise<{ ok: boolean; message?: string }>;
+  endShift: (payload: { countedCash: number; countedCard: number; note?: string; varianceReason?: string }) => Promise<{ ok: boolean; message?: string }>;
+  closeAllOpenShifts: (payload: { countedCashByShift: Record<string, number>; countedCardByShift: Record<string, number>; note?: string; varianceReasonByShift?: Record<string, string> }) => Promise<{ ok: boolean; message?: string }>;
   addCashMovement: (payload: { type: "cash_in" | "cash_out"; amount: number; reason: string }) => { ok: boolean; message?: string };
   createExpense: (payload: {
     amount: number;
@@ -2693,11 +2693,16 @@ export function AppProvider({
       return;
     }
 
-    setState((current) => {
+    let cancelled = false;
+    void fetch(`/api/system-time?timezone=${encodeURIComponent(currentShop.timezone ?? "Asia/Riyadh")}`, { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as { businessDate?: string };
+        if (cancelled || !response.ok || !payload.businessDate) return;
+        const businessDateNow = payload.businessDate;
+        setState((current) => {
       const openDay = getActiveBusinessDay(current.businessDays, currentShopId);
       const shop = current.shops.find((entry) => entry.id === currentShopId);
       const timeZone = shop?.timezone ?? currentShop.timezone ?? "Asia/Riyadh";
-      const businessDateNow = getBusinessDateInTimezone(timeZone);
       const shouldCloseOldDay = Boolean(openDay && openDay.businessDate < businessDateNow);
       const shouldOpenToday = !openDay || shouldCloseOldDay;
 
@@ -2740,6 +2745,9 @@ export function AppProvider({
             countedCash: summary.expectedCash,
             expectedCash: summary.expectedCash,
             difference: 0,
+            countedCard: summary.expectedCard,
+            expectedCard: summary.expectedCard,
+            cardDifference: 0,
             note: "Auto closed by rollover setting.",
             endedAt: automatedAt
           };
@@ -2786,6 +2794,9 @@ export function AppProvider({
               expectedCash: summary.expectedCash,
               countedCash: summary.expectedCash,
               cashDifference: 0,
+              expectedCard: summary.expectedCard,
+              countedCard: summary.expectedCard,
+              cardDifference: 0,
               note: "Auto rollover pending admin confirmation.",
               closedAt: automatedAt
             },
@@ -2842,7 +2853,13 @@ export function AppProvider({
           : shifts,
         dayCloses
       };
-    });
+        });
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     autoRolloverTick,
     cloudLoadAttemptedShopIds,
@@ -5313,7 +5330,9 @@ export function AppProvider({
                     phone: posValues.phone ?? shop.phone,
                     email: posValues.email ?? shop.email,
                     website: posValues.website ?? shop.website,
-                    currency: posValues.currency ?? shop.currency
+                    currency: posValues.currency ?? shop.currency,
+                    country: posValues.country ?? shop.country,
+                    timezone: posValues.timezone ?? shop.timezone
                   }
                 : shop
             );
@@ -7020,8 +7039,13 @@ export function AppProvider({
           }
 
           const shop = current.shops.find((entry) => entry.id === currentShopId);
-          const resolvedBusinessDate =
-            businessDate?.trim() || getBusinessDateInTimezone(shop?.timezone ?? "Asia/Riyadh", new Date());
+          const today = getBusinessDateInTimezone(shop?.timezone ?? "Asia/Riyadh", new Date());
+          const resolvedBusinessDate = businessDate?.trim() || today;
+
+          if (resolvedBusinessDate !== today) {
+            result = { ok: false, message: `Business days can only start for today (${today}) in the shop time zone.` };
+            return current;
+          }
 
           result = { ok: true };
 
@@ -7043,7 +7067,7 @@ export function AppProvider({
 
         return result;
       },
-      closeBusinessDay: async ({ countedCash, note }) => {
+      closeBusinessDay: async ({ countedCash, countedCard, note, varianceReason }) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
         }
@@ -7055,7 +7079,7 @@ export function AppProvider({
         if (!shouldUseSharedStateEndpoint()) {
           return commitCriticalShopMutationToCloud({
             type: "close_business_day",
-            payload: { countedCash, note }
+            payload: { countedCash, countedCard, note, varianceReason }
           });
         }
 
@@ -7090,6 +7114,18 @@ export function AppProvider({
             shifts: current.shifts,
             refunds: current.refunds
           });
+          const normalizedCard = Math.round(countedCard * 100) / 100;
+          const cashDifference = Math.round((countedCash - summary.expectedCash) * 100) / 100;
+          const cardDifference = Math.round((normalizedCard - summary.expectedCard) * 100) / 100;
+          const normalizedVarianceReason = varianceReason?.trim();
+          if (!Number.isFinite(normalizedCard) || normalizedCard < 0) {
+            result = { ok: false, message: "Enter a valid counted card settlement amount." };
+            return current;
+          }
+          if ((Math.abs(cashDifference) >= 0.01 || Math.abs(cardDifference) >= 0.01) && !normalizedVarianceReason) {
+            result = { ok: false, message: "Explain the cash or card variance before closing the day." };
+            return current;
+          }
           const closedAt = new Date().toISOString();
 
           result = { ok: true };
@@ -7121,7 +7157,11 @@ export function AppProvider({
                 netSales: summary.netSales,
                 expectedCash: summary.expectedCash,
                 countedCash,
-                cashDifference: Math.round((countedCash - summary.expectedCash) * 100) / 100,
+                cashDifference,
+                expectedCard: summary.expectedCard,
+                countedCard: normalizedCard,
+                cardDifference,
+                varianceReason: normalizedVarianceReason,
                 note: note?.trim() || undefined,
                 closedAt
               },
@@ -7152,18 +7192,29 @@ export function AppProvider({
 
         return result;
       },
-      confirmAutoDayClose: ({ dayCloseId, countedCash, note }) => {
+      confirmAutoDayClose: ({ dayCloseId, countedCash, countedCard, note, varianceReason }) => {
         if (!currentShopId || !session || !hasShopPermission(session, currentSettings?.pos, "dashboard")) {
           return { ok: false, message: "Only an authorized admin can confirm day-end totals." };
         }
         const normalizedCash = Math.round(countedCash * 100) / 100;
+        const normalizedCard = Math.round(countedCard * 100) / 100;
         if (!Number.isFinite(normalizedCash) || normalizedCash < 0) {
           return { ok: false, message: "Enter a valid counted cash amount." };
+        }
+        if (!Number.isFinite(normalizedCard) || normalizedCard < 0) {
+          return { ok: false, message: "Enter a valid card terminal total." };
         }
         let result: { ok: boolean; message?: string } = { ok: false, message: "Day close not found." };
         setState((current) => {
           const dayClose = current.dayCloses.find((entry) => entry.id === dayCloseId && entry.shopId === currentShopId);
           if (!dayClose) return current;
+          const cashDifference = Math.round((normalizedCash - dayClose.expectedCash) * 100) / 100;
+          const cardDifference = Math.round((normalizedCard - (dayClose.expectedCard ?? 0)) * 100) / 100;
+          const normalizedVarianceReason = varianceReason?.trim();
+          if ((Math.abs(cashDifference) >= 0.01 || Math.abs(cardDifference) >= 0.01) && !normalizedVarianceReason) {
+            result = { ok: false, message: "Explain the cash or card variance before confirming the previous day." };
+            return current;
+          }
           result = { ok: true, message: "Previous day totals confirmed." };
           return {
             ...current,
@@ -7178,7 +7229,10 @@ export function AppProvider({
             dayCloses: current.dayCloses.map((entry) => entry.id === dayCloseId ? {
               ...entry,
               countedCash: normalizedCash,
-              cashDifference: Math.round((normalizedCash - entry.expectedCash) * 100) / 100,
+              cashDifference,
+              countedCard: normalizedCard,
+              cardDifference,
+              varianceReason: normalizedVarianceReason,
               note: note?.trim() || "Auto rollover reviewed and confirmed by admin."
             } : entry),
             auditLogs: [{
@@ -7207,6 +7261,20 @@ export function AppProvider({
 
         if (!attendanceBusinessDate) {
           return { ok: false, message: "Start the business day before using auto rollover." };
+        }
+
+        let verifiedBusinessDate: string;
+        try {
+          const response = await fetch(`/api/system-time?timezone=${encodeURIComponent(currentShop?.timezone ?? "Asia/Riyadh")}`, { cache: "no-store" });
+          const timePayload = (await response.json()) as { businessDate?: string };
+          if (!response.ok || !timePayload.businessDate) throw new Error("Online time verification failed.");
+          verifiedBusinessDate = timePayload.businessDate;
+        } catch {
+          return { ok: false, message: "Online date verification is required before rolling over the business day." };
+        }
+
+        if (attendanceBusinessDate >= verifiedBusinessDate) {
+          return { ok: false, message: "The current business day cannot roll forward until the next date begins in the shop time zone." };
         }
 
         if (!shouldUseSharedStateEndpoint()) {
@@ -7274,6 +7342,9 @@ export function AppProvider({
               countedCash: summary.expectedCash,
               expectedCash: summary.expectedCash,
               difference: 0,
+              countedCard: summary.expectedCard,
+              expectedCard: summary.expectedCard,
+              cardDifference: 0,
               note: payload?.note?.trim() || "Auto closed by shop admin.",
               endedAt: closedAt
             };
@@ -7289,9 +7360,7 @@ export function AppProvider({
             shifts,
             refunds: current.refunds
           });
-          const nextDate = new Date(`${openDay.businessDate}T00:00:00`);
-          nextDate.setDate(nextDate.getDate() + 1);
-          const nextBusinessDate = nextDate.toISOString().slice(0, 10);
+          const nextBusinessDate = verifiedBusinessDate;
           const nextDayId = createId("day");
           const nextShiftId = createId("shift");
           const shouldStartShift = payload?.startShift ?? true;
@@ -7378,6 +7447,9 @@ export function AppProvider({
                 expectedCash: summary.expectedCash,
                 countedCash: summary.expectedCash,
                 cashDifference: 0,
+                expectedCard: summary.expectedCard,
+                countedCard: summary.expectedCard,
+                cardDifference: 0,
                 note: "Auto rollover pending admin confirmation.",
                 closedAt
               },
@@ -7921,6 +7993,13 @@ export function AppProvider({
             return current;
           }
 
+          const shop = current.shops.find((entry) => entry.id === currentShopId);
+          const today = getBusinessDateInTimezone(shop?.timezone ?? "Asia/Riyadh", new Date());
+          if (openDay.businessDate !== today) {
+            result = { ok: false, message: `A shift can only start in today's business day (${today}). Close or roll over the old day first.` };
+            return current;
+          }
+
           const openShift = getActiveShift(current.shifts, currentShopId, session.id);
 
           if (openShift) {
@@ -8001,6 +8080,13 @@ export function AppProvider({
             return current;
           }
 
+          const shop = current.shops.find((entry) => entry.id === currentShopId);
+          const today = getBusinessDateInTimezone(shop?.timezone ?? "Asia/Riyadh", new Date());
+          if (openDay.businessDate !== today) {
+            result = { ok: false, message: `A shift can only start in today's business day (${today}). Close or roll over the old day first.` };
+            return current;
+          }
+
           const admin = current.users.find(
             (user) =>
               user.shopId === currentShopId &&
@@ -8066,6 +8152,9 @@ export function AppProvider({
                       countedCash: summary.expectedCash,
                       expectedCash: summary.expectedCash,
                       difference: 0,
+                      countedCard: summary.expectedCard,
+                      expectedCard: summary.expectedCard,
+                      cardDifference: 0,
                       note: shift.note ?? "Force closed by admin to free an active device shift.",
                       forcedClosedBy: admin.id,
                       forceClosedAt: now,
@@ -8092,7 +8181,7 @@ export function AppProvider({
 
         return result;
       },
-      endShift: async ({ countedCash, note }) => {
+      endShift: async ({ countedCash, countedCard, note, varianceReason }) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
         }
@@ -8100,7 +8189,7 @@ export function AppProvider({
         if (!shouldUseSharedStateEndpoint()) {
           return commitCriticalShopMutationToCloud({
             type: "end_shift",
-            payload: { countedCash, note }
+            payload: { countedCash, countedCard, note, varianceReason }
           });
         }
 
@@ -8121,6 +8210,18 @@ export function AppProvider({
             customerAccountPayments: current.customerAccountPayments,
             refunds: current.refunds
           });
+          const normalizedCard = Math.round(countedCard * 100) / 100;
+          const difference = Math.round((countedCash - summary.expectedCash) * 100) / 100;
+          const cardDifference = Math.round((normalizedCard - summary.expectedCard) * 100) / 100;
+          const normalizedVarianceReason = varianceReason?.trim();
+          if (!Number.isFinite(normalizedCard) || normalizedCard < 0) {
+            result = { ok: false, message: "Enter a valid counted card settlement amount." };
+            return current;
+          }
+          if ((Math.abs(difference) >= 0.01 || Math.abs(cardDifference) >= 0.01) && !normalizedVarianceReason) {
+            result = { ok: false, message: "Explain the cash or card variance before closing the shift." };
+            return current;
+          }
           const endedAt = new Date().toISOString();
 
           result = { ok: true };
@@ -8133,7 +8234,11 @@ export function AppProvider({
                     ...shift,
                     countedCash,
                     expectedCash: summary.expectedCash,
-                    difference: Math.round((countedCash - summary.expectedCash) * 100) / 100,
+                    difference,
+                    countedCard: normalizedCard,
+                    expectedCard: summary.expectedCard,
+                    cardDifference,
+                    varianceReason: normalizedVarianceReason,
                     note: note?.trim() || undefined,
                     endedAt
                   }
@@ -8144,7 +8249,7 @@ export function AppProvider({
 
         return result;
       },
-      closeAllOpenShifts: async ({ countedCashByShift, note }) => {
+      closeAllOpenShifts: async ({ countedCashByShift, countedCardByShift, note, varianceReasonByShift }) => {
         if (!currentShopId || !session) {
           return { ok: false, message: "Session unavailable." };
         }
@@ -8156,7 +8261,7 @@ export function AppProvider({
         if (!shouldUseSharedStateEndpoint()) {
           return commitCriticalShopMutationToCloud({
             type: "end_all_shifts",
-            payload: { countedCashByShift, note }
+            payload: { countedCashByShift, countedCardByShift, note, varianceReasonByShift }
           });
         }
 
@@ -8175,6 +8280,10 @@ export function AppProvider({
               result = { ok: false, message: "Enter counted cash for every open shift." };
               return current;
             }
+            if (!Number.isFinite(countedCardByShift[shift.id]) || countedCardByShift[shift.id] < 0) {
+              result = { ok: false, message: "Enter counted card settlement for every open shift." };
+              return current;
+            }
           }
           const summaries = new Map(openShifts.map((shift) => [shift.id, calculateShiftSummary({
             shift,
@@ -8183,6 +8292,16 @@ export function AppProvider({
             customerAccountPayments: current.customerAccountPayments,
             refunds: current.refunds
           })]));
+          for (const shift of openShifts) {
+            const summary = summaries.get(shift.id);
+            if (!summary) continue;
+            const cashDifference = Math.round((countedCashByShift[shift.id] - summary.expectedCash) * 100) / 100;
+            const cardDifference = Math.round((countedCardByShift[shift.id] - summary.expectedCard) * 100) / 100;
+            if ((Math.abs(cashDifference) >= 0.01 || Math.abs(cardDifference) >= 0.01) && !varianceReasonByShift?.[shift.id]?.trim()) {
+              result = { ok: false, message: "Explain every cash or card variance before closing all shifts." };
+              return current;
+            }
+          }
           const endedAt = new Date().toISOString();
           result = { ok: true, message: `${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"} closed.` };
           return {
@@ -8191,11 +8310,19 @@ export function AppProvider({
               const summary = summaries.get(shift.id);
               if (!summary) return shift;
               const countedCash = Math.round(countedCashByShift[shift.id] * 100) / 100;
+              const countedCard = Math.round(countedCardByShift[shift.id] * 100) / 100;
+              const difference = Math.round((countedCash - summary.expectedCash) * 100) / 100;
+              const cardDifference = Math.round((countedCard - summary.expectedCard) * 100) / 100;
+              const normalizedVarianceReason = varianceReasonByShift?.[shift.id]?.trim();
               return {
                 ...shift,
                 countedCash,
                 expectedCash: summary.expectedCash,
-                difference: Math.round((countedCash - summary.expectedCash) * 100) / 100,
+                difference,
+                countedCard,
+                expectedCard: summary.expectedCard,
+                cardDifference,
+                varianceReason: normalizedVarianceReason,
                 note: note?.trim() || "Closed by admin during day-end reconciliation.",
                 forcedClosedBy: session.id,
                 forceClosedAt: endedAt,

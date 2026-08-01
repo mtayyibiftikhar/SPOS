@@ -46,7 +46,7 @@ export type CriticalShopMutation =
   | { type: "create_bill"; payload: CheckoutBillInput }
   | { type: "create_refund"; payload: CreateRefundInput }
   | { type: "start_business_day"; payload: { businessDate?: string; openingNote?: string } }
-  | { type: "close_business_day"; payload: { countedCash: number; note?: string } }
+  | { type: "close_business_day"; payload: { countedCash: number; countedCard: number; note?: string; varianceReason?: string } }
   | {
       type: "start_shift";
       payload: {
@@ -55,10 +55,10 @@ export type CriticalShopMutation =
         openingCash: number;
       };
     }
-  | { type: "end_shift"; payload: { countedCash: number; note?: string } }
+  | { type: "end_shift"; payload: { countedCash: number; countedCard: number; note?: string; varianceReason?: string } }
   | {
       type: "end_all_shifts";
-      payload: { countedCashByShift: Record<string, number>; note?: string };
+      payload: { countedCashByShift: Record<string, number>; countedCardByShift: Record<string, number>; note?: string; varianceReasonByShift?: Record<string, string> };
     }
   | {
       type: "settle_customer_account";
@@ -115,10 +115,14 @@ function startBusinessDayMutation(
 
   const shop = state.shops?.find((entry) => entry.id === context.shopId);
   const now = new Date();
-  const businessDate = payload.businessDate?.trim() || getBusinessDateInTimezone(shop?.timezone ?? "Asia/Riyadh", now);
+  const today = getBusinessDateInTimezone(shop?.timezone ?? "Asia/Riyadh", now);
+  const businessDate = payload.businessDate?.trim() || today;
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) {
     return { result: { ok: false, message: "Enter a valid business date." }, state };
+  }
+  if (businessDate !== today) {
+    return { result: { ok: false, message: `Business days can only start for today (${today}) in the shop time zone.` }, state };
   }
 
   return {
@@ -150,8 +154,12 @@ function closeBusinessDayMutation(
   }
 
   const countedCash = Math.round(payload.countedCash * 100) / 100;
+  const countedCard = Math.round(payload.countedCard * 100) / 100;
   if (!Number.isFinite(countedCash) || countedCash < 0) {
     return { result: { ok: false, message: "Enter a valid counted cash amount." }, state };
+  }
+  if (!Number.isFinite(countedCard) || countedCard < 0) {
+    return { result: { ok: false, message: "Enter a valid counted card settlement amount." }, state };
   }
 
   const openDay = getActiveBusinessDay(state.businessDays ?? [], context.shopId);
@@ -176,6 +184,12 @@ function closeBusinessDayMutation(
     shopId: context.shopId,
     timeZone: shop?.timezone ?? "Asia/Riyadh"
   });
+  const cashDifference = Math.round((countedCash - summary.expectedCash) * 100) / 100;
+  const cardDifference = Math.round((countedCard - summary.expectedCard) * 100) / 100;
+  const varianceReason = payload.varianceReason?.trim();
+  if ((Math.abs(cashDifference) >= 0.01 || Math.abs(cardDifference) >= 0.01) && !varianceReason) {
+    return { result: { ok: false, message: "Explain the cash or card variance before closing the day." }, state };
+  }
   const closedAt = new Date().toISOString();
 
   return {
@@ -222,7 +236,11 @@ function closeBusinessDayMutation(
           netSales: summary.netSales,
           expectedCash: summary.expectedCash,
           countedCash,
-          cashDifference: Math.round((countedCash - summary.expectedCash) * 100) / 100,
+          cashDifference,
+          expectedCard: summary.expectedCard,
+          countedCard,
+          cardDifference,
+          varianceReason,
           note: payload.note?.trim() || undefined,
           closedAt
         },
@@ -248,6 +266,11 @@ function startShiftMutation(
 
   const openDay = getActiveBusinessDay(state.businessDays ?? [], context.shopId);
   if (!openDay) return { result: { ok: false, message: "Start the business day before starting a shift." }, state };
+  const shop = state.shops?.find((entry) => entry.id === context.shopId);
+  const today = getBusinessDateInTimezone(shop?.timezone ?? "Asia/Riyadh", new Date());
+  if (openDay.businessDate !== today) {
+    return { result: { ok: false, message: `A shift can only start in today's business day (${today}). Close or roll over the old day first.` }, state };
+  }
   if (getActiveShift(state.shifts ?? [], context.shopId, context.userId)) {
     return { result: { ok: false, message: "Close the current shift before starting a new one." }, state };
   }
@@ -298,8 +321,12 @@ function endShiftMutation(
   context: MutationContext
 ) {
   const countedCash = Math.round(payload.countedCash * 100) / 100;
+  const countedCard = Math.round(payload.countedCard * 100) / 100;
   if (!Number.isFinite(countedCash) || countedCash < 0) {
     return { result: { ok: false, message: "Enter a valid counted cash amount." }, state };
+  }
+  if (!Number.isFinite(countedCard) || countedCard < 0) {
+    return { result: { ok: false, message: "Enter a valid counted card settlement amount." }, state };
   }
 
   const activeShift = getActiveShift(state.shifts ?? [], context.shopId, context.userId);
@@ -312,6 +339,12 @@ function endShiftMutation(
     shift: activeShift
   });
   const endedAt = new Date().toISOString();
+  const difference = Math.round((countedCash - summary.expectedCash) * 100) / 100;
+  const cardDifference = Math.round((countedCard - summary.expectedCard) * 100) / 100;
+  const varianceReason = payload.varianceReason?.trim();
+  if ((Math.abs(difference) >= 0.01 || Math.abs(cardDifference) >= 0.01) && !varianceReason) {
+    return { result: { ok: false, message: "Explain the cash or card variance before closing the shift." }, state };
+  }
 
   return {
     result: { ok: true },
@@ -323,7 +356,11 @@ function endShiftMutation(
               ...shift,
               countedCash,
               expectedCash: summary.expectedCash,
-              difference: Math.round((countedCash - summary.expectedCash) * 100) / 100,
+              difference,
+              countedCard,
+              expectedCard: summary.expectedCard,
+              cardDifference,
+              varianceReason,
               note: payload.note?.trim() || undefined,
               endedAt
             }
@@ -351,8 +388,12 @@ function endAllShiftsMutation(
 
   for (const shift of openShifts) {
     const countedCash = payload.countedCashByShift[shift.id];
+    const countedCard = payload.countedCardByShift[shift.id];
     if (!Number.isFinite(countedCash) || countedCash < 0) {
       return { result: { ok: false, message: "Enter counted cash for every open shift." }, state };
+    }
+    if (!Number.isFinite(countedCard) || countedCard < 0) {
+      return { result: { ok: false, message: "Enter counted card settlement for every open shift." }, state };
     }
   }
 
@@ -363,6 +404,15 @@ function endAllShiftsMutation(
     customerAccountPayments: state.customerAccountPayments ?? [],
     refunds: state.refunds ?? []
   })]));
+  for (const shift of openShifts) {
+    const summary = summaries.get(shift.id);
+    if (!summary) continue;
+    const cashDifference = Math.round((payload.countedCashByShift[shift.id] - summary.expectedCash) * 100) / 100;
+    const cardDifference = Math.round((payload.countedCardByShift[shift.id] - summary.expectedCard) * 100) / 100;
+    if ((Math.abs(cashDifference) >= 0.01 || Math.abs(cardDifference) >= 0.01) && !payload.varianceReasonByShift?.[shift.id]?.trim()) {
+      return { result: { ok: false, message: "Explain every cash or card variance before closing all shifts." }, state };
+    }
+  }
   const endedAt = new Date().toISOString();
 
   return {
@@ -373,11 +423,19 @@ function endAllShiftsMutation(
         const summary = summaries.get(shift.id);
         if (!summary) return shift;
         const countedCash = Math.round(payload.countedCashByShift[shift.id] * 100) / 100;
+        const countedCard = Math.round(payload.countedCardByShift[shift.id] * 100) / 100;
+        const difference = Math.round((countedCash - summary.expectedCash) * 100) / 100;
+        const cardDifference = Math.round((countedCard - summary.expectedCard) * 100) / 100;
+        const varianceReason = payload.varianceReasonByShift?.[shift.id]?.trim();
         return {
           ...shift,
           countedCash,
           expectedCash: summary.expectedCash,
-          difference: Math.round((countedCash - summary.expectedCash) * 100) / 100,
+          difference,
+          countedCard,
+          expectedCard: summary.expectedCard,
+          cardDifference,
+          varianceReason,
           note: payload.note?.trim() || "Closed by admin during day-end reconciliation.",
           forcedClosedBy: context.userId,
           forceClosedAt: endedAt,
