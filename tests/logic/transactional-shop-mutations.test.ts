@@ -365,7 +365,8 @@ test("walk-in refunds require and retain an identified customer", () => {
   assert.equal(accepted.result.ok, true);
   assert.equal(accepted.state.refunds?.[0].customerId, "customer_1");
   assert.equal(accepted.state.refunds?.[0].customerName, "Aisha");
-  assert.equal(accepted.state.bills?.[0].customerId, undefined);
+  assert.equal(accepted.state.bills?.[0].customerId, "customer_1");
+  assert.equal(accepted.state.bills?.[0].customerName, "Aisha");
 });
 
 test("only one business day can be open for a shop", () => {

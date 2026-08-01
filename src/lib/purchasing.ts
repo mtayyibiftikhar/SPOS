@@ -59,3 +59,11 @@ export function reconcileSupplierBalance(
 ) {
   return roundPurchaseMoney(currentBalance + revisedOrderTotal - previousOrderTotal - paymentNow);
 }
+
+export function getPurchasePaymentStatus(totalAmount: number, paidAmount: number) {
+  const total = roundPurchaseMoney(Math.max(0, totalAmount));
+  const paid = roundPurchaseMoney(Math.max(0, paidAmount));
+  if (paid <= 0) return "unpaid" as const;
+  if (total > 0 && paid >= total) return "paid" as const;
+  return "partial" as const;
+}

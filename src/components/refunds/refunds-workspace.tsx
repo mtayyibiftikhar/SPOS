@@ -13,7 +13,8 @@ import {
   Plus,
   Printer,
   ReceiptText,
-  Search
+  Search,
+  X
 } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
 import { hasShopPermission } from "@/lib/access-control";
@@ -280,6 +281,7 @@ export function RefundsWorkspace() {
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newCustomerPhone, setNewCustomerPhone] = useState("");
   const [newCustomerEmail, setNewCustomerEmail] = useState("");
+  const [newCustomerVatNumber, setNewCustomerVatNumber] = useState("");
   const [customerModalFeedback, setCustomerModalFeedback] = useState<string | null>(null);
   const [isRefunding, setIsRefunding] = useState(false);
   const [billPage, setBillPage] = useState(1);
@@ -441,13 +443,13 @@ export function RefundsWorkspace() {
   const selectedRefundCustomer = shopCustomers.find((customer) => customer.id === refundCustomerId) ?? null;
   const matchingRefundCustomers = shopCustomers.filter((customer) => {
     const query = normalizeQuery(refundCustomerSearch);
-    if (!query) return true;
+    if (query.length < 2) return false;
     return [customer.name, customer.phone, customer.email, customer.whatsapp]
       .filter(Boolean)
       .join(" ")
       .toLowerCase()
       .includes(query);
-  });
+  }).slice(0, 20);
 
   useEffect(() => {
     if (!selectedBill) return;
@@ -706,6 +708,10 @@ export function RefundsWorkspace() {
     setRefundCustomerId(customerExists ? bill.customerId! : "");
     setCustomerModalOpen(!customerExists);
     setRefundCustomerSearch("");
+    setNewCustomerName("");
+    setNewCustomerPhone("");
+    setNewCustomerEmail("");
+    setNewCustomerVatNumber("");
     setCustomerModalFeedback(null);
   };
 
@@ -713,7 +719,8 @@ export function RefundsWorkspace() {
     const result = saveCustomer({
       name: newCustomerName,
       phone: newCustomerPhone,
-      email: newCustomerEmail
+      email: newCustomerEmail,
+      vatNumber: newCustomerVatNumber
     });
     if (!result.ok || !result.customerId) {
       setCustomerModalFeedback(result.message ?? "Unable to create customer.");
@@ -723,8 +730,19 @@ export function RefundsWorkspace() {
     setNewCustomerName("");
     setNewCustomerPhone("");
     setNewCustomerEmail("");
+    setNewCustomerVatNumber("");
     setCustomerModalFeedback(null);
     setCustomerModalOpen(false);
+  };
+
+  const closeCustomerModal = () => {
+    setCustomerModalOpen(false);
+    setCustomerModalFeedback(null);
+    if (!refundCustomerId) {
+      setSelectedBillId(null);
+      setRefundStep("find");
+      router.replace("/refunds");
+    }
   };
 
   const toggleRefundSelection = (refundId: string) => {
@@ -1434,7 +1452,9 @@ export function RefundsWorkspace() {
                 <h2 className="mt-2 text-2xl font-semibold text-slate-950">Assign this refund to a customer</h2>
                 <p className="mt-2 text-sm text-slate-600">Walk-in refunds are not permitted. Choose a saved customer or create one now.</p>
               </div>
-              {selectedRefundCustomer ? <Button onClick={() => setCustomerModalOpen(false)} variant="secondary">Close</Button> : null}
+              <Button aria-label="Close customer assignment" className="h-10 w-10 rounded-full p-0" onClick={closeCustomerModal} variant="secondary">
+                <X className="h-4 w-4" />
+              </Button>
             </div>
 
             <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -1444,6 +1464,9 @@ export function RefundsWorkspace() {
                   <Input className="pl-11" placeholder="Search saved customers" value={refundCustomerSearch} onChange={(event) => setRefundCustomerSearch(event.target.value)} />
                 </label>
                 <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+                  {refundCustomerSearch.trim().length < 2 ? (
+                    <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">Enter at least 2 characters to search customers.</p>
+                  ) : null}
                   {matchingRefundCustomers.map((customer) => (
                     <button
                       className="w-full rounded-2xl border border-slate-200 p-4 text-left transition hover:border-emerald-300 hover:bg-emerald-50"
@@ -1459,7 +1482,7 @@ export function RefundsWorkspace() {
                       <span className="mt-1 block text-sm text-slate-500">{customer.phone || customer.email || "Saved customer"}</span>
                     </button>
                   ))}
-                  {matchingRefundCustomers.length === 0 ? <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No matching customers.</p> : null}
+                  {refundCustomerSearch.trim().length >= 2 && matchingRefundCustomers.length === 0 ? <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No matching customers.</p> : null}
                 </div>
               </div>
 
@@ -1469,6 +1492,7 @@ export function RefundsWorkspace() {
                   <Input placeholder="Customer name" value={newCustomerName} onChange={(event) => setNewCustomerName(event.target.value)} />
                   <Input inputMode="tel" placeholder="Phone" value={newCustomerPhone} onChange={(event) => setNewCustomerPhone(sanitizePhoneInput(event.target.value))} />
                   <Input type="email" placeholder="Email (optional)" value={newCustomerEmail} onChange={(event) => setNewCustomerEmail(event.target.value)} />
+                  <Input placeholder="VAT number (optional)" value={newCustomerVatNumber} onChange={(event) => setNewCustomerVatNumber(event.target.value)} />
                   <Button className="w-full" disabled={!newCustomerName.trim()} onClick={handleCreateRefundCustomer}>Create and assign customer</Button>
                 </div>
               </div>

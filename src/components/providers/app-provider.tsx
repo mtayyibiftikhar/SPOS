@@ -41,6 +41,7 @@ import { getPosAssetDeliveryUrl, normalizeBrandAssetUrls } from "@/lib/pos-asset
 import { applySettlementToBills, getCustomerAccountMetrics } from "@/lib/customer-accounts";
 import {
   getPurchaseOrderValuation,
+  getPurchasePaymentStatus,
   getWeightedAverageCost,
   reconcileSupplierBalance,
   roundPurchaseMoney
@@ -6224,7 +6225,7 @@ export function AppProvider({
           message: "Unable to save supplier."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const accessBlock = getShopAccessBlock(current, currentShopId);
 
           if (accessBlock) {
@@ -6302,7 +6303,7 @@ export function AppProvider({
               ...current.suppliers
             ]
           };
-        });
+        }));
 
         if (result.ok) announceExplicitSave();
         return result;
@@ -6915,12 +6916,7 @@ export function AppProvider({
                     ...entry,
                     status: "cancelled",
                     totalAmount: receivedTotal,
-                    paymentStatus:
-                      (entry.paidAmount ?? 0) >= receivedTotal
-                        ? "paid"
-                        : (entry.paidAmount ?? 0) > 0
-                          ? "partial"
-                          : "unpaid"
+                    paymentStatus: getPurchasePaymentStatus(receivedTotal, entry.paidAmount ?? 0)
                   }
                 : entry
             ),
@@ -9495,10 +9491,17 @@ export function AppProvider({
               };
             }),
             bills: current.bills.map((entry) =>
-              entry.id === bill.id && fullyRefunded
+              entry.id === bill.id
                 ? {
                     ...entry,
-                    status: "refunded"
+                    customerId: refundCustomer.id,
+                    customerName: refundCustomer.name,
+                    customerPhone: refundCustomer.phone,
+                    customerEmail: refundCustomer.email,
+                    customerAddress: refundCustomer.address,
+                    customerVatNumber: refundCustomer.vatNumber,
+                    customerWhatsapp: refundCustomer.whatsapp,
+                    status: fullyRefunded ? "refunded" : entry.status
                   }
                 : entry
             )

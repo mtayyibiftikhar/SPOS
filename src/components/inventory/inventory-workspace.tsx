@@ -351,6 +351,13 @@ export function InventoryWorkspace() {
   const [orderStep, setOrderStep] = useState<PurchaseOrderStep>("items");
   const [orderSupplierId, setOrderSupplierId] = useState("");
   const [orderSupplierName, setOrderSupplierName] = useState("");
+  const [orderSupplierDetails, setOrderSupplierDetails] = useState({
+    address: "",
+    contactPerson: "",
+    email: "",
+    phone: "",
+    vatNumber: ""
+  });
   const [orderSearch, setOrderSearch] = useState("");
   const [orderItems, setOrderItems] = useState<PurchaseOrderDraftItem[]>([]);
   const [orderPaymentMethod, setOrderPaymentMethod] = useState<SupplierPaymentMethod>("credit");
@@ -791,6 +798,7 @@ export function InventoryWorkspace() {
     })));
     setOrderSupplierId("");
     setOrderSupplierName("");
+    setOrderSupplierDetails({ address: "", contactPerson: "", email: "", phone: "", vatNumber: "" });
     setFeedback({ tone: "success", message: `${lowStockProducts.length} low-stock items added. Choose any supplier on the next step.` });
   };
 
@@ -897,6 +905,23 @@ export function InventoryWorkspace() {
     }
 
     const selectedSupplier = suppliers.find((supplier) => supplier.id === orderSupplierId);
+    let supplierId = selectedSupplier?.id;
+    if (!supplierId) {
+      const supplierResult = saveSupplier({
+        address: orderSupplierDetails.address,
+        contactPerson: orderSupplierDetails.contactPerson,
+        defaultPaymentMethod: orderPaymentMethod,
+        email: orderSupplierDetails.email,
+        name: orderSupplierName,
+        phone: orderSupplierDetails.phone,
+        vatNumber: orderSupplierDetails.vatNumber
+      });
+      if (!supplierResult.ok || !supplierResult.supplierId) {
+        setFeedback({ tone: "error", message: supplierResult.message ?? "Unable to create supplier." });
+        return;
+      }
+      supplierId = supplierResult.supplierId;
+    }
     const result = createPurchaseOrder({
       expectedAt: poExpectedAt || undefined,
       items: orderItems.map((item) => ({
@@ -909,7 +934,7 @@ export function InventoryWorkspace() {
       paidAmount: orderPaidAmountNumber,
       paymentMethod: orderPaymentMethod,
       paymentStatus: orderPaymentStatus,
-      supplierId: selectedSupplier?.id,
+      supplierId,
       supplierName: selectedSupplier?.name ?? orderSupplierName
     });
 
@@ -1111,6 +1136,7 @@ export function InventoryWorkspace() {
     );
     setOrderSupplierId(order.supplierId ?? "");
     setOrderSupplierName(order.supplierId ? "" : order.supplierName);
+    setOrderSupplierDetails({ address: "", contactPerson: "", email: "", phone: "", vatNumber: "" });
     setOrderPaymentMethod(order.paymentMethod ?? "credit");
     setOrderPaidAmount("");
     setPoExpectedAt(todayInTimeZone(currentShop?.timezone));
@@ -1824,7 +1850,14 @@ export function InventoryWorkspace() {
                         </Select>
                       </div>
                       {!orderSupplierId ? (
-                        <Input placeholder="Supplier name" value={orderSupplierName} onChange={(event) => setOrderSupplierName(event.target.value)} />
+                        <div className="grid gap-3 rounded-[22px] border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
+                          <Input className="sm:col-span-2" placeholder="Supplier business name" value={orderSupplierName} onChange={(event) => setOrderSupplierName(event.target.value)} />
+                          <Input inputMode="tel" placeholder="Phone" value={orderSupplierDetails.phone} onChange={(event) => setOrderSupplierDetails((current) => ({ ...current, phone: sanitizePhoneInput(event.target.value) }))} />
+                          <Input type="email" placeholder="Email" value={orderSupplierDetails.email} onChange={(event) => setOrderSupplierDetails((current) => ({ ...current, email: event.target.value }))} />
+                          <Input placeholder="VAT number" value={orderSupplierDetails.vatNumber} onChange={(event) => setOrderSupplierDetails((current) => ({ ...current, vatNumber: event.target.value }))} />
+                          <Input placeholder="Contact person" value={orderSupplierDetails.contactPerson} onChange={(event) => setOrderSupplierDetails((current) => ({ ...current, contactPerson: event.target.value }))} />
+                          <Textarea className="min-h-20 sm:col-span-2" placeholder="Supplier address" value={orderSupplierDetails.address} onChange={(event) => setOrderSupplierDetails((current) => ({ ...current, address: event.target.value }))} />
+                        </div>
                       ) : null}
                       <div className="grid gap-4 sm:grid-cols-2">
                         <Input value={poNumber} onChange={(event) => setPoNumber(event.target.value)} />
@@ -2115,6 +2148,13 @@ export function InventoryWorkspace() {
                     </>
                   );
                 })()}
+              </div>
+              <div className="mt-5 grid gap-3 rounded-[24px] border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Contact person</p><p className="mt-1 font-medium text-slate-950">{selectedSupplier.contactPerson || "Not provided"}</p></div>
+                <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Phone</p><p className="mt-1 font-medium text-slate-950">{selectedSupplier.phone || "Not provided"}</p></div>
+                <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Email</p><p className="mt-1 font-medium text-slate-950">{selectedSupplier.email || "Not provided"}</p></div>
+                <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">VAT number</p><p className="mt-1 font-medium text-slate-950">{selectedSupplier.vatNumber || "Not provided"}</p></div>
+                <div className="sm:col-span-2 lg:col-span-4"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Address</p><p className="mt-1 font-medium text-slate-950">{selectedSupplier.address || "Not provided"}</p></div>
               </div>
               {supplierStats(selectedSupplier).due > 0 ? (
                 <div className="mt-5 rounded-[24px] border border-emerald-200 bg-emerald-50 p-4">

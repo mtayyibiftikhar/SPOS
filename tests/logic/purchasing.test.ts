@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getPurchaseOrderValuation, getWeightedAverageCost, reconcileSupplierBalance } from "../../src/lib/purchasing";
+import {
+  getPurchaseOrderValuation,
+  getPurchasePaymentStatus,
+  getWeightedAverageCost,
+  reconcileSupplierBalance
+} from "../../src/lib/purchasing";
 
 test("partial receipt values actual goods and keeps unreceived units at ordered cost", () => {
   const valuation = getPurchaseOrderValuation([{
@@ -26,4 +31,11 @@ test("received promotional stock uses weighted average inventory cost", () => {
 test("supplier balance reconciles receipt price changes and payments", () => {
   assert.equal(reconcileSupplierBalance(50, 60, 44, 0), 34);
   assert.equal(reconcileSupplierBalance(50, 60, 44, 40), -6);
+});
+
+test("a cancelled zero-value PO with no payment remains unpaid", () => {
+  assert.equal(getPurchasePaymentStatus(0, 0), "unpaid");
+  assert.equal(getPurchasePaymentStatus(24, 0), "unpaid");
+  assert.equal(getPurchasePaymentStatus(24, 10), "partial");
+  assert.equal(getPurchasePaymentStatus(24, 24), "paid");
 });

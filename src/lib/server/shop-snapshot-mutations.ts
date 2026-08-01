@@ -1030,6 +1030,13 @@ function createRefundMutation(
 
         return {
           ...entry,
+          customerId: refundCustomer.id,
+          customerName: refundCustomer.name,
+          customerPhone: refundCustomer.phone,
+          customerEmail: refundCustomer.email,
+          customerAddress: refundCustomer.address,
+          customerVatNumber: refundCustomer.vatNumber,
+          customerWhatsapp: refundCustomer.whatsapp,
           dueAmount: fullyRefunded ? 0 : dueAmount,
           status: fullyRefunded ? "refunded" : dueAmount > 0 ? "due" : entry.status
         };
