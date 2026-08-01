@@ -1,36 +1,43 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState, type InputHTMLAttributes } from "react";
 import {
   AlertCircle,
   CheckCircle2,
   Download,
   FileSpreadsheet,
+  Pencil,
   Upload,
   type LucideIcon
 } from "lucide-react";
 import { usePosApp } from "@/components/providers/app-provider";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { downloadCsv, normalizeCsvHeader, parseCsv } from "@/lib/csv";
 import { normalizeBarcode, normalizeSpreadsheetBarcode, unwrapSpreadsheetText } from "@/lib/catalog";
 import { hasShopPermission } from "@/lib/access-control";
 import {
+  applyProductImportDefaults,
   downloadProductImportWorkbook,
   PRODUCT_IMPORT_HEADERS,
+  type ProductImportWorkbookRow,
   readProductImportWorkbook
 } from "@/lib/product-import-workbook";
 import type { Product, ProductCategory } from "@/types/pos";
 
 const HEADERS = PRODUCT_IMPORT_HEADERS;
 
-type ProductCsvRow = Record<(typeof HEADERS)[number], string>;
+type ProductCsvRow = ProductImportWorkbookRow;
 type PreviewRow = {
   line: number;
   data: ProductCsvRow;
   errors: string[];
   barcodes: string[];
 };
+
+type PreviewDraft = Pick<PreviewRow, "line" | "data">;
 
 function booleanValue(value: string) {
   const normalized = value.trim().toLowerCase();
@@ -57,6 +64,55 @@ function splitBarcodes(primary: string, additional: string) {
   return [unwrapSpreadsheetText(primary), ...unwrapSpreadsheetText(additional).split("|")]
     .map((value) => value.trim())
     .filter(Boolean);
+}
+
+function validatePreviewRows(rows: PreviewDraft[], products: Product[]): PreviewRow[] {
+  const existingBarcodeOwners = new Set<string>();
+  products.forEach((product) => {
+    [product.barcode, ...(product.barcodes ?? [])].forEach((value) => {
+      const barcode = normalizeBarcode(value);
+      if (barcode) existingBarcodeOwners.add(barcode);
+    });
+  });
+
+  const fileBarcodeOwners = new Map<string, number>();
+  return rows.map((row) => {
+    const data = applyProductImportDefaults(row.data);
+    const errors: string[] = [];
+    if (!data.english_name.trim()) errors.push("English name is required.");
+    if (!(data.type === "product" || data.type === "service")) errors.push("Type must be product or service.");
+    if (nonNegativeNumber(data.sale_price) === null) errors.push("Sale price must be zero or greater.");
+    if (nonNegativeNumber(data.cost_price) === null) errors.push("Cost price must be zero or greater.");
+    if (nonNegativeInteger(data.stock_quantity) === null) errors.push("Stock quantity must be a whole number of zero or greater.");
+    if (nonNegativeInteger(data.reorder_level) === null) errors.push("Reorder level must be a whole number of zero or greater.");
+    if (booleanValue(data.taxable) === null) errors.push("Taxable must be true or false.");
+    if (booleanValue(data.quick_tab) === null) errors.push("Quick tab must be true or false.");
+    if (!(data.status === "active" || data.status === "inactive")) errors.push("Status must be active or inactive.");
+
+    const rawBarcodes = splitBarcodes(data.primary_barcode, data.additional_barcodes);
+    const barcodes: string[] = [];
+    rawBarcodes.forEach((rawBarcode) => {
+      const barcode = strictBarcode(rawBarcode);
+      if (!barcode) {
+        errors.push(`Barcode ${rawBarcode} must contain 1 to 13 digits only.`);
+        return;
+      }
+      if (barcodes.includes(barcode)) {
+        errors.push(`Barcode ${barcode} is repeated in this row.`);
+        return;
+      }
+      barcodes.push(barcode);
+      if (existingBarcodeOwners.has(barcode)) errors.push(`Barcode ${barcode} already belongs to another product.`);
+      const previousLine = fileBarcodeOwners.get(barcode);
+      if (previousLine !== undefined && previousLine !== row.line) {
+        errors.push(`Barcode ${barcode} is also used on line ${previousLine}.`);
+      } else {
+        fileBarcodeOwners.set(barcode, row.line);
+      }
+    });
+
+    return { line: row.line, data, errors: Array.from(new Set(errors)), barcodes };
+  });
 }
 
 function excelText(value: string) {
@@ -97,6 +153,7 @@ export function ProductDataWorkspace() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<PreviewRow[]>([]);
   const [fileName, setFileName] = useState("");
+  const [editingLine, setEditingLine] = useState<number | null>(null);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const isAdmin = hasShopPermission(session, currentSettings?.pos, "products");
   const products = state.products.filter((product) => product.shopId === currentShopId);
@@ -146,76 +203,41 @@ export function ProductDataWorkspace() {
       return;
     }
 
-    const existingBarcodeOwners = new Map<string, string>();
-    products.forEach((product) => {
-      [product.barcode, ...(product.barcodes ?? [])].forEach((value) => {
-        const barcode = normalizeBarcode(value);
-        if (barcode) existingBarcodeOwners.set(barcode, product.id);
-      });
-    });
-
-    const fileBarcodeOwners = new Map<string, number>();
     const populatedRows = rows.slice(1).filter((values) => values.some((value) => value.trim() !== ""));
     if (!populatedRows.length) {
       setPreview([]);
       setMessage({ tone: "error", text: "The spreadsheet has no product rows." });
       return;
     }
-    const parsed = populatedRows.map((values, rowIndex): PreviewRow => {
+    const drafts = populatedRows.map((values, rowIndex): PreviewDraft => {
       const data = Object.fromEntries(
         HEADERS.map((header, index) => [header, values[index]?.trim() ?? ""])
       ) as ProductCsvRow;
-      const errors: string[] = [];
-
-      data.type = data.type.toLowerCase();
-      data.taxable = data.taxable.toLowerCase();
-      data.quick_tab = data.quick_tab.toLowerCase();
-      data.status = data.status.toLowerCase();
-
-      if (values.length !== HEADERS.length) errors.push(`Expected ${HEADERS.length} columns but found ${values.length}.`);
-      if (!data.english_name) errors.push("English name is required.");
-      if (!(data.type === "product" || data.type === "service")) errors.push("Type must be product or service.");
-      if (nonNegativeNumber(data.sale_price) === null) errors.push("Sale price must be zero or greater.");
-      if (nonNegativeNumber(data.cost_price) === null) errors.push("Cost price must be zero or greater.");
-      if (nonNegativeInteger(data.stock_quantity) === null) errors.push("Stock quantity must be a whole number of zero or greater.");
-      if (nonNegativeInteger(data.reorder_level) === null) errors.push("Reorder level must be a whole number of zero or greater.");
-      if (booleanValue(data.taxable) === null) errors.push("Taxable must be true or false.");
-      if (booleanValue(data.quick_tab) === null) errors.push("Quick tab must be true or false.");
-      if (!(data.status === "active" || data.status === "inactive")) errors.push("Status must be active or inactive.");
-
-      const rawBarcodes = splitBarcodes(data.primary_barcode, data.additional_barcodes);
-      const barcodes: string[] = [];
-      rawBarcodes.forEach((rawBarcode) => {
-        const barcode = strictBarcode(rawBarcode);
-        if (!barcode) {
-          errors.push(`Barcode ${rawBarcode} must contain 1 to 13 digits only.`);
-          return;
-        }
-        if (barcodes.includes(barcode)) {
-          errors.push(`Barcode ${barcode} is repeated in this row.`);
-          return;
-        }
-        barcodes.push(barcode);
-        const existingOwner = existingBarcodeOwners.get(barcode);
-        if (existingOwner) {
-          errors.push(`Barcode ${barcode} already belongs to another product.`);
-        }
-        const previousLine = fileBarcodeOwners.get(barcode);
-        if (previousLine !== undefined && previousLine !== rowIndex + 2) {
-          errors.push(`Barcode ${barcode} is also used on line ${previousLine}.`);
-        } else {
-          fileBarcodeOwners.set(barcode, rowIndex + 2);
-        }
-      });
-
-      return { line: rowIndex + 2, data, errors: Array.from(new Set(errors)), barcodes };
+      return { line: rowIndex + 2, data };
     });
+    const parsed = validatePreviewRows(drafts, products);
 
     setPreview(parsed);
     setMessage(
       parsed.some((row) => row.errors.length)
         ? { tone: "error", text: "Review the highlighted rows. Nothing has been imported yet." }
         : { tone: "success", text: `${parsed.length} rows validated and ready to import.` }
+    );
+  };
+
+  const updatePreviewField = (line: number, field: keyof ProductCsvRow, value: string) => {
+    const next = validatePreviewRows(
+      preview.map((row) => ({
+        line: row.line,
+        data: row.line === line ? { ...row.data, [field]: value } : row.data
+      })),
+      products
+    );
+    setPreview(next);
+    setMessage(
+      next.some((row) => row.errors.length)
+        ? { tone: "error", text: "Review the highlighted rows. Nothing has been imported yet." }
+        : { tone: "success", text: `${next.length} rows validated and ready to import.` }
     );
   };
 
@@ -329,7 +351,8 @@ export function ProductDataWorkspace() {
                 </thead>
                 <tbody>
                   {preview.map((row) => (
-                    <tr key={row.line} className="border-t border-slate-100 align-top">
+                    <Fragment key={row.line}>
+                    <tr className="border-t border-slate-100 align-top">
                       <td className="p-4 font-semibold">{row.line}</td>
                       <td className="p-4">
                         <strong>{row.data.english_name || "Unnamed"}</strong>
@@ -353,8 +376,25 @@ export function ProductDataWorkspace() {
                             <CheckCircle2 className="h-4 w-4" />Ready
                           </span>
                         )}
+                        <Button
+                          className="mt-3"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setEditingLine((current) => current === row.line ? null : row.line)}
+                        >
+                          <Pencil className="mr-2 h-4 w-4" />
+                          {editingLine === row.line ? "Close editor" : "Edit row"}
+                        </Button>
                       </td>
                     </tr>
+                    {editingLine === row.line ? (
+                      <tr className="border-t border-emerald-100 bg-emerald-50/40">
+                        <td colSpan={6} className="p-5">
+                          <ProductImportRowEditor row={row} onChange={updatePreviewField} />
+                        </td>
+                      </tr>
+                    ) : null}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -373,6 +413,84 @@ export function ProductDataWorkspace() {
         )}
       </Card>
     </div>
+  );
+}
+
+function ProductImportRowEditor({
+  onChange,
+  row
+}: {
+  onChange: (line: number, field: keyof ProductCsvRow, value: string) => void;
+  row: PreviewRow;
+}) {
+  const field = (name: keyof ProductCsvRow, label: string, props?: InputHTMLAttributes<HTMLInputElement>) => (
+    <label className="space-y-1.5 text-xs font-semibold text-slate-600">
+      <span>{label}</span>
+      <Input
+        {...props}
+        value={row.data[name]}
+        onChange={(event) => onChange(row.line, name, event.target.value)}
+      />
+    </label>
+  );
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="font-semibold text-slate-950">Edit spreadsheet line {row.line}</h3>
+          <p className="text-xs text-slate-500">Changes are validated immediately and apply only to this import preview.</p>
+        </div>
+        <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${row.errors.length ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
+          {row.errors.length ? `${row.errors.length} issue${row.errors.length === 1 ? "" : "s"} remaining` : "Ready to import"}
+        </span>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {field("english_name", "English name")}
+        {field("arabic_name", "Arabic name (optional)", { dir: "rtl" })}
+        {field("urdu_name", "Urdu name (optional)", { dir: "rtl" })}
+        <label className="space-y-1.5 text-xs font-semibold text-slate-600">
+          <span>Type</span>
+          <Select value={row.data.type} onChange={(event) => onChange(row.line, "type", event.target.value)}>
+            <option value="product">Product</option>
+            <option value="service">Service</option>
+          </Select>
+        </label>
+        {field("category", "Category (defaults to General)")}
+        {field("sale_price", "Sale price", { inputMode: "decimal" })}
+        {field("cost_price", "Cost price", { inputMode: "decimal" })}
+        {field("primary_barcode", "Primary barcode (optional)")}
+        {field("additional_barcodes", "Additional barcodes (separate with |)")}
+        {field("stock_quantity", "Stock quantity", { inputMode: "numeric" })}
+        {field("reorder_level", "Reorder level", { inputMode: "numeric" })}
+        <ImportSelect label="Taxable" value={row.data.taxable} onChange={(value) => onChange(row.line, "taxable", value)} options={["true", "false"]} />
+        <ImportSelect label="Quick tab" value={row.data.quick_tab} onChange={(value) => onChange(row.line, "quick_tab", value)} options={["true", "false"]} />
+        <ImportSelect label="Status" value={row.data.status} onChange={(value) => onChange(row.line, "status", value)} options={["active", "inactive"]} />
+        {field("image_url", "Image URL (optional)")}
+      </div>
+    </div>
+  );
+}
+
+function ImportSelect({
+  label,
+  onChange,
+  options,
+  value
+}: {
+  label: string;
+  onChange: (value: string) => void;
+  options: string[];
+  value: string;
+}) {
+  return (
+    <label className="space-y-1.5 text-xs font-semibold text-slate-600">
+      <span>{label}</span>
+      <Select value={value} onChange={(event) => onChange(event.target.value)}>
+        {!options.includes(value) ? <option value={value}>Select a value</option> : null}
+        {options.map((option) => <option key={option} value={option} className="capitalize">{option}</option>)}
+      </Select>
+    </label>
   );
 }
 

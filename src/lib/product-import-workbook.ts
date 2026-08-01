@@ -19,6 +19,19 @@ export const PRODUCT_IMPORT_HEADERS = [
   "image_url"
 ] as const;
 
+export type ProductImportWorkbookRow = Record<(typeof PRODUCT_IMPORT_HEADERS)[number], string>;
+
+export function applyProductImportDefaults(data: ProductImportWorkbookRow): ProductImportWorkbookRow {
+  return {
+    ...data,
+    type: data.type.trim().toLowerCase() || "product",
+    category: data.category.trim() || "General",
+    taxable: data.taxable.trim().toLowerCase(),
+    quick_tab: data.quick_tab.trim().toLowerCase(),
+    status: data.status.trim().toLowerCase()
+  };
+}
+
 const SAMPLE_ROW = [
   "Sample coffee", "", "", "product", "Drinks", "12", "6", "6281234567890",
   "6281234567891|6281234567892", "20", "5", "true", "true", "active", ""
@@ -72,7 +85,7 @@ function workbookFiles() {
   <sheetData><row r="1">${headerCells}</row><row r="2">${sampleCells}</row></sheetData>
   <autoFilter ref="A1:O1001"/>
   <dataValidations count="4">
-    <dataValidation type="list" allowBlank="0" showErrorMessage="1" errorStyle="stop" errorTitle="Invalid product type" error="Choose product or service from the list." sqref="D2:D1001"><formula1>&quot;product,service&quot;</formula1></dataValidation>
+    <dataValidation type="list" allowBlank="1" showErrorMessage="1" errorStyle="stop" errorTitle="Invalid product type" error="Choose product or service from the list, or leave blank for product." sqref="D2:D1001"><formula1>&quot;product,service&quot;</formula1></dataValidation>
     <dataValidation type="list" allowBlank="0" showErrorMessage="1" errorStyle="stop" errorTitle="Invalid taxable value" error="Choose true or false from the list." sqref="L2:L1001"><formula1>&quot;true,false&quot;</formula1></dataValidation>
     <dataValidation type="list" allowBlank="0" showErrorMessage="1" errorStyle="stop" errorTitle="Invalid quick tab value" error="Choose true or false from the list." sqref="M2:M1001"><formula1>&quot;true,false&quot;</formula1></dataValidation>
     <dataValidation type="list" allowBlank="0" showErrorMessage="1" errorStyle="stop" errorTitle="Invalid status" error="Choose active or inactive from the list." sqref="N2:N1001"><formula1>&quot;active,inactive&quot;</formula1></dataValidation>
