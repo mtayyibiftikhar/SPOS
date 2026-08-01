@@ -347,6 +347,7 @@ export function ProductDataWorkspace() {
                     <th className="p-4">Category</th>
                     <th className="p-4">Barcodes</th>
                     <th className="p-4">Result</th>
+                    <th className="w-40 p-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -376,8 +377,10 @@ export function ProductDataWorkspace() {
                             <CheckCircle2 className="h-4 w-4" />Ready
                           </span>
                         )}
+                      </td>
+                      <td className="p-4 text-right">
                         <Button
-                          className="mt-3"
+                          className="whitespace-nowrap"
                           size="sm"
                           variant="secondary"
                           onClick={() => setEditingLine((current) => current === row.line ? null : row.line)}
@@ -389,7 +392,7 @@ export function ProductDataWorkspace() {
                     </tr>
                     {editingLine === row.line ? (
                       <tr className="border-t border-emerald-100 bg-emerald-50/40">
-                        <td colSpan={6} className="p-5">
+                        <td colSpan={7} className="p-5">
                           <ProductImportRowEditor row={row} onChange={updatePreviewField} />
                         </td>
                       </tr>
