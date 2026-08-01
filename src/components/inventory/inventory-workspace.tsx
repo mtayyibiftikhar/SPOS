@@ -37,7 +37,7 @@ import { getBusinessDateInTimezone } from "@/lib/cash-control";
 import { getPurchaseOrderValuation } from "@/lib/purchasing";
 import { hasShopPermission } from "@/lib/access-control";
 import { cn, formatCurrency, formatDateTime } from "@/lib/utils";
-import type { Product, PurchaseOrder, PurchaseOrderItem, PurchasePaymentStatus, Supplier, SupplierPaymentMethod } from "@/types/pos";
+import type { DemoAppState, Product, PurchaseOrder, PurchaseOrderItem, PurchasePaymentStatus, Supplier, SupplierPaymentMethod } from "@/types/pos";
 
 type InventoryView = "overview" | "add" | "adjust" | "order" | "suppliers" | "data";
 type AdjustMode = "item" | "supplier" | "category";
@@ -259,6 +259,20 @@ export function InventoryWorkspace() {
       }, {}),
     [state.purchaseOrderItems]
   );
+  const purchaseOrderById = useMemo(
+    () => new Map(purchaseOrders.map((order) => [order.id, order])),
+    [purchaseOrders]
+  );
+  const latestInventoryBatchByProductId = useMemo(() => {
+    const batches = new Map<string, DemoAppState["inventoryBatches"][number]>();
+    state.inventoryBatches
+      .filter((batch) => batch.shopId === currentShopId)
+      .sort((left, right) => new Date(right.receivedAt).getTime() - new Date(left.receivedAt).getTime())
+      .forEach((batch) => {
+        if (!batches.has(batch.productId)) batches.set(batch.productId, batch);
+      });
+    return batches;
+  }, [currentShopId, state.inventoryBatches]);
   const lowStockProducts = useMemo(
     () => physicalProducts.filter((product) => product.stockQuantity <= product.reorderLevel),
     [physicalProducts]
@@ -1218,24 +1232,16 @@ export function InventoryWorkspace() {
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard label="Stock items" value={physicalProducts.length} />
             <MetricCard label="Stock value" tone="green" value={formatCurrency(stockValue, currency, locale)} />
-            <button
+            <div
               className={cn(
-                "min-h-32 rounded-[28px] border p-5 text-left transition hover:-translate-y-0.5 hover:shadow-[0_18px_40px_rgba(15,23,42,0.08)]",
+                "min-h-32 rounded-[28px] border p-5 text-left",
                 lowStockProducts.length > 0 ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-white"
               )}
-              type="button"
-              onClick={() => {
-                if (lowStockGroups.length === 1) {
-                  loadLowStockGroupForOrder(lowStockGroups[0].key, true);
-                } else if (lowStockGroups.length > 1) {
-                  setFeedback({ tone: "success", message: "Choose one supplier group below to keep the purchase order clean." });
-                }
-              }}
             >
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Low stock</p>
               <p className="mt-3 font-display text-4xl font-semibold tracking-[-0.04em] text-slate-950">{lowStockProducts.length}</p>
-              <p className="mt-2 text-sm text-slate-600">{lowStockGroups.length > 1 ? "Grouped by supplier" : "Click to prepare order"}</p>
-            </button>
+              <p className="mt-2 text-sm text-slate-600">Review the groups below or use Order inventory</p>
+            </div>
             <MetricCard label="Suppliers" value={suppliers.length} />
           </section>
 
@@ -1304,7 +1310,7 @@ export function InventoryWorkspace() {
                       <th className="px-5 py-3">Product</th>
                       <th className="px-5 py-3">Barcode</th>
                       <th className="px-5 py-3">Category</th>
-                      <th className="px-5 py-3">Supplier</th>
+                      <th className="px-5 py-3">Latest receipt</th>
                       <th className="px-5 py-3">On hand</th>
                       <th className="px-5 py-3">Reorder</th>
                       <th className="px-5 py-3">Cost</th>
@@ -1314,17 +1320,19 @@ export function InventoryWorkspace() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {overviewPageProducts.map((product) => {
-                      const supplierNames = (productSupplierIds[product.id] ?? [])
-                        .map((supplierId) => supplierById[supplierId]?.name)
-                        .filter(Boolean)
-                        .join(", ");
+                      const latestBatch = latestInventoryBatchByProductId.get(product.id);
+                      const latestOrder = latestBatch?.purchaseOrderId ? purchaseOrderById.get(latestBatch.purchaseOrderId) : undefined;
+                      const latestSupplier = latestBatch?.supplierId ? supplierById[latestBatch.supplierId] : undefined;
 
                       return (
                         <tr key={product.id}>
                           <td className="px-5 py-4 font-semibold text-slate-950">{getProductName(product, locale)}</td>
                           <td className="px-5 py-4 text-slate-600">{product.barcode ?? "No barcode"}</td>
                           <td className="px-5 py-4 text-slate-600">{product.categoryId ? categoryById[product.categoryId] ?? "No category" : "No category"}</td>
-                          <td className="px-5 py-4 text-slate-600">{supplierNames || GENERAL_SUPPLIER_NAME}</td>
+                          <td className="px-5 py-4 text-slate-600">
+                            <span className="font-semibold text-slate-950">{latestOrder?.number ?? (latestBatch ? "Manual receipt" : "No receipt")}</span>
+                            <span className="block text-xs">{latestSupplier?.name ?? GENERAL_SUPPLIER_NAME}</span>
+                          </td>
                           <td className="px-5 py-4 text-slate-950">{product.stockQuantity}</td>
                           <td className="px-5 py-4 text-slate-600">{product.reorderLevel}</td>
                           <td className="px-5 py-4 text-slate-600">{formatCurrency(product.costPrice, currency, locale)}</td>
