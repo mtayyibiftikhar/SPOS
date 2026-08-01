@@ -33,6 +33,8 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { createStructuredReportPdfBlob, downloadBlob } from "@/lib/report-export";
 import { sanitizePhoneInput } from "@/lib/phone";
+import { getBusinessDateInTimezone } from "@/lib/cash-control";
+import { getPurchaseOrderValuation } from "@/lib/purchasing";
 import { hasShopPermission } from "@/lib/access-control";
 import { cn, formatCurrency, formatDateTime } from "@/lib/utils";
 import type { Product, PurchaseOrder, PurchaseOrderItem, PurchasePaymentStatus, Supplier, SupplierPaymentMethod } from "@/types/pos";
@@ -89,6 +91,10 @@ function getProductName(product: Product, locale: "en" | "ar" | "ur") {
 function createPoNumber() {
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   return `PO-${stamp}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+}
+
+function todayInTimeZone(timeZone?: string) {
+  return getBusinessDateInTimezone(timeZone || "Asia/Riyadh", new Date());
 }
 
 function buildSuggestedOrderQuantity(product: Product) {
@@ -174,6 +180,7 @@ export function InventoryWorkspace() {
     saveProduct,
     saveSupplier,
     session,
+    settleSupplierAccount,
     state,
     t
   } = usePosApp();
@@ -335,7 +342,7 @@ export function InventoryWorkspace() {
   const [orderPaymentMethod, setOrderPaymentMethod] = useState<SupplierPaymentMethod>("credit");
   const [orderPaidAmount, setOrderPaidAmount] = useState("");
   const [poNumber, setPoNumber] = useState(createPoNumber);
-  const [poExpectedAt, setPoExpectedAt] = useState("");
+  const [poExpectedAt, setPoExpectedAt] = useState(() => todayInTimeZone());
   const [poNote, setPoNote] = useState("");
   const [poFilter, setPoFilter] = useState<PurchaseOrderFilter>("open");
   const [reorderSearch, setReorderSearch] = useState("");
@@ -343,6 +350,8 @@ export function InventoryWorkspace() {
   const [receiveItems, setReceiveItems] = useState<Record<string, PurchaseOrderReceiveItem>>({});
   const [receivePaymentMethod, setReceivePaymentMethod] = useState<SupplierPaymentMethod>("credit");
   const [receivePaidAmount, setReceivePaidAmount] = useState("");
+  const [supplierPaymentAmount, setSupplierPaymentAmount] = useState("");
+  const [supplierPaymentMethod, setSupplierPaymentMethod] = useState<SupplierPaymentMethod>("bank");
   const [supplierView, setSupplierView] = useState<SupplierView>("list");
   const [supplierSearch, setSupplierSearch] = useState("");
   const [selectedSupplierDetailId, setSelectedSupplierDetailId] = useState("");
@@ -756,12 +765,19 @@ export function InventoryWorkspace() {
   };
 
   const addLowStockToOrder = () => {
-    if (lowStockGroups.length === 1) {
-      loadLowStockGroupForOrder(lowStockGroups[0].key);
+    if (lowStockProducts.length === 0) {
+      setFeedback({ tone: "error", message: "No low-stock products need ordering right now." });
       return;
     }
 
-    setFeedback({ tone: "error", message: "Choose a supplier group first so the purchase order stays clean." });
+    setOrderItems(lowStockProducts.map((product) => ({
+      costPrice: String(product.costPrice),
+      productId: product.id,
+      quantity: String(buildSuggestedOrderQuantity(product))
+    })));
+    setOrderSupplierId("");
+    setOrderSupplierName("");
+    setFeedback({ tone: "success", message: `${lowStockProducts.length} low-stock items added. Choose any supplier on the next step.` });
   };
 
   const updateOrderItem = (productId: string, patch: Partial<PurchaseOrderDraftItem>) => {
@@ -791,7 +807,7 @@ export function InventoryWorkspace() {
     setOrderSupplierName("");
     setOrderPaidAmount("");
     setOrderPaymentMethod("credit");
-    setPoExpectedAt("");
+    setPoExpectedAt(todayInTimeZone(currentShop?.timezone));
     setPoNote("");
     setPoNumber(createPoNumber());
     setOrderStep("items");
@@ -906,7 +922,8 @@ export function InventoryWorkspace() {
             productName: product?.name ?? { ar: item.productId, en: item.productId, ur: item.productId },
             purchaseOrderId: "",
             quantity: Number(item.quantity || 0),
-            receivedQuantity: 0
+            receivedQuantity: 0,
+            receivedAmount: 0
           } satisfies PurchaseOrderItem;
         });
     const supplierName = savedOrder?.supplierName || orderSupplier?.name || orderSupplierName || "Supplier";
@@ -921,9 +938,17 @@ export function InventoryWorkspace() {
         const cost = Number(item.costPrice || 0);
         const lineTotal = quantity * cost;
 
-        return `<tr><td>${name}</td><td>${quantity}</td><td>${formatCurrency(cost, currency, locale)}</td><td>${formatCurrency(lineTotal, currency, locale)}</td></tr>`;
+        const receivedQuantity = Number(item.receivedQuantity || 0);
+        const receivedValue = item.receivedAmount ?? receivedQuantity * cost;
+        return `<tr><td>${name}</td><td>${quantity}</td><td>${receivedQuantity}</td><td>${formatCurrency(cost, currency, locale)}</td><td>${formatCurrency(lineTotal, currency, locale)}</td><td>${formatCurrency(receivedValue, currency, locale)}</td></tr>`;
       })
       .join("");
+    const receivedTotal = sourceItems.reduce(
+      (sum, item) => sum + (item.receivedAmount ?? (item.receivedQuantity ?? 0) * item.costPrice),
+      0
+    );
+    const logoPath = currentShopId ? state.settingsByShop[currentShopId]?.pos.logoUrl : undefined;
+    const logoUrl = logoPath ? new URL(logoPath, window.location.origin).toString() : "";
     const printWindow = window.open("", "_blank", "width=860,height=720");
 
     if (!printWindow) {
@@ -936,13 +961,16 @@ export function InventoryWorkspace() {
         <head>
           <title>${escapeHtml(number)}</title>
           <style>
-            body { font-family: Arial, sans-serif; color: #0f172a; padding: 28px; }
+            * { box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; color: #0f172a; padding: 32px; max-width: 1080px; margin: 0 auto; }
             h1 { margin: 0 0 6px; font-size: 28px; }
             .muted { color: #64748b; }
-            .head { display: flex; justify-content: space-between; gap: 18px; border-bottom: 2px solid #0f172a; padding-bottom: 18px; margin-bottom: 20px; }
+            .brand { display:flex; align-items:center; gap:14px; }
+            .logo { width:64px; height:64px; object-fit:contain; border-radius:16px; border:1px solid #e2e8f0; }
+            .head { display: flex; justify-content: space-between; gap: 28px; border: 1px solid #dbe4ef; border-radius: 22px; padding: 22px; margin-bottom: 22px; background:#f8fafc; }
             table { width: 100%; border-collapse: collapse; margin-top: 18px; }
             th, td { border-bottom: 1px solid #e2e8f0; padding: 10px; text-align: left; }
-            th { background: #f8fafc; font-size: 12px; text-transform: uppercase; letter-spacing: .12em; }
+            th { background: #ecfdf5; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; }
             .totals { margin-top: 18px; margin-left: auto; width: 320px; }
             .totals div { display: flex; justify-content: space-between; padding: 6px 0; }
             .total { font-weight: 800; font-size: 20px; }
@@ -952,10 +980,13 @@ export function InventoryWorkspace() {
         <body>
           <button onclick="window.print()" style="margin-bottom:16px;padding:10px 16px;border-radius:12px;border:0;background:#020617;color:#fff;font-weight:700;">Print PO</button>
           <div class="head">
-            <div>
-              <p class="muted">Purchase Order</p>
-              <h1>${escapeHtml(number)}</h1>
-              <p>${escapeHtml(currentShop?.name ?? "")}</p>
+            <div class="brand">
+              ${logoUrl ? `<img class="logo" src="${escapeHtml(logoUrl)}" alt="Store logo" />` : ""}
+              <div>
+                <p class="muted">Purchase Order</p>
+                <h1>${escapeHtml(number)}</h1>
+                <p>${escapeHtml(currentShop?.name ?? "")}</p>
+              </div>
             </div>
             <div>
               <p><strong>Supplier:</strong> ${escapeHtml(supplierName)}</p>
@@ -964,11 +995,12 @@ export function InventoryWorkspace() {
             </div>
           </div>
           <table>
-            <thead><tr><th>Product</th><th>Qty</th><th>Cost</th><th>Total</th></tr></thead>
+            <thead><tr><th>Product</th><th>Ordered</th><th>Received</th><th>Ordered cost</th><th>Ordered value</th><th>Received value</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
           <div class="totals">
             <div><span>Total</span><strong>${formatCurrency(total, currency, locale)}</strong></div>
+            <div><span>Received value</span><strong>${formatCurrency(receivedTotal, currency, locale)}</strong></div>
             <div><span>Paid</span><strong>${formatCurrency(paid, currency, locale)}</strong></div>
             <div class="total"><span>Due</span><span>${formatCurrency(Math.max(0, total - paid), currency, locale)}</span></div>
           </div>
@@ -1013,7 +1045,18 @@ export function InventoryWorkspace() {
   const receiveOrder = (purchaseOrderId: string) => {
     const order = purchaseOrders.find((entry) => entry.id === purchaseOrderId);
     const savedItems = purchaseOrderItemsByOrderId[purchaseOrderId] ?? [];
-    const remainingAmount = Math.max(0, (order?.totalAmount ?? 0) - (order?.paidAmount ?? 0));
+    const projectedItems = savedItems.map((item) => {
+      const remainingQuantity = Math.max(0, item.quantity - (item.receivedQuantity ?? 0));
+      const receivedQuantity = Math.min(remainingQuantity, Math.max(0, Number(receiveItems[item.id]?.quantity || 0)));
+      const receivedCost = Math.max(0, Number(receiveItems[item.id]?.costPrice || item.costPrice));
+      return {
+        ...item,
+        receivedAmount: (item.receivedAmount ?? (item.receivedQuantity ?? 0) * item.costPrice) + receivedQuantity * receivedCost,
+        receivedQuantity: (item.receivedQuantity ?? 0) + receivedQuantity
+      };
+    });
+    const projectedTotal = getPurchaseOrderValuation(projectedItems).revisedTotal;
+    const remainingAmount = Math.max(0, projectedTotal - (order?.paidAmount ?? 0));
     const paidNow = Math.min(remainingAmount, Math.max(0, Number(receivePaidAmount || 0)));
     const result = receivePurchaseOrder(purchaseOrderId, {
       items: savedItems.map((item) => ({
@@ -1056,7 +1099,7 @@ export function InventoryWorkspace() {
     setOrderSupplierName(order.supplierId ? "" : order.supplierName);
     setOrderPaymentMethod(order.paymentMethod ?? "credit");
     setOrderPaidAmount("");
-    setPoExpectedAt("");
+    setPoExpectedAt(todayInTimeZone(currentShop?.timezone));
     setPoNote(order.note ?? "");
     setPoNumber(createPoNumber());
     setOrderTab("create");
@@ -1103,6 +1146,21 @@ export function InventoryWorkspace() {
   const removeSupplier = (supplierId: string) => {
     const result = deleteSupplier(supplierId);
     setFeedback({ tone: result.ok ? "success" : "error", message: result.ok ? "Supplier removed." : result.message ?? "Unable to remove supplier." });
+  };
+
+  const paySupplier = (supplier: Supplier, amount = Number(supplierPaymentAmount || 0)) => {
+    const result = settleSupplierAccount({
+      amount,
+      paymentMethod: supplierPaymentMethod,
+      supplierId: supplier.id
+    });
+    setFeedback({
+      tone: result.ok ? "success" : "error",
+      message: result.ok
+        ? `${formatCurrency(result.appliedAmount ?? 0, currency, locale)} paid to ${supplier.name}.`
+        : result.message ?? "Unable to record supplier payment."
+    });
+    if (result.ok) setSupplierPaymentAmount("");
   };
 
   const navItems = [
@@ -1659,9 +1717,18 @@ export function InventoryWorkspace() {
                                   <p className="font-semibold text-slate-950">{getProductName(product, locale)}</p>
                                   <p className="mt-1 text-xs text-slate-500">Initial cost {formatCurrency(product.costPrice, currency, locale)}</p>
                                 </div>
-                                <Input inputMode="decimal" value={item.quantity} onChange={(event) => updateOrderItem(item.productId, { quantity: event.target.value })} />
-                                <Input inputMode="decimal" value={item.costPrice} onChange={(event) => updateOrderItem(item.productId, { costPrice: event.target.value })} />
-                                <p className="font-semibold text-slate-950">{formatCurrency(quantity * cost, currency, locale)}</p>
+                                <label className="space-y-1 text-xs font-semibold text-slate-500">
+                                  <span>Order quantity</span>
+                                  <Input inputMode="decimal" value={item.quantity} onChange={(event) => updateOrderItem(item.productId, { quantity: event.target.value })} />
+                                </label>
+                                <label className="space-y-1 text-xs font-semibold text-slate-500">
+                                  <span>Unit cost</span>
+                                  <Input inputMode="decimal" value={item.costPrice} onChange={(event) => updateOrderItem(item.productId, { costPrice: event.target.value })} />
+                                </label>
+                                <div>
+                                  <p className="text-xs font-semibold text-slate-500">Line total</p>
+                                  <p className="mt-1 font-semibold text-slate-950">{formatCurrency(quantity * cost, currency, locale)}</p>
+                                </div>
                                 <Button className="h-10 w-10 rounded-full p-0" variant="danger" onClick={() => removeOrderItem(item.productId)}>
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
@@ -1753,7 +1820,16 @@ export function InventoryWorkspace() {
                       ) : null}
                       <div className="grid gap-4 sm:grid-cols-2">
                         <Input value={poNumber} onChange={(event) => setPoNumber(event.target.value)} />
-                        <Input type="date" value={poExpectedAt} onChange={(event) => setPoExpectedAt(event.target.value)} />
+                        <label className="space-y-1 text-xs font-semibold text-slate-500">
+                          <span>PO date</span>
+                          <Input
+                            max={todayInTimeZone(currentShop?.timezone)}
+                            min={todayInTimeZone(currentShop?.timezone)}
+                            type="date"
+                            value={poExpectedAt}
+                            onChange={(event) => setPoExpectedAt(event.target.value)}
+                          />
+                        </label>
                       </div>
                       <div className="grid gap-4 sm:grid-cols-2">
                         <Select value={orderPaymentMethod} onChange={(event) => setOrderPaymentMethod(event.target.value as SupplierPaymentMethod)}>
@@ -1807,7 +1883,17 @@ export function InventoryWorkspace() {
                     const savedItems = purchaseOrderItemsByOrderId[order.id] ?? [];
                     const orderedUnits = savedItems.reduce((sum, item) => sum + item.quantity, 0);
                     const receivedUnits = savedItems.reduce((sum, item) => sum + (item.receivedQuantity ?? 0), 0);
-                    const remainingAmount = Math.max(0, (order.totalAmount ?? 0) - (order.paidAmount ?? 0));
+                    const valuation = getPurchaseOrderValuation(savedItems);
+                    const remainingAmount = Math.max(0, (order.totalAmount ?? valuation.revisedTotal) - (order.paidAmount ?? 0));
+                    const supplierCredit = Math.max(0, (order.paidAmount ?? 0) - (order.totalAmount ?? valuation.revisedTotal));
+                    const receiptValue = savedItems.reduce((sum, item) => {
+                      const quantity = Math.min(
+                        Math.max(0, item.quantity - (item.receivedQuantity ?? 0)),
+                        Math.max(0, Number(receiveItems[item.id]?.quantity || 0))
+                      );
+                      const cost = Math.max(0, Number(receiveItems[item.id]?.costPrice || item.costPrice));
+                      return sum + quantity * cost;
+                    }, 0);
 
                     return (
                       <div key={order.id} className="rounded-[24px] border border-slate-200 bg-white p-4">
@@ -1815,7 +1901,13 @@ export function InventoryWorkspace() {
                           <div>
                             <p className="font-semibold text-slate-950">{order.number}</p>
                             <p className="mt-1 text-sm text-slate-500">{order.supplierName} | {formatDateTime(order.createdAt, locale)}</p>
-                            <p className="mt-1 text-sm text-slate-500">Received {receivedUnits}/{orderedUnits} | Due {formatCurrency(remainingAmount, currency, locale)}</p>
+                            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
+                              <span>Ordered <strong>{orderedUnits}</strong></span>
+                              <span>Received <strong>{receivedUnits}</strong></span>
+                              <span>Received value <strong>{formatCurrency(valuation.receivedTotal, currency, locale)}</strong></span>
+                              <span>Paid <strong>{formatCurrency(order.paidAmount ?? 0, currency, locale)}</strong></span>
+                              <span>{supplierCredit > 0 ? "Supplier credit" : "Due"} <strong>{formatCurrency(supplierCredit || remainingAmount, currency, locale)}</strong></span>
+                            </div>
                           </div>
                           <div className="flex flex-wrap gap-2">
                             <Badge variant={order.status === "received" ? "success" : order.status === "cancelled" ? "warning" : "neutral"}>{order.status}</Badge>
@@ -1834,19 +1926,25 @@ export function InventoryWorkspace() {
                         </div>
                         {receivingOrderId === order.id ? (
                           <div className="mt-4 rounded-[22px] border border-emerald-200 bg-emerald-50/60 p-4">
+                            <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                              <div className="rounded-2xl bg-white p-3 text-sm"><span className="text-slate-500">Receiving now</span><strong className="mt-1 block text-slate-950">{formatCurrency(receiptValue, currency, locale)}</strong></div>
+                              <div className="rounded-2xl bg-white p-3 text-sm"><span className="text-slate-500">Already paid</span><strong className="mt-1 block text-slate-950">{formatCurrency(order.paidAmount ?? 0, currency, locale)}</strong></div>
+                              <div className="rounded-2xl bg-white p-3 text-sm"><span className="text-slate-500">Current PO due</span><strong className="mt-1 block text-slate-950">{formatCurrency(remainingAmount, currency, locale)}</strong></div>
+                            </div>
                             <div className="grid gap-3 md:grid-cols-2">
-                              <Select value={receivePaymentMethod} onChange={(event) => setReceivePaymentMethod(event.target.value as SupplierPaymentMethod)}>
-                                <option value="credit">Credit</option>
-                                <option value="cash">Cash</option>
-                                <option value="card">Card</option>
-                                <option value="bank">Bank</option>
-                              </Select>
-                              <Input
-                                inputMode="decimal"
-                                placeholder="Amount paid now"
-                                value={receivePaidAmount}
-                                onChange={(event) => setReceivePaidAmount(event.target.value)}
-                              />
+                              <label className="space-y-1 text-xs font-semibold text-slate-500">
+                                <span>Payment method</span>
+                                <Select value={receivePaymentMethod} onChange={(event) => setReceivePaymentMethod(event.target.value as SupplierPaymentMethod)}>
+                                  <option value="credit">Credit</option>
+                                  <option value="cash">Cash</option>
+                                  <option value="card">Card</option>
+                                  <option value="bank">Bank</option>
+                                </Select>
+                              </label>
+                              <label className="space-y-1 text-xs font-semibold text-slate-500">
+                                <span>Amount paid now</span>
+                                <Input inputMode="decimal" value={receivePaidAmount} onChange={(event) => setReceivePaidAmount(event.target.value)} />
+                              </label>
                             </div>
                             <div className="mt-4 space-y-2">
                               {savedItems.map((item) => {
@@ -1854,13 +1952,14 @@ export function InventoryWorkspace() {
                                 const remainingQuantity = Math.max(0, item.quantity - (item.receivedQuantity ?? 0));
 
                                 return (
-                                  <div key={item.id} className="grid gap-3 rounded-[18px] border border-emerald-100 bg-white p-3 md:grid-cols-[1fr_120px_140px] md:items-center">
+                                  <div key={item.id} className="grid gap-3 rounded-[18px] border border-emerald-100 bg-white p-3 md:grid-cols-[1fr_150px_150px_130px] md:items-end">
                                     <div>
                                       <p className="font-semibold text-slate-950">{product ? getProductName(product, locale) : item.productName.en}</p>
-                                      <p className="text-sm text-slate-500">Remaining {remainingQuantity}</p>
+                                      <p className="text-sm text-slate-500">Ordered {item.quantity} | Previously received {item.receivedQuantity ?? 0} | Remaining {remainingQuantity}</p>
                                     </div>
-                                    <Input inputMode="decimal" value={receiveItems[item.id]?.quantity ?? "0"} onChange={(event) => updateReceiveItem(item.id, { quantity: event.target.value })} />
-                                    <Input inputMode="decimal" value={receiveItems[item.id]?.costPrice ?? String(item.costPrice)} onChange={(event) => updateReceiveItem(item.id, { costPrice: event.target.value })} />
+                                    <label className="space-y-1 text-xs font-semibold text-slate-500"><span>Receive quantity</span><Input inputMode="decimal" value={receiveItems[item.id]?.quantity ?? "0"} onChange={(event) => updateReceiveItem(item.id, { quantity: event.target.value })} /></label>
+                                    <label className="space-y-1 text-xs font-semibold text-slate-500"><span>Actual unit cost</span><Input inputMode="decimal" value={receiveItems[item.id]?.costPrice ?? String(item.costPrice)} onChange={(event) => updateReceiveItem(item.id, { costPrice: event.target.value })} /></label>
+                                    <div className="pb-3 text-sm"><span className="text-slate-500">Receipt value</span><strong className="mt-1 block text-slate-950">{formatCurrency(Math.min(remainingQuantity, Math.max(0, Number(receiveItems[item.id]?.quantity || 0))) * Math.max(0, Number(receiveItems[item.id]?.costPrice || item.costPrice)), currency, locale)}</strong></div>
                                   </div>
                                 );
                               })}
@@ -1953,6 +2052,8 @@ export function InventoryWorkspace() {
                       type="button"
                       onClick={() => {
                         setSelectedSupplierDetailId(supplier.id);
+                        setSupplierPaymentMethod(supplier.defaultPaymentMethod ?? "bank");
+                        setSupplierPaymentAmount("");
                         setSupplierView("detail");
                       }}
                     >
@@ -1960,7 +2061,7 @@ export function InventoryWorkspace() {
                       <p className="mt-1 text-sm text-slate-500">{supplier.phone || supplier.email || "No contact"}</p>
                       <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
                         <span>Orders <strong>{stats.orders.length}</strong></span>
-                        <span>Due <strong>{formatCurrency(stats.due, currency, locale)}</strong></span>
+                        <span>{stats.due < 0 ? "Credit" : "Due"} <strong>{formatCurrency(Math.abs(stats.due), currency, locale)}</strong></span>
                       </div>
                     </button>
                   );
@@ -1998,18 +2099,62 @@ export function InventoryWorkspace() {
                       <MetricCard label="Items bought" value={stats.units} />
                       <MetricCard label="Total ordered" value={formatCurrency(stats.amount, currency, locale)} />
                       <MetricCard label="Total paid" value={formatCurrency(stats.paid, currency, locale)} />
-                      <MetricCard label="Supplier due" tone="warm" value={formatCurrency(stats.due, currency, locale)} />
+                      <MetricCard
+                        label={stats.due < 0 ? "Supplier owes us" : "Supplier due"}
+                        tone="warm"
+                        value={formatCurrency(Math.abs(stats.due), currency, locale)}
+                      />
                     </>
                   );
                 })()}
               </div>
-              <div className="mt-5 grid gap-3 md:grid-cols-2">
-                {supplierStats(selectedSupplier).orders.slice(0, 8).map((order) => (
-                  <div key={order.id} className="rounded-[22px] border border-slate-200 bg-white p-4">
-                    <p className="font-semibold text-slate-950">{order.number}</p>
-                    <p className="mt-1 text-sm text-slate-500">{formatDateTime(order.createdAt, locale)} | {formatCurrency(order.totalAmount ?? 0, currency, locale)}</p>
+              {supplierStats(selectedSupplier).due > 0 ? (
+                <div className="mt-5 rounded-[24px] border border-emerald-200 bg-emerald-50 p-4">
+                  <div className="flex flex-wrap items-end gap-3">
+                    <label className="min-w-52 flex-1 space-y-1 text-xs font-semibold text-slate-600">
+                      <span>Payment method</span>
+                      <Select value={supplierPaymentMethod} onChange={(event) => setSupplierPaymentMethod(event.target.value as SupplierPaymentMethod)}>
+                        <option value="cash">Cash</option>
+                        <option value="card">Card</option>
+                        <option value="bank">Bank</option>
+                      </Select>
+                    </label>
+                    <label className="min-w-52 flex-1 space-y-1 text-xs font-semibold text-slate-600">
+                      <span>Amount to pay</span>
+                      <Input
+                        inputMode="decimal"
+                        placeholder={String(supplierStats(selectedSupplier).due)}
+                        value={supplierPaymentAmount}
+                        onChange={(event) => setSupplierPaymentAmount(event.target.value)}
+                      />
+                    </label>
+                    <Button disabled={!supplierPaymentAmount || Number(supplierPaymentAmount) <= 0} onClick={() => paySupplier(selectedSupplier)}>
+                      Pay supplier
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => paySupplier(selectedSupplier, supplierStats(selectedSupplier).due)}
+                    >
+                      Pay full due
+                    </Button>
                   </div>
-                ))}
+                </div>
+              ) : null}
+              <div className="mt-5 grid gap-3 md:grid-cols-2">
+                {supplierStats(selectedSupplier).orders.slice(0, 8).map((order) => {
+                  const due = (order.totalAmount ?? 0) - (order.paidAmount ?? 0);
+                  return (
+                    <div key={order.id} className="rounded-[22px] border border-slate-200 bg-white p-4">
+                      <div className="flex items-center justify-between gap-3"><p className="font-semibold text-slate-950">{order.number}</p><Badge variant={due <= 0 ? "success" : "warning"}>{due <= 0 ? "Paid" : "Due"}</Badge></div>
+                      <p className="mt-1 text-sm text-slate-500">{formatDateTime(order.createdAt, locale)}</p>
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-600">
+                        <span>Total <strong className="block text-slate-950">{formatCurrency(order.totalAmount ?? 0, currency, locale)}</strong></span>
+                        <span>Paid <strong className="block text-slate-950">{formatCurrency(order.paidAmount ?? 0, currency, locale)}</strong></span>
+                        <span>Due <strong className="block text-slate-950">{formatCurrency(Math.max(0, due), currency, locale)}</strong></span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </Card>
           ) : null}

@@ -40,6 +40,12 @@ import { initialAppState } from "@/lib/mock-data";
 import { getPosAssetDeliveryUrl, normalizeBrandAssetUrls } from "@/lib/pos-asset-url";
 import { applySettlementToBills, getCustomerAccountMetrics } from "@/lib/customer-accounts";
 import {
+  getPurchaseOrderValuation,
+  getWeightedAverageCost,
+  reconcileSupplierBalance,
+  roundPurchaseMoney
+} from "@/lib/purchasing";
+import {
   calculateBusinessDaySummary,
   calculateShiftSummary,
   getActiveBusinessDay,
@@ -810,6 +816,11 @@ interface AppContextValue {
       paymentMethod?: DemoAppState["purchaseOrders"][number]["paymentMethod"];
     }
   ) => { ok: boolean; message?: string };
+  settleSupplierAccount: (payload: {
+    supplierId: string;
+    amount: number;
+    paymentMethod: DemoAppState["purchaseOrders"][number]["paymentMethod"];
+  }) => { ok: boolean; message?: string; appliedAmount?: number };
   cancelPurchaseOrder: (purchaseOrderId: string) => { ok: boolean; message?: string };
   deleteProduct: (productId: string, reason: string) => void;
   restoreDeletedProduct: (deletedProductId: string) => void;
@@ -1126,6 +1137,7 @@ function normalizeStoredState(stored: DemoAppState, ownerBootstrap: OwnerBootstr
       ...item,
       initialCostPrice: item.initialCostPrice ?? item.costPrice,
       receivedQuantity: item.receivedQuantity ?? 0,
+      receivedAmount: item.receivedAmount ?? (item.receivedQuantity ?? 0) * item.costPrice,
       expiryDate: item.expiryDate?.trim() || undefined
     })),
     businessDays: stored.businessDays ?? [],
@@ -6367,7 +6379,7 @@ export function AppProvider({
           message: "Unable to save purchase order."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const accessBlock = getShopAccessBlock(current, currentShopId);
 
           if (accessBlock) {
@@ -6507,13 +6519,14 @@ export function AppProvider({
                 productName: item.product.name,
                 quantity: item.quantity,
                 receivedQuantity: 0,
+                receivedAmount: 0,
                 costPrice: item.costPrice,
                 initialCostPrice: item.initialCostPrice
               })),
               ...current.purchaseOrderItems
             ]
           };
-        });
+        }));
 
         if (result.ok) announceExplicitSave();
         return result;
@@ -6532,7 +6545,7 @@ export function AppProvider({
           message: "Unable to receive purchase order."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const accessBlock = getShopAccessBlock(current, currentShopId);
 
           if (accessBlock) {
@@ -6589,9 +6602,23 @@ export function AppProvider({
               };
             })
             .filter((entry) => entry.receivedQuantity > 0);
-          const totalAmount = order.totalAmount ?? orderItems.reduce((sum, item) => sum + item.quantity * item.costPrice, 0);
+          const previousTotalAmount = order.totalAmount ?? orderItems.reduce((sum, item) => sum + item.quantity * item.costPrice, 0);
           const alreadyPaid = order.paidAmount ?? 0;
           const parsedPaidAmount = Number.isFinite(payload.paidAmount) ? payload.paidAmount ?? 0 : 0;
+          const projectedItems = orderItems.map((item) => {
+            const receivedLine = receivedLines.find((entry) => entry.item.id === item.id);
+            const nextReceivedQuantity = Math.round(
+              ((item.receivedQuantity ?? 0) + (receivedLine?.receivedQuantity ?? 0)) * 100
+            ) / 100;
+            const previousReceivedAmount = item.receivedAmount ?? (item.receivedQuantity ?? 0) * item.costPrice;
+            const nextReceivedAmount = roundPurchaseMoney(
+              previousReceivedAmount + (receivedLine?.receivedQuantity ?? 0) * (receivedLine?.costPrice ?? item.costPrice)
+            );
+
+            return { ...item, receivedAmount: nextReceivedAmount, receivedQuantity: nextReceivedQuantity };
+          });
+          const projectedValuation = getPurchaseOrderValuation(projectedItems);
+          const totalAmount = projectedValuation.revisedTotal;
           const receivePaidAmount = Math.min(
             Math.max(0, Math.round(parsedPaidAmount * 100) / 100),
             Math.max(0, Math.round((totalAmount - alreadyPaid) * 100) / 100)
@@ -6623,7 +6650,12 @@ export function AppProvider({
 
             return {
               ...product,
-              costPrice: receivedItem.costPrice,
+              costPrice: getWeightedAverageCost(
+                product.stockQuantity,
+                product.costPrice,
+                receivedItem.quantity,
+                receivedItem.costPrice
+              ),
               stockQuantity: Math.round((product.stockQuantity + receivedItem.quantity) * 100) / 100,
               updatedAt: createdAt
             };
@@ -6685,24 +6717,18 @@ export function AppProvider({
           }, []);
 
           result = { ok: true };
+          const projectedById = new Map(projectedItems.map((item) => [item.id, item]));
           const nextPurchaseOrderItems = current.purchaseOrderItems.map((item) => {
+            const projected = projectedById.get(item.id);
             const receivedLine = receivedLines.find((entry) => entry.item.id === item.id);
-
-            if (!receivedLine) {
-              return item;
-            }
-
-            return {
-              ...item,
-              costPrice: receivedLine.costPrice,
-              expiryDate: receivedLine.expiryDate || item.expiryDate,
-              receivedQuantity: Math.round(((item.receivedQuantity ?? 0) + receivedLine.receivedQuantity) * 100) / 100
-            };
+            return projected
+              ? { ...projected, expiryDate: receivedLine?.expiryDate || item.expiryDate }
+              : item;
           });
           const relatedNextItems = nextPurchaseOrderItems.filter((item) => item.purchaseOrderId === purchaseOrderId);
           const allReceived = relatedNextItems.every((item) => (item.receivedQuantity ?? 0) >= item.quantity);
           const anyReceived = relatedNextItems.some((item) => (item.receivedQuantity ?? 0) > 0);
-          const nextPaidAmount = Math.min(totalAmount, Math.round((alreadyPaid + receivePaidAmount) * 100) / 100);
+          const nextPaidAmount = roundPurchaseMoney(alreadyPaid + receivePaidAmount);
           const nextPaymentStatus: PurchasePaymentStatus =
             nextPaidAmount >= totalAmount && totalAmount > 0 ? "paid" : nextPaidAmount > 0 ? "partial" : "unpaid";
           const nextPaymentMethod = payload.paymentMethod ?? order.paymentMethod ?? "credit";
@@ -6718,7 +6744,12 @@ export function AppProvider({
                   supplier.id === order.supplierId
                     ? {
                         ...supplier,
-                        accountBalance: Math.max(0, Math.round(((supplier.accountBalance ?? 0) - receivePaidAmount) * 100) / 100),
+                        accountBalance: reconcileSupplierBalance(
+                          supplier.accountBalance ?? 0,
+                          previousTotalAmount,
+                          totalAmount,
+                          receivePaidAmount
+                        ),
                         updatedAt: createdAt
                       }
                     : supplier
@@ -6728,6 +6759,7 @@ export function AppProvider({
               entry.id === order.id
                 ? {
                     ...entry,
+                    totalAmount,
                     paidAmount: nextPaidAmount,
                     paymentMethod: nextPaymentMethod,
                     paymentStatus: nextPaymentStatus,
@@ -6739,7 +6771,90 @@ export function AppProvider({
                 : entry
             )
           };
-        });
+        }));
+
+        if (result.ok) announceExplicitSave();
+        return result;
+      },
+      settleSupplierAccount: ({ supplierId, amount, paymentMethod }) => {
+        if (!currentShopId || !session) return { ok: false, message: "Session unavailable." };
+        if (!hasShopPermission(session, currentSettings?.pos, "inventory")) {
+          return { ok: false, message: "Only the shop admin can pay supplier accounts." };
+        }
+
+        const requestedAmount = roundPurchaseMoney(Math.max(0, amount));
+        if (requestedAmount <= 0) return { ok: false, message: "Enter a supplier payment amount." };
+
+        let result: { ok: boolean; message?: string; appliedAmount?: number } = {
+          ok: false,
+          message: "Unable to record supplier payment."
+        };
+
+        flushSync(() => setState((current) => {
+          const accessBlock = getShopAccessBlock(current, currentShopId);
+          if (accessBlock) {
+            result = { ok: false, message: accessBlock };
+            return current;
+          }
+
+          const supplier = current.suppliers.find((entry) => entry.id === supplierId && entry.shopId === currentShopId);
+          if (!supplier) {
+            result = { ok: false, message: "Supplier not found." };
+            return current;
+          }
+
+          const due = Math.max(0, supplier.accountBalance ?? 0);
+          if (due <= 0) {
+            result = { ok: false, message: "This supplier account has no amount due." };
+            return current;
+          }
+
+          const appliedAmount = Math.min(due, requestedAmount);
+          let remaining = appliedAmount;
+          const paidAt = new Date().toISOString();
+          const eligibleOrderIds = current.purchaseOrders
+            .filter((order) => order.shopId === currentShopId && order.supplierId === supplierId && order.status !== "cancelled")
+            .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
+            .map((order) => order.id);
+          const eligibleOrderIdSet = new Set(eligibleOrderIds);
+          const nextOrdersById = new Map<string, DemoAppState["purchaseOrders"][number]>();
+
+          for (const orderId of eligibleOrderIds) {
+            const order = current.purchaseOrders.find((entry) => entry.id === orderId);
+            if (!order || remaining <= 0) continue;
+            const orderDue = Math.max(0, roundPurchaseMoney((order.totalAmount ?? 0) - (order.paidAmount ?? 0)));
+            const allocation = Math.min(orderDue, remaining);
+            if (allocation <= 0) continue;
+            const nextPaid = roundPurchaseMoney((order.paidAmount ?? 0) + allocation);
+            const total = order.totalAmount ?? 0;
+            nextOrdersById.set(order.id, {
+              ...order,
+              paidAmount: nextPaid,
+              paymentMethod: paymentMethod ?? order.paymentMethod ?? "credit",
+              paymentStatus: nextPaid >= total && total > 0 ? "paid" : "partial",
+              lastPaymentAt: paidAt
+            });
+            remaining = roundPurchaseMoney(remaining - allocation);
+          }
+
+          result = { ok: true, appliedAmount };
+          return {
+            ...current,
+            purchaseOrders: current.purchaseOrders.map((order) =>
+              eligibleOrderIdSet.has(order.id) ? nextOrdersById.get(order.id) ?? order : order
+            ),
+            suppliers: current.suppliers.map((entry) =>
+              entry.id === supplier.id
+                ? {
+                    ...entry,
+                    accountBalance: roundPurchaseMoney((entry.accountBalance ?? 0) - appliedAmount),
+                    defaultPaymentMethod: paymentMethod ?? entry.defaultPaymentMethod ?? "credit",
+                    updatedAt: paidAt
+                  }
+                : entry
+            )
+          };
+        }));
 
         if (result.ok) announceExplicitSave();
         return result;
@@ -6758,7 +6873,7 @@ export function AppProvider({
           message: "Unable to cancel purchase order."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const accessBlock = getShopAccessBlock(current, currentShopId);
 
           if (accessBlock) {
@@ -6786,7 +6901,9 @@ export function AppProvider({
           }
 
           const updatedAt = new Date().toISOString();
-          const unpaidAmount = Math.max(0, Math.round(((order.totalAmount ?? 0) - (order.paidAmount ?? 0)) * 100) / 100);
+          const orderItems = current.purchaseOrderItems.filter((item) => item.purchaseOrderId === order.id);
+          const receivedTotal = getPurchaseOrderValuation(orderItems).receivedTotal;
+          const previousTotal = order.totalAmount ?? 0;
 
           result = { ok: true };
 
@@ -6796,7 +6913,14 @@ export function AppProvider({
               entry.id === order.id
                 ? {
                     ...entry,
-                    status: "cancelled"
+                    status: "cancelled",
+                    totalAmount: receivedTotal,
+                    paymentStatus:
+                      (entry.paidAmount ?? 0) >= receivedTotal
+                        ? "paid"
+                        : (entry.paidAmount ?? 0) > 0
+                          ? "partial"
+                          : "unpaid"
                   }
                 : entry
             ),
@@ -6805,14 +6929,18 @@ export function AppProvider({
                   supplier.id === order.supplierId
                     ? {
                         ...supplier,
-                        accountBalance: Math.max(0, Math.round(((supplier.accountBalance ?? 0) - unpaidAmount) * 100) / 100),
+                        accountBalance: reconcileSupplierBalance(
+                          supplier.accountBalance ?? 0,
+                          previousTotal,
+                          receivedTotal
+                        ),
                         updatedAt
                       }
                     : supplier
                 )
               : current.suppliers
           };
-        });
+        }));
 
         if (result.ok) announceExplicitSave();
         return result;

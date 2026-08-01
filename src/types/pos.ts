@@ -283,6 +283,7 @@ export interface PurchaseOrderItem {
   productName: LocalizedText;
   quantity: number;
   receivedQuantity?: number;
+  receivedAmount?: number;
   costPrice: number;
   initialCostPrice?: number;
   expiryDate?: string;
