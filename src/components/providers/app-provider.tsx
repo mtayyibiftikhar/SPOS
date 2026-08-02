@@ -2729,7 +2729,6 @@ export function AppProvider({
       let shifts = current.shifts;
       let dayCloses = current.dayCloses;
       let businessDays = current.businessDays;
-      let openingCashForNewShift = 0;
 
       if (openDay && shouldCloseOldDay) {
         const openShifts = current.shifts.filter(
@@ -2757,6 +2756,7 @@ export function AppProvider({
 
           return {
             ...shift,
+            openingCash: summary.openingCash,
             countedCash: summary.expectedCash,
             expectedCash: summary.expectedCash,
             difference: 0,
@@ -2780,7 +2780,6 @@ export function AppProvider({
           refunds: current.refunds
         });
 
-        openingCashForNewShift = summary.expectedCash;
         businessDays = current.businessDays.map((day) =>
           day.id === openDay.id
             ? {
@@ -2859,7 +2858,7 @@ export function AppProvider({
                 cashierId: session.id,
                 deviceActivationId: currentDeviceActivation?.id,
                 deviceBrowserInfo: currentDeviceActivation?.browserInfo ?? getCurrentBrowserInfo(),
-                openingCash: openingCashForNewShift,
+                openingCash: 0,
                 startedAt: automatedAt,
                 note: "Auto started by rollover setting."
               },
@@ -7509,7 +7508,7 @@ export function AppProvider({
           return { ok: false, message: "Enter a valid card terminal total." };
         }
         let result: { ok: boolean; message?: string } = { ok: false, message: "Day close not found." };
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const dayClose = current.dayCloses.find((entry) => entry.id === dayCloseId && entry.shopId === currentShopId);
           if (!dayClose) return current;
           const cashDifference = Math.round((normalizedCash - dayClose.expectedCash) * 100) / 100;
@@ -7527,7 +7526,7 @@ export function AppProvider({
               shift.businessDate > dayClose.businessDate &&
               shift.startedAt === dayClose.closedAt &&
               shift.note?.startsWith("Auto started")
-                ? { ...shift, openingCash: normalizedCash }
+                ? { ...shift, openingCash: 0 }
                 : shift
             ),
             dayCloses: current.dayCloses.map((entry) => entry.id === dayCloseId ? {
@@ -7549,7 +7548,7 @@ export function AppProvider({
               createdAt: new Date().toISOString()
             }, ...current.auditLogs]
           };
-        });
+        }));
         return result;
       },
       autoCloseAndStartNextBusinessDay: async (payload) => {
@@ -7609,7 +7608,7 @@ export function AppProvider({
           message: "Unable to auto close and start the next business day."
         };
 
-        setState((current) => {
+        flushSync(() => setState((current) => {
           const openDay = getActiveBusinessDay(current.businessDays, currentShopId);
 
           if (!openDay) {
@@ -7643,6 +7642,7 @@ export function AppProvider({
 
             return {
               ...shift,
+              openingCash: summary.openingCash,
               countedCash: summary.expectedCash,
               expectedCash: summary.expectedCash,
               difference: 0,
@@ -7672,7 +7672,7 @@ export function AppProvider({
           result = {
             ok: true,
             message: shouldStartShift
-              ? "Open shifts and day were auto closed. Next business day and shift are ready."
+              ? "Open shifts and day were auto closed. The next business day and shift started fresh at zero."
               : "Open shifts and day were auto closed. Next business day is ready."
           };
 
@@ -7706,7 +7706,7 @@ export function AppProvider({
                     cashierId: session.id,
                     deviceActivationId: currentDeviceActivation?.id,
                     deviceBrowserInfo: currentDeviceActivation?.browserInfo ?? getCurrentBrowserInfo(),
-                    openingCash: summary.expectedCash,
+                    openingCash: 0,
                     startedAt: closedAt,
                     note: "Auto started after day rollover."
                   },
@@ -7760,7 +7760,7 @@ export function AppProvider({
               ...current.dayCloses
             ]
           };
-        });
+        }));
 
         return result;
       },
@@ -8453,6 +8453,7 @@ export function AppProvider({
                 shift.id === targetShift.id
                   ? {
                       ...shift,
+                      openingCash: summary.openingCash,
                       countedCash: summary.expectedCash,
                       expectedCash: summary.expectedCash,
                       difference: 0,
@@ -8536,6 +8537,7 @@ export function AppProvider({
               shift.id === activeShift.id
                 ? {
                     ...shift,
+                    openingCash: summary.openingCash,
                     countedCash,
                     expectedCash: summary.expectedCash,
                     difference,
@@ -8620,6 +8622,7 @@ export function AppProvider({
               const normalizedVarianceReason = varianceReasonByShift?.[shift.id]?.trim();
               return {
                 ...shift,
+                openingCash: summary.openingCash,
                 countedCash,
                 expectedCash: summary.expectedCash,
                 difference,

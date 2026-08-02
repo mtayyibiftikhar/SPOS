@@ -356,6 +356,12 @@ export function CashControlPanel() {
   ])), [openShiftsForDay, state.bills, state.cashMovements, state.customerAccountPayments, state.refunds]);
 
   useEffect(() => {
+    if (!currentBusinessDay || !activeDaySummary || openShiftsForDay.length > 0) return;
+    setDayCountedCash(String(activeDaySummary.expectedCash));
+    setDayCountedCard(String(activeDaySummary.expectedCard));
+  }, [activeDaySummary, currentBusinessDay, openShiftsForDay.length]);
+
+  useEffect(() => {
     setAdminShiftCounts((current) => Object.fromEntries(openShiftsForDay.map((shift) => [
       shift.id,
       current[shift.id] ?? String(openShiftSummaries.get(shift.id)?.expectedCash ?? 0)
@@ -540,6 +546,8 @@ export function CashControlPanel() {
     if (result.ok) {
       setOpeningNote("");
       setDayCountedCash("");
+      setDayCountedCard("");
+      setDayVarianceReason("");
       setDayCloseNote("");
     }
   };
@@ -1166,7 +1174,7 @@ export function CashControlPanel() {
                   Auto close day and open next day
                 </Button>
                 <p className="sm:col-span-2 text-xs leading-5 text-slate-500">
-                  Use this only when staff forgot to close. Open shifts close with expected cash, then the next day and shift start automatically.
+                  Use this only when staff forgot to close. The old day is sealed with its expected totals; the next day and shift start fresh at zero cash and zero card activity.
                 </p>
                 <FeedbackText feedback={dayFeedback} />
               </div>
@@ -1700,7 +1708,7 @@ export function CashControlPanel() {
               Review {formatBusinessDate(pendingAutoDayClose.businessDate, locale)}
             </h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Auto rollover kept operations moving and filled the expected values. Confirm the real drawer count now so reports record any shortage or excess honestly.
+              Confirm the previous day&apos;s real drawer and card-terminal totals. These values seal that closed day only; the new business day remains fresh at zero.
             </p>
             <div className="mt-5 grid gap-3 rounded-3xl border border-slate-200 bg-slate-50 p-5 sm:grid-cols-2">
               <SummaryRow label="Net sales" value={formatCurrency(pendingAutoDaySummary.netSales, currency, locale)} />

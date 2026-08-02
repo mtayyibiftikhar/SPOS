@@ -354,6 +354,7 @@ function endShiftMutation(
         shift.id === activeShift.id
           ? {
               ...shift,
+              openingCash: summary.openingCash,
               countedCash,
               expectedCash: summary.expectedCash,
               difference,
@@ -429,6 +430,7 @@ function endAllShiftsMutation(
         const varianceReason = payload.varianceReasonByShift?.[shift.id]?.trim();
         return {
           ...shift,
+          openingCash: summary.openingCash,
           countedCash,
           expectedCash: summary.expectedCash,
           difference,

@@ -542,6 +542,32 @@ test("ending a shift records authoritative expected cash and variance", () => {
   assert.ok(closed.state.shifts?.[0].endedAt);
 });
 
+test("closing a legacy rollover shift permanently clears carried opening cash", () => {
+  const state = openState({
+    bills: [bill({ shiftId: "shift_rollover", total: 12, paidAmount: 12 })],
+    shifts: [{
+      id: "shift_rollover",
+      shopId: SHOP_ID,
+      businessDayId: "day_1",
+      businessDate: BUSINESS_DATE,
+      cashierId: USER_ID,
+      openingCash: 568,
+      startedAt: NOW,
+      note: "Auto started after day rollover."
+    }]
+  });
+  const closed = applyCriticalShopMutation(
+    state,
+    { type: "end_shift", payload: { countedCash: 12, countedCard: 0, note: "Counted" } },
+    { role: "cashier", shopId: SHOP_ID, userId: USER_ID }
+  );
+
+  assert.equal(closed.result.ok, true);
+  assert.equal(closed.state.shifts?.[0].openingCash, 0);
+  assert.equal(closed.state.shifts?.[0].expectedCash, 12);
+  assert.equal(closed.state.shifts?.[0].difference, 0);
+});
+
 test("card-terminal variance requires a reason before a shift can close", () => {
   const state = openState({
     bills: [bill({ paymentMethod: "card", shiftId: "shift_cashier" })],

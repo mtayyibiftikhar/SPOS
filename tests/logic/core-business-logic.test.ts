@@ -338,6 +338,41 @@ test("business-day opening cash is counted once across sequential shifts on the 
   assert.equal(summary.expectedCash, 10);
 });
 
+test("a rollover shift never carries the previous day drawer total into the new day", () => {
+  const rolloverShift: Shift = {
+    id: "shift_1",
+    shopId: SHOP_ID,
+    businessDate: BUSINESS_DATE,
+    cashierId: "user_1",
+    deviceActivationId: "drawer_1",
+    openingCash: 568,
+    startedAt: "2026-07-14T00:01:00.000Z",
+    note: "Auto started after day rollover."
+  };
+  const cashSale = bill({ shiftId: rolloverShift.id, total: 12 });
+
+  const shiftSummary = calculateShiftSummary({
+    shift: rolloverShift,
+    bills: [cashSale],
+    cashMovements: [],
+    refunds: []
+  });
+  const daySummary = calculateBusinessDaySummary({
+    businessDate: BUSINESS_DATE,
+    shopId: SHOP_ID,
+    timeZone: "Asia/Riyadh",
+    bills: [cashSale],
+    cashMovements: [],
+    shifts: [rolloverShift],
+    refunds: []
+  });
+
+  assert.equal(shiftSummary.openingCash, 0);
+  assert.equal(shiftSummary.expectedCash, 12);
+  assert.equal(daySummary.openingCash, 0);
+  assert.equal(daySummary.expectedCash, 12);
+});
+
 test("card account payments are reported without inflating the cash drawer", () => {
   const shift: Shift = {
     id: "shift_card_account",

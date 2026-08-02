@@ -4,6 +4,15 @@ function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
 }
 
+const ZERO_OPENING_CASH_ROLLOVER_NOTES = new Set([
+  "Auto started after day rollover.",
+  "Auto started by rollover setting."
+]);
+
+export function getEffectiveShiftOpeningCash(shift: Pick<Shift, "openingCash" | "note">) {
+  return ZERO_OPENING_CASH_ROLLOVER_NOTES.has(shift.note ?? "") ? 0 : roundMoney(shift.openingCash);
+}
+
 export type ShiftCashSummary = {
   billCount: number;
   openingCash: number;
@@ -169,7 +178,8 @@ export function calculateShiftSummary({
       .filter((movement) => movement.type === "cash_out")
       .reduce((sum, movement) => sum + movement.amount, 0)
   );
-  const expectedCash = roundMoney(shift.openingCash + cashSales + accountCashPayments + cashIn - cashOut - cashRefunds);
+  const openingCash = getEffectiveShiftOpeningCash(shift);
+  const expectedCash = roundMoney(openingCash + cashSales + accountCashPayments + cashIn - cashOut - cashRefunds);
   const expectedCard = roundMoney(cardSales + accountCardPayments - cardRefunds);
   const countedCash = shift.countedCash ?? null;
   const countedCard = shift.countedCard ?? null;
@@ -180,7 +190,7 @@ export function calculateShiftSummary({
 
   return {
     billCount: shiftBills.length,
-    openingCash: roundMoney(shift.openingCash),
+    openingCash,
     totalSales,
     cashSales,
     cardSales,
@@ -252,7 +262,7 @@ export function calculateBusinessDaySummary({
       if (!firstShiftByDrawer.has(drawerKey)) firstShiftByDrawer.set(drawerKey, shift);
     });
   const openingCash = roundMoney(
-    Array.from(firstShiftByDrawer.values()).reduce((sum, shift) => sum + shift.openingCash, 0)
+    Array.from(firstShiftByDrawer.values()).reduce((sum, shift) => sum + getEffectiveShiftOpeningCash(shift), 0)
   );
   const totalSales = roundMoney(dayBills.reduce((sum, bill) => sum + bill.total, 0));
   const cashSales = roundMoney(
