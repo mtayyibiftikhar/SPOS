@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { sanitizePhoneInput } from "@/lib/phone";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { readShopUserSession } from "@/lib/supabase/shop-session";
+import { isShopSessionCurrent, readShopUserSession } from "@/lib/supabase/shop-session";
 
 type ShopUserPayload = {
   email?: string;
@@ -47,6 +47,7 @@ async function authorizeShopAdmin(request: Request) {
   }
 
   const supabase = createSupabaseAdminClient();
+  if (!(await isShopSessionCurrent(supabase, session))) return null;
   const { data: admin, error } = await supabase
     .from("profiles")
     .select("id, shop_id, email, role, is_active")

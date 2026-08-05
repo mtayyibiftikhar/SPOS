@@ -10,7 +10,7 @@ import { applyCriticalShopMutation, type CriticalShopMutation } from "@/lib/serv
 import { syncNormalizedShopProjection } from "@/lib/server/normalized-shop-projection";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { loadBrandProfileSnapshot } from "@/lib/supabase/brand-assets";
-import { readShopDeviceSession, readShopUserSession } from "@/lib/supabase/shop-session";
+import { isShopSessionCurrent, readShopDeviceSession, readShopUserSession } from "@/lib/supabase/shop-session";
 import type { DemoAppState, ProductKey, UserRole } from "@/types/pos";
 
 const SNAPSHOT_BUCKET = "shop-cloud-snapshots";
@@ -716,7 +716,7 @@ async function authorizeShopStateAccess(request: Request, shopId: string, requir
 
   const userSession = readShopUserSession(request);
 
-  if (userSession?.shopId === shopId) {
+  if (userSession?.shopId === shopId && await isShopSessionCurrent(supabase, userSession)) {
     const { data: profile, error } = await supabase
       .from("profiles")
       .select("id, shop_id, email, role, is_active")
@@ -743,7 +743,7 @@ async function authorizeShopStateAccess(request: Request, shopId: string, requir
 
   const deviceSession = readShopDeviceSession(request);
 
-  if (deviceSession?.shopId === shopId) {
+  if (deviceSession?.shopId === shopId && await isShopSessionCurrent(supabase, deviceSession)) {
     const [{ data: keyRow, error: keyError }, { data: activation, error: activationError }] = await Promise.all([
       supabase
       .from("product_keys")

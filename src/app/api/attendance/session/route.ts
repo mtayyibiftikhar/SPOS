@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createSecureAttendanceToken, hashAttendanceToken } from "@/lib/server/attendance-token";
 import { closeExpiredAttendanceRecords } from "@/lib/server/attendance-rollover";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { readShopUserSession } from "@/lib/supabase/shop-session";
+import { isShopSessionCurrent, readShopUserSession } from "@/lib/supabase/shop-session";
 import type { DemoAppState } from "@/types/pos";
 
 const SESSION_TTL_MS = 60 * 60 * 1000;
@@ -30,6 +30,9 @@ export async function GET(request: Request) {
 
   try {
     const supabase = createSupabaseAdminClient();
+    if (!(await isShopSessionCurrent(supabase, session))) {
+      return NextResponse.json({ ok: false, message: "Your shop session has been signed out." }, { status: 401 });
+    }
     await closeExpiredAttendanceRecords(supabase, session.shopId);
     const { data, error } = await supabase
       .from("attendance_records")
@@ -75,6 +78,9 @@ export async function POST(request: Request) {
 
   try {
     const supabase = createSupabaseAdminClient();
+    if (!(await isShopSessionCurrent(supabase, session))) {
+      return NextResponse.json({ ok: false, message: "Your shop session has been signed out." }, { status: 401 });
+    }
     await closeExpiredAttendanceRecords(supabase, session.shopId);
     const [{ data: profile, error: profileError }, { data: snapshot, error: snapshotError }] = await Promise.all([
       supabase

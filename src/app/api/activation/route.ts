@@ -2,10 +2,12 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { hashProductKey } from "@/lib/cloud-sync";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
+import { sendCommerceBridgeWebhook } from "@/lib/server/commerce-bridge-webhook";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { loadBrandProfileSnapshot } from "@/lib/supabase/brand-assets";
 import {
   createShopDeviceSessionToken,
+  isShopSessionCurrent,
   readShopDeviceSession,
   SHOP_DEVICE_SESSION_COOKIE,
   SHOP_DEVICE_SESSION_MAX_AGE_SECONDS,
@@ -14,6 +16,7 @@ import {
 } from "@/lib/supabase/shop-session";
 
 type ActivationRequest = {
+  activationCode?: string;
   browserInfo?: string;
   deviceFingerprint?: string;
   productKey?: string;
@@ -74,22 +77,27 @@ export async function POST(request: Request) {
   }
 
   const productKey = body.productKey?.trim();
+  const activationCode = body.activationCode?.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   const deviceFingerprint = body.deviceFingerprint?.trim();
 
-  if (!productKey || !deviceFingerprint) {
+  if ((!productKey && !activationCode) || !deviceFingerprint) {
     return NextResponse.json(
-      { ok: false, message: "Product key and device fingerprint are required." },
+      { ok: false, message: "Store key or device code and device fingerprint are required." },
       { status: 400 }
     );
   }
 
-  if (productKey.length < 30) {
+  if (productKey && productKey.length < 30) {
     return NextResponse.json({ ok: false, message: "Product key must be at least 30 characters." }, { status: 400 });
+  }
+
+  if (activationCode && activationCode.length !== 8) {
+    return NextResponse.json({ ok: false, message: "Device activation code must contain 8 characters." }, { status: 400 });
   }
 
   const rateLimit = await consumeRateLimit(request, {
     blockSeconds: 900,
-    identifier: hashProductKey(productKey),
+    identifier: hashProductKey(productKey || activationCode || "invalid"),
     limit: 12,
     scope: "product_key_activation",
     windowSeconds: 900
@@ -104,19 +112,32 @@ export async function POST(request: Request) {
 
   try {
     const supabase = createSupabaseAdminClient();
-    const keyHash = hashProductKey(productKey);
-    const { data: productKeyRow, error: productKeyError } = await supabase
+    let activationCodeRow: { id: string; product_key_id: string; shop_id: string } | null = null;
+    if (activationCode) {
+      const { data, error } = await supabase
+        .from("commerce_device_activation_codes")
+        .select("id, product_key_id, shop_id")
+        .eq("code_hash", hashProductKey(activationCode))
+        .is("used_at", null)
+        .gt("expires_at", new Date().toISOString())
+        .maybeSingle();
+      if (error) throw error;
+      activationCodeRow = data;
+    }
+
+    const productKeyQuery = supabase
       .from("product_keys")
-      .select("id, shop_id, status, allowed_devices, created_at, activated_at, expires_at")
-      .eq("key_hash", keyHash)
-      .maybeSingle();
+      .select("id, shop_id, status, allowed_devices, key_preview, created_at, activated_at, expires_at");
+    const { data: productKeyRow, error: productKeyError } = activationCodeRow
+      ? await productKeyQuery.eq("id", activationCodeRow.product_key_id).eq("shop_id", activationCodeRow.shop_id).maybeSingle()
+      : await productKeyQuery.eq("key_hash", hashProductKey(productKey || "")).maybeSingle();
 
     if (productKeyError) {
       throw productKeyError;
     }
 
     if (!productKeyRow) {
-      return NextResponse.json({ ok: false, message: "Invalid product key." }, { status: 404 });
+      return NextResponse.json({ ok: false, message: activationCode ? "Invalid or expired device activation code." : "Invalid product key." }, { status: 404 });
     }
 
     if (["revoked", "locked", "expired"].includes(productKeyRow.status)) {
@@ -173,18 +194,34 @@ export async function POST(request: Request) {
       );
     }
 
+    if (activationCode) {
+      const { count, error: adminCountError } = await supabase
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .eq("shop_id", productKeyRow.shop_id)
+        .eq("role", "shop_admin")
+        .eq("is_active", true);
+      if (adminCountError) throw adminCountError;
+      if (!count) {
+        return NextResponse.json(
+          { ok: false, message: "Use the permanent store key for first-time installation. Device codes work after the store administrator is created." },
+          { status: 409 }
+        );
+      }
+    }
+
     const browserInfo =
       body.browserInfo?.trim() || request.headers.get("user-agent") || "Unknown browser";
     const now = new Date().toISOString();
-    const { data: activationResultData, error: activationError } = await supabase.rpc(
-      "activate_product_key_device",
-      {
+    const activationRpc = activationCode ? "activate_product_key_device_with_code" : "activate_product_key_device";
+    const activationParams = {
         p_browser_info: browserInfo,
         p_device_fingerprint: deviceFingerprint,
         p_product_key_id: productKeyRow.id,
-        p_shop_id: productKeyRow.shop_id
-      }
-    );
+        p_shop_id: productKeyRow.shop_id,
+        ...(activationCode ? { p_code_hash: hashProductKey(activationCode) } : {})
+      };
+    const { data: activationResultData, error: activationError } = await supabase.rpc(activationRpc, activationParams);
 
     if (activationError) throw activationError;
 
@@ -195,6 +232,7 @@ export async function POST(request: Request) {
         device_limit: "This product key has reached its device limit.",
         expired: "This product key has expired.",
         invalid_device: "This device could not be identified. Refresh and try again.",
+        invalid_activation_code: "This device activation code has expired or was already used.",
         license_expired: "Your POS license has expired. Please contact support.",
         license_locked: "Your POS is temporarily locked. Please contact support.",
         no_license: "No license is attached to this shop.",
@@ -216,9 +254,9 @@ export async function POST(request: Request) {
     });
 
     const shopSelect =
-      "id, name, slug, setup_email, email, website, phone, address, currency, timezone, plan_name, license_status, created_at";
+      "id, name, slug, setup_email, email, website, phone, address, currency, timezone, plan_name, license_status, session_version, created_at";
     const legacyShopSelect =
-      "id, name, slug, email, website, phone, address, currency, timezone, plan_name, license_status, created_at";
+      "id, name, slug, email, website, phone, address, currency, timezone, plan_name, license_status, session_version, created_at";
     const shopWithSetupEmail = await supabase
       .from("shops")
       .select(shopSelect)
@@ -317,7 +355,7 @@ export async function POST(request: Request) {
             productKeys: [
               {
                 id: productKeyRow.id,
-                key: productKey,
+                key: productKey || productKeyRow.key_preview || "Activated device",
                 status: "active",
                 shopId: productKeyRow.shop_id,
                 allowedDevices: productKeyRow.allowed_devices,
@@ -400,13 +438,28 @@ export async function POST(request: Request) {
       licenseStatus,
       shopId: productKeyRow.shop_id
     });
+    if (activationRow) {
+      await sendCommerceBridgeWebhook(activationRow.id, {
+        event_type: "device_activated",
+        store_id: productKeyRow.shop_id,
+        device: {
+          id: activationRow.id,
+          uuid: activationRow.id,
+          name: activationRow.browser_info ?? "POS device",
+          type: "browser",
+          platform: browserInfo,
+          app_version: "web"
+        }
+      });
+    }
     response.cookies.set(
       SHOP_DEVICE_SESSION_COOKIE,
       createShopDeviceSessionToken({
         kind: "device",
         shopId: productKeyRow.shop_id,
         productKeyId: productKeyRow.id,
-        deviceFingerprint
+        deviceFingerprint,
+        sessionVersion: Number(shop?.session_version ?? 0)
       }),
       shopSessionCookieOptions(SHOP_DEVICE_SESSION_MAX_AGE_SECONDS)
     );
@@ -460,6 +513,9 @@ export async function DELETE(request: Request) {
 
   try {
     const supabase = createSupabaseAdminClient();
+    if (!(await isShopSessionCurrent(supabase, session))) {
+      return NextResponse.json({ ok: false, message: "This store device session has been signed out." }, { status: 401 });
+    }
     const { data: admins, error: adminError } = await supabase
       .from("profiles")
       .select("id, email")

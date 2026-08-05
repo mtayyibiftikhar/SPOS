@@ -4,6 +4,7 @@ import { consumeRateLimit } from "@/lib/server/rate-limit";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
   createShopUserSessionToken,
+  isShopSessionCurrent,
   readShopUserSession,
   SHOP_USER_SESSION_COOKIE,
   SHOP_USER_SESSION_MAX_AGE_SECONDS,
@@ -118,6 +119,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: "This user is inactive. Ask the shop admin to reactivate access." }, { status: 403 });
     }
 
+    const { data: shop, error: shopError } = await supabase
+      .from("shops")
+      .select("session_version")
+      .eq("id", profile.shop_id)
+      .maybeSingle();
+
+    if (shopError || !shop) {
+      return NextResponse.json({ ok: false, message: "This store is unavailable." }, { status: 403 });
+    }
+
     const lastLoginAt = new Date().toISOString();
     await supabase.from("profiles").update({ last_login_at: lastLoginAt }).eq("id", profile.id);
 
@@ -135,7 +146,8 @@ export async function POST(request: Request) {
         shopId: profile.shop_id,
         userId: profile.id,
         email: profile.email,
-        role: profile.role
+        role: profile.role,
+        sessionVersion: Number(shop.session_version ?? 0)
       }),
       shopSessionCookieOptions(SHOP_USER_SESSION_MAX_AGE_SECONDS)
     );
@@ -157,6 +169,9 @@ export async function GET(request: Request) {
   }
 
   const supabase = createSupabaseAdminClient();
+  if (!(await isShopSessionCurrent(supabase, session))) {
+    return NextResponse.json({ ok: false, message: "Shop user session has been signed out." }, { status: 401 });
+  }
   const { data: profile, error } = await supabase
     .from("profiles")
     .select("id, shop_id, email, role, is_active")

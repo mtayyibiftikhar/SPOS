@@ -4,7 +4,7 @@ import { closeExpiredAttendanceRecords } from "@/lib/server/attendance-rollover"
 import { isMissingAttendanceScheduleColumns } from "@/lib/server/attendance-schema";
 import { optimizePosImage } from "@/lib/server/optimize-pos-image";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { readShopUserSession } from "@/lib/supabase/shop-session";
+import { isShopSessionCurrent, readShopUserSession } from "@/lib/supabase/shop-session";
 import { uploadPrivatePosAsset } from "@/lib/supabase/storage-assets";
 import { DEFAULT_SHIFT_END_TIME, DEFAULT_SHIFT_START_TIME } from "@/lib/attendance";
 import type { DemoAppState } from "@/types/pos";
@@ -77,6 +77,7 @@ async function resolveDirectSession(request: Request, businessDate: string) {
   if (!userSession) return null;
 
   const supabase = createSupabaseAdminClient();
+  if (!(await isShopSessionCurrent(supabase, userSession))) return null;
   const [
     { data: shop, error: shopError },
     { data: profile, error: profileError },

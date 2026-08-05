@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createHmac, timingSafeEqual } from "node:crypto";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const SHOP_DEVICE_SESSION_COOKIE = "spos_shop_device";
 export const SHOP_USER_SESSION_COOKIE = "spos_shop_user";
@@ -12,6 +13,7 @@ export type ShopDeviceSession = {
   expiresAt: number;
   kind: "device";
   productKeyId: string;
+  sessionVersion: number;
   shopId: string;
 };
 
@@ -20,6 +22,7 @@ export type ShopUserSession = {
   expiresAt: number;
   kind: "user";
   role: "shop_admin" | "cashier" | "support";
+  sessionVersion: number;
   shopId: string;
   userId: string;
 };
@@ -107,6 +110,21 @@ export function readShopDeviceSession(request: Request) {
 
 export function readShopUserSession(request: Request) {
   return verifyToken<ShopUserSession>(readCookie(request, SHOP_USER_SESSION_COOKIE), "user");
+}
+
+export async function isShopSessionCurrent(
+  supabase: SupabaseClient,
+  session: ShopDeviceSession | ShopUserSession
+) {
+  const { data, error } = await supabase
+    .from("shops")
+    .select("session_version")
+    .eq("id", session.shopId)
+    .maybeSingle();
+
+  if (error || !data) return false;
+
+  return Number(data.session_version ?? 0) === Number(session.sessionVersion ?? 0);
 }
 
 export const shopSessionCookieOptions = (maxAge: number) => ({

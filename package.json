@@ -15,6 +15,8 @@
     "check:launch": "npm run typecheck && npm run test:logic && npm run build",
     "audit:cloud-schema": "node scripts/audit-cloud-schema.cjs",
     "smoke:production": "node scripts/smoke-production.cjs",
+    "test:commerce-bridge": "node --test wordpress-plugin/global-fsms-commerce-bridge/tests/*.test.mjs",
+    "package:commerce-bridge": "node scripts/package-commerce-bridge.cjs",
     "db:reset-stores": "node scripts/reset-all-store-data.cjs",
     "desktop:dev": "electron apps/desktop/main.cjs",
     "desktop:build": "electron-builder --config apps/desktop/electron-builder.yml --win nsis",

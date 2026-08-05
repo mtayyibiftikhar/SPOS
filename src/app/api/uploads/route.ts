@@ -3,7 +3,7 @@ import { stableUuid } from "@/lib/cloud-sync";
 import { deletePrivatePosAsset, getPrivatePosAssetPathFromUrl, uploadPrivatePosAsset } from "@/lib/supabase/storage-assets";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getAuthorizedOwnerSession } from "@/lib/supabase/owner-session";
-import { readShopUserSession } from "@/lib/supabase/shop-session";
+import { isShopSessionCurrent, readShopUserSession } from "@/lib/supabase/shop-session";
 import { optimizePosImage } from "@/lib/server/optimize-pos-image";
 
 type UploadScope = "category" | "owner-ad" | "owner-login-hero" | "owner-logo" | "product" | "shop-logo";
@@ -57,7 +57,7 @@ async function authorizeShopUpload(request: Request, requestedShopId: string) {
   const candidateShopIds = getCandidateShopIds(requestedShopId);
   const session = readShopUserSession(request);
 
-  if (session && candidateShopIds.includes(session.shopId)) {
+  if (session && candidateShopIds.includes(session.shopId) && await isShopSessionCurrent(supabase, session)) {
     const { data: profile, error } = await supabase
       .from("profiles")
       .select("id, shop_id, email, role, is_active")

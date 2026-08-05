@@ -352,7 +352,9 @@ export function LoginForm() {
         body: JSON.stringify({
           browserInfo: browserInfo || getBrowserInfo(),
           deviceFingerprint: getDeviceFingerprint(),
-          productKey: normalizedActivationKey
+          ...(normalizedActivationKey.replace(/[^A-Z0-9]/gi, "").length === 8
+            ? { activationCode: normalizedActivationKey }
+            : { productKey: normalizedActivationKey })
         })
       });
       const payload = (await response.json()) as CloudActivationResponse;
@@ -526,8 +528,8 @@ export function LoginForm() {
             <h2 className="mt-5 font-display text-4xl font-medium text-slate-950">Activate store POS</h2>
             <div className="mt-7 space-y-4">
               <label className="block space-y-2">
-                <span className="text-sm font-semibold text-slate-950">Activation key</span>
-                <Input autoComplete="off" className="h-14 rounded-[10px] border-slate-400 bg-white font-mono text-base focus:border-blue-600" placeholder="SPOS-KSA-..." value={activationKey} onChange={(event) => setActivationKey(event.target.value)} />
+                <span className="text-sm font-semibold text-slate-950">Store key or device code</span>
+                <Input autoComplete="off" className="h-14 rounded-[10px] border-slate-400 bg-white font-mono text-base focus:border-blue-600" placeholder="GFSMS-... or 8-character code" value={activationKey} onChange={(event) => setActivationKey(event.target.value)} />
               </label>
               {activationMessage ? (
                 <p className={cn("rounded-2xl px-4 py-3 text-sm font-semibold", activationMessage.includes("accepted") || activationMessage.includes("activated") ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700")}>

@@ -176,7 +176,7 @@ export async function POST(request: Request) {
       await Promise.all([
         supabase
           .from("shops")
-          .select("id, name, slug, license_status")
+          .select("id, name, slug, license_status, session_version")
           .eq("id", productKeyRow.shop_id)
           .maybeSingle(),
         supabase
@@ -432,7 +432,8 @@ export async function POST(request: Request) {
         shopId: shop.id,
         userId: authUserId,
         email: adminEmail,
-        role: "shop_admin"
+        role: "shop_admin",
+        sessionVersion: Number(shop.session_version ?? 0)
       }),
       shopSessionCookieOptions(SHOP_USER_SESSION_MAX_AGE_SECONDS)
     );

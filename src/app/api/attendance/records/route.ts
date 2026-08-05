@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { readShopUserSession } from "@/lib/supabase/shop-session";
+import { isShopSessionCurrent, readShopUserSession } from "@/lib/supabase/shop-session";
 import {
   calculateAutoClosedAttendanceHours,
   DEFAULT_SHIFT_END_TIME,
@@ -225,6 +225,9 @@ export async function GET(request: Request) {
   try {
     const now = new Date();
     const supabase = createSupabaseAdminClient();
+    if (!(await isShopSessionCurrent(supabase, session))) {
+      return NextResponse.json({ ok: false, message: "Your shop session has been signed out." }, { status: 401 });
+    }
     if (!(await canManageAttendance(supabase, session))) {
       return NextResponse.json({ ok: false, message: "Your role cannot access attendance." }, { status: 403 });
     }
@@ -271,6 +274,9 @@ export async function POST(request: Request) {
 
   try {
     const supabase = createSupabaseAdminClient();
+    if (!(await isShopSessionCurrent(supabase, session))) {
+      return NextResponse.json({ ok: false, message: "Your shop session has been signed out." }, { status: 401 });
+    }
     const canManage = await canManageAttendance(supabase, session);
 
     if (!canManage) {
