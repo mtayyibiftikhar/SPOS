@@ -509,6 +509,13 @@ async function loadOwnerControlledShopState(
                 attendanceRequireSelfie:
                   (currentState.settingsByShop?.[shop.id]?.pos as { attendanceRequireSelfie?: boolean } | undefined)
                     ?.attendanceRequireSelfie ?? false,
+                attendanceAllowKioskPin: currentState.settingsByShop?.[shop.id]?.pos.attendanceAllowKioskPin ?? true,
+                attendanceAllowFingerprint: currentState.settingsByShop?.[shop.id]?.pos.attendanceAllowFingerprint ?? false,
+                attendanceAllowPersonalBiometric: currentState.settingsByShop?.[shop.id]?.pos.attendanceAllowPersonalBiometric ?? false,
+                attendanceKioskSelfieWithPin: currentState.settingsByShop?.[shop.id]?.pos.attendanceKioskSelfieWithPin ?? false,
+                attendanceGeofenceRadiusMeters: currentState.settingsByShop?.[shop.id]?.pos.attendanceGeofenceRadiusMeters ?? 100,
+                attendanceLatitude: currentState.settingsByShop?.[shop.id]?.pos.attendanceLatitude,
+                attendanceLongitude: currentState.settingsByShop?.[shop.id]?.pos.attendanceLongitude,
                 rolePermissions: currentState.settingsByShop?.[shop.id]?.pos.rolePermissions,
                 accessRoles: currentState.settingsByShop?.[shop.id]?.pos.accessRoles,
                 userAccessRoleIds: currentState.settingsByShop?.[shop.id]?.pos.userAccessRoleIds,

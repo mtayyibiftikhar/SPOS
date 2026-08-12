@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   ArrowLeft,
   Edit3,
+  Fingerprint,
   KeyRound,
   Search,
   Trash2,
@@ -38,6 +39,15 @@ type UserFormState = {
 };
 
 type UsersView = "list" | "form" | "roles";
+type AttendanceCredential = {
+  employee_code: string;
+  fingerprint_enabled: boolean;
+  fingerprint_enrolled_at?: string | null;
+  personal_biometric_enabled: boolean;
+  personal_passkey_count: number;
+  pin_enabled: boolean;
+  user_id: string;
+};
 
 const emptyUserForm: UserFormState = {
   name: "",
@@ -67,6 +77,14 @@ export default function UsersPage() {
     tone: "success" | "error";
     message: string;
   } | null>(null);
+  const [attendanceCredentials, setAttendanceCredentials] = useState<AttendanceCredential[]>([]);
+  const [attendanceUser, setAttendanceUser] = useState<User | null>(null);
+  const [attendanceCode, setAttendanceCode] = useState("");
+  const [attendancePin, setAttendancePin] = useState("");
+  const [attendancePinEnabled, setAttendancePinEnabled] = useState(true);
+  const [attendanceFingerprintEnabled, setAttendanceFingerprintEnabled] = useState(false);
+  const [attendancePersonalBiometricEnabled, setAttendancePersonalBiometricEnabled] = useState(false);
+  const [isSavingAttendance, setIsSavingAttendance] = useState(false);
   const canManageUsers = session?.role === "shop_admin" || session?.role === "super_admin";
   const accessRoles = useMemo(() => getAccessRoles(currentSettings?.pos), [currentSettings?.pos]);
   const accessRoleNames = useMemo(
@@ -77,6 +95,62 @@ export default function UsersPage() {
     const archived = new Set(currentSettings?.pos.archivedUserIds ?? []);
     return currentUsers.filter((user) => !archived.has(user.id));
   }, [currentSettings?.pos.archivedUserIds, currentUsers]);
+
+  const loadAttendanceCredentials = async () => {
+    if (!canManageUsers) return;
+    try {
+      const response = await fetch("/api/attendance/credentials", { cache: "no-store" });
+      const result = await response.json() as { credentials?: AttendanceCredential[] };
+      if (response.ok) setAttendanceCredentials(result.credentials ?? []);
+    } catch {
+      // User management remains available if attendance enrollment is not yet migrated.
+    }
+  };
+
+  useEffect(() => {
+    void loadAttendanceCredentials();
+  }, [canManageUsers]);
+
+  const openAttendanceEnrollment = (user: User) => {
+    const credential = attendanceCredentials.find((entry) => entry.user_id === user.id);
+    setAttendanceUser(user);
+    setAttendanceCode(credential?.employee_code ?? `EMP-${user.id.replace(/[^a-z0-9]/gi, "").slice(-6).toUpperCase()}`);
+    setAttendancePin("");
+    setAttendancePinEnabled(credential?.pin_enabled ?? true);
+    setAttendanceFingerprintEnabled(credential?.fingerprint_enabled ?? false);
+    setAttendancePersonalBiometricEnabled(credential?.personal_biometric_enabled ?? false);
+  };
+
+  const saveAttendanceEnrollment = async () => {
+    if (!attendanceUser) return;
+    setIsSavingAttendance(true);
+    try {
+      const response = await fetch("/api/attendance/credentials", {
+        body: JSON.stringify({
+          employeeCode: attendanceCode,
+          fingerprintEnabled: attendanceFingerprintEnabled,
+          personalBiometricEnabled: attendancePersonalBiometricEnabled,
+          pin: attendancePin || undefined,
+          pinEnabled: attendancePinEnabled,
+          userId: attendanceUser.id
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      });
+      const result = await response.json() as { credential?: AttendanceCredential; message?: string; ok?: boolean };
+      if (!response.ok || !result.ok || !result.credential) {
+        setFeedback({ tone: "error", message: result.message ?? "Unable to save attendance enrollment." });
+        return;
+      }
+      setAttendanceCredentials((current) => [...current.filter((entry) => entry.user_id !== attendanceUser.id), result.credential!]);
+      setAttendanceUser(null);
+      setFeedback({ tone: "success", message: "Attendance enrollment saved." });
+    } catch {
+      setFeedback({ tone: "error", message: "Unable to reach attendance enrollment service." });
+    } finally {
+      setIsSavingAttendance(false);
+    }
+  };
 
   const filteredUsers = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -370,7 +444,9 @@ export default function UsersPage() {
               No users matched the current search.
             </div>
           ) : (
-            filteredUsers.map((user) => (
+            filteredUsers.map((user) => {
+              const attendanceCredential = attendanceCredentials.find((entry) => entry.user_id === user.id);
+              return (
               <div
                 key={user.id}
                 className="rounded-[26px] border border-line bg-white p-4 shadow-[0_14px_40px_rgba(15,23,42,0.05)]"
@@ -397,11 +473,17 @@ export default function UsersPage() {
                       <p className="mt-2 text-xs uppercase tracking-[0.2em] text-slate-400">
                         {t("users.lastLoginLine", { date: formatDateTime(user.lastLoginAt, locale) })}
                       </p>
+                      <p className="mt-2 text-xs font-semibold text-emerald-700">
+                        {attendanceCredential ? `Attendance ID ${attendanceCredential.employee_code}` : "Attendance not enrolled"}
+                      </p>
                     </div>
                   </div>
 
                   {canManageUsers ? (
                     <div className="flex flex-wrap gap-3">
+                      <Button size="sm" variant="secondary" onClick={() => openAttendanceEnrollment(user)}>
+                        <span className="inline-flex items-center gap-2"><Fingerprint className="h-4 w-4" />Attendance</span>
+                      </Button>
                       <Button size="sm" variant="secondary" onClick={() => startEditUser(user)}>
                         <span className="inline-flex items-center gap-2">
                           <Edit3 className="h-4 w-4" />
@@ -434,7 +516,7 @@ export default function UsersPage() {
                   ) : null}
                 </div>
               </div>
-            ))
+            );})
           )}
         </div>
       </Card>
@@ -773,6 +855,25 @@ export default function UsersPage() {
                 {deletingUserId === deleteCandidate.id ? "Deleting..." : "Delete user"}
               </Button>
             </div>
+          </div>
+        </div>
+      ) : null}
+      {attendanceUser ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-[30px] bg-white p-6 shadow-2xl">
+            <p className="text-xs font-bold uppercase tracking-[.25em] text-emerald-700">Attendance enrollment</p>
+            <h2 className="mt-2 text-2xl font-semibold text-slate-950">{attendanceUser.name}</h2>
+            <div className="mt-6 grid gap-4 sm:grid-cols-2">
+              <label className="text-sm font-semibold text-slate-950">Employee ID<Input className="mt-2 uppercase" maxLength={20} onChange={(event) => setAttendanceCode(event.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""))} value={attendanceCode} /></label>
+              <label className="text-sm font-semibold text-slate-950">New attendance PIN<Input className="mt-2" inputMode="numeric" maxLength={6} onChange={(event) => setAttendancePin(event.target.value.replace(/\D/g, ""))} placeholder="Leave blank to keep current PIN" type="password" value={attendancePin} /></label>
+            </div>
+            <div className="mt-5 grid gap-3">
+              <label className="flex items-center justify-between rounded-2xl border border-slate-200 p-4 text-sm font-semibold"><span>Allow ID + PIN kiosk</span><input checked={attendancePinEnabled} className="h-5 w-5 accent-emerald-600" onChange={(event) => setAttendancePinEnabled(event.target.checked)} type="checkbox" /></label>
+              <label className="flex items-center justify-between rounded-2xl border border-slate-200 p-4 text-sm font-semibold"><span>Prepare fingerprint enrollment</span><input checked={attendanceFingerprintEnabled} className="h-5 w-5 accent-emerald-600" onChange={(event) => setAttendanceFingerprintEnabled(event.target.checked)} type="checkbox" /></label>
+              <label className="flex items-center justify-between rounded-2xl border border-slate-200 p-4 text-sm font-semibold"><span>Allow personal-device biometric</span><input checked={attendancePersonalBiometricEnabled} className="h-5 w-5 accent-emerald-600" onChange={(event) => setAttendancePersonalBiometricEnabled(event.target.checked)} type="checkbox" /></label>
+            </div>
+            <p className="mt-4 rounded-2xl bg-amber-50 p-4 text-xs leading-5 text-amber-800">Fingerprint is marked ready for enrollment, but attendance will not claim a biometric match until an approved terminal and its signed device reference are connected.</p>
+            <div className="mt-6 flex justify-end gap-3"><Button disabled={isSavingAttendance} onClick={() => setAttendanceUser(null)} variant="secondary">Cancel</Button><Button disabled={isSavingAttendance || attendanceCode.length < 3 || (Boolean(attendancePin) && attendancePin.length < 4)} onClick={() => void saveAttendanceEnrollment()}>{isSavingAttendance ? "Saving..." : "Save enrollment"}</Button></div>
           </div>
         </div>
       ) : null}

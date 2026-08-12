@@ -71,6 +71,9 @@ function escapeHtml(value: string | number | undefined) {
 function sourceLabel(record: AttendanceRecord) {
   if (record.source === "qr") return "Verified clock-in";
   if (record.source === "manual") return "Manual record";
+  if (record.source === "kiosk_pin") return "Store kiosk ID + PIN";
+  if (record.source === "fingerprint") return "Fingerprint verified";
+  if (record.source === "passkey") return "Personal biometric verified";
   return "Admin force clock-in";
 }
 

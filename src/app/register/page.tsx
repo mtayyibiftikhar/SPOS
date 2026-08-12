@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Building2, CheckCircle2, Globe2, KeyRound, Mail, MapPin, Phone, ReceiptText, ShieldCheck, UserRoundPlus } from "lucide-react";
+import { Building2, Camera, CheckCircle2, Fingerprint, Globe2, KeyRound, Mail, MapPin, Phone, ReceiptText, ShieldCheck, Smartphone, UserRoundPlus } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { usePosApp } from "@/components/providers/app-provider";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,14 @@ type RegisterFormState = {
   adminEmail: string;
   adminPhone: string;
   adminPassword: string;
+  attendanceEnabled: boolean;
+  attendanceAllowQrLink: boolean;
+  attendanceRequireLocation: boolean;
+  attendanceRequireSelfie: boolean;
+  attendanceAllowKioskPin: boolean;
+  attendanceAllowFingerprint: boolean;
+  attendanceAllowPersonalBiometric: boolean;
+  attendanceGeofenceRadiusMeters: number;
 };
 
 type CompleteInstallationResponse = {
@@ -148,7 +156,15 @@ export default function RegisterPage() {
     adminName: "",
     adminEmail: "",
     adminPhone: "",
-    adminPassword: ""
+    adminPassword: "",
+    attendanceEnabled: true,
+    attendanceAllowQrLink: true,
+    attendanceRequireLocation: true,
+    attendanceRequireSelfie: false,
+    attendanceAllowKioskPin: true,
+    attendanceAllowFingerprint: false,
+    attendanceAllowPersonalBiometric: false,
+    attendanceGeofenceRadiusMeters: 100
   });
 
   const activeIndex = steps.findIndex((step) => step.id === activeStep);
@@ -239,7 +255,15 @@ export default function RegisterPage() {
       taxRate: current.taxRate || settings?.tax.rate || 15,
       taxMode: settings?.tax.mode ?? current.taxMode,
       receiptFooterText: current.receiptFooterText || settings?.receipt.footerText || `Thank you for visiting ${shop.name}.`,
-      adminEmail: current.adminEmail || setupEmail
+      adminEmail: current.adminEmail || setupEmail,
+      attendanceEnabled: settings?.pos.attendanceEnabled ?? current.attendanceEnabled,
+      attendanceAllowQrLink: settings?.pos.attendanceAllowQrLink ?? current.attendanceAllowQrLink,
+      attendanceRequireLocation: settings?.pos.attendanceRequireLocation ?? current.attendanceRequireLocation,
+      attendanceRequireSelfie: settings?.pos.attendanceRequireSelfie ?? current.attendanceRequireSelfie,
+      attendanceAllowKioskPin: settings?.pos.attendanceAllowKioskPin ?? current.attendanceAllowKioskPin,
+      attendanceAllowFingerprint: settings?.pos.attendanceAllowFingerprint ?? current.attendanceAllowFingerprint,
+      attendanceAllowPersonalBiometric: settings?.pos.attendanceAllowPersonalBiometric ?? current.attendanceAllowPersonalBiometric,
+      attendanceGeofenceRadiusMeters: settings?.pos.attendanceGeofenceRadiusMeters ?? current.attendanceGeofenceRadiusMeters
     }));
   }, [form.productKey, state.productKeys, state.settingsByShop, state.shops]);
 
@@ -518,6 +542,34 @@ export default function RegisterPage() {
                       <p className="font-semibold text-slate-950">{form.shopName || "Shop logo preview"}</p>
                     </div>
                   ) : null}
+                  <div className="rounded-[28px] border border-emerald-100 bg-emerald-50/60 p-5 md:col-span-2">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-950">Staff attendance</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-600">Choose how employees will clock in. You can change these rules later.</p>
+                      </div>
+                      <label className="flex items-center gap-3 text-sm font-semibold text-slate-950">
+                        Enable attendance
+                        <input checked={form.attendanceEnabled} className="h-5 w-5 accent-emerald-600" onChange={(event) => updateForm("attendanceEnabled", event.target.checked)} type="checkbox" />
+                      </label>
+                    </div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      {[
+                        { field: "attendanceAllowQrLink" as const, icon: Smartphone, label: "Employee phone / QR", text: "Secure employee link from the Time Clock." },
+                        { field: "attendanceAllowKioskPin" as const, icon: KeyRound, label: "Shared ID + PIN kiosk", text: "One activated store device for all staff." },
+                        { field: "attendanceRequireLocation" as const, icon: MapPin, label: "Capture GPS", text: "Record location evidence from mobile clock-in." },
+                        { field: "attendanceRequireSelfie" as const, icon: Camera, label: "Require selfie", text: "Capture a fresh employee photo at clock-in." },
+                        { field: "attendanceAllowFingerprint" as const, icon: Fingerprint, label: "Fingerprint terminal", text: "Prepare employees for supported scanner hardware." },
+                        { field: "attendanceAllowPersonalBiometric" as const, icon: ShieldCheck, label: "Personal biometric", text: "Prepare for device passkey verification." }
+                      ].map(({ field, icon: Icon, label, text }) => (
+                        <label className="flex items-center justify-between gap-3 rounded-2xl border border-white bg-white px-4 py-3" key={field}>
+                          <span className="flex items-start gap-3"><Icon className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" /><span><span className="block text-sm font-semibold text-slate-950">{label}</span><span className="mt-1 block text-xs leading-4 text-slate-500">{text}</span></span></span>
+                          <input checked={form[field]} className="h-5 w-5 shrink-0 accent-emerald-600" disabled={!form.attendanceEnabled} onChange={(event) => updateForm(field, event.target.checked)} type="checkbox" />
+                        </label>
+                      ))}
+                    </div>
+                    <p className="mt-3 text-xs leading-5 text-slate-500">Fingerprint and personal biometrics are enabled only after compatible hardware or a registered passkey performs real verification.</p>
+                  </div>
                 </div>
               </section>
             ) : null}

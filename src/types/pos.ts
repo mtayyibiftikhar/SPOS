@@ -42,7 +42,9 @@ export type SupplierPaymentMethod = "cash" | "card" | "bank" | "credit";
 export type PurchasePaymentStatus = "unpaid" | "partial" | "paid";
 export type LedgerReferenceType = "bill" | "customer_payment" | "refund" | "expense" | "cash_movement";
 export type AttendanceStatus = "open" | "closed" | "auto_closed";
-export type AttendanceSource = "qr" | "manual" | "admin_bypass";
+export type AttendanceSource = "qr" | "manual" | "admin_bypass" | "kiosk_pin" | "fingerprint" | "passkey";
+export type AttendanceVerificationMethod = "mobile_qr" | "mobile_direct" | "kiosk_pin" | "fingerprint" | "passkey" | "admin_manual";
+export type AttendanceVerificationStrength = "low" | "medium" | "high" | "manual";
 
 export interface LocalizedText {
   en: string;
@@ -136,6 +138,9 @@ export interface AttendanceRecord {
   businessDate: string;
   status: AttendanceStatus;
   source: AttendanceSource;
+  verificationMethod?: AttendanceVerificationMethod;
+  verificationStrength?: AttendanceVerificationStrength;
+  attendanceDeviceId?: string;
   clockInAt: string;
   clockOutAt?: string;
   clockInLocation?: AttendanceLocation;
@@ -580,6 +585,13 @@ export interface POSSettings {
   attendanceAllowQrLink?: boolean;
   attendanceRequireLocation?: boolean;
   attendanceRequireSelfie?: boolean;
+  attendanceAllowKioskPin?: boolean;
+  attendanceAllowFingerprint?: boolean;
+  attendanceAllowPersonalBiometric?: boolean;
+  attendanceKioskSelfieWithPin?: boolean;
+  attendanceGeofenceRadiusMeters?: number;
+  attendanceLatitude?: number;
+  attendanceLongitude?: number;
   rolePermissions?: Partial<Record<Exclude<UserRole, "super_admin">, RolePermissionKey[]>>;
   accessRoles?: ShopAccessRole[];
   userAccessRoleIds?: Record<string, string>;

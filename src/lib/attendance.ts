@@ -3,9 +3,26 @@ import type { AttendanceRecord } from "@/types/pos";
 export const DEFAULT_SHIFT_START_TIME = "08:00";
 export const DEFAULT_SHIFT_END_TIME = "16:00";
 const RIYADH_OFFSET = "+03:00";
+const EARTH_RADIUS_METERS = 6_371_000;
 
 function roundHours(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+export function calculateAttendanceDistanceMeters(
+  from: { latitude: number; longitude: number },
+  to: { latitude: number; longitude: number }
+) {
+  const radians = (value: number) => (value * Math.PI) / 180;
+  const latitudeDelta = radians(to.latitude - from.latitude);
+  const longitudeDelta = radians(to.longitude - from.longitude);
+  const fromLatitude = radians(from.latitude);
+  const toLatitude = radians(to.latitude);
+  const haversine =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(fromLatitude) * Math.cos(toLatitude) * Math.sin(longitudeDelta / 2) ** 2;
+
+  return EARTH_RADIUS_METERS * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 }
 
 export function calculateElapsedAttendanceHours(clockInAt: string, clockOutAt: string) {

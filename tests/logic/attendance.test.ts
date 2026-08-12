@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  calculateAttendanceDistanceMeters,
   calculateAutoClosedAttendanceHours,
   calculateElapsedAttendanceHours,
   calculateScheduledAttendanceClosure,
@@ -23,6 +24,15 @@ function createAttendanceRecord(overrides: Partial<AttendanceRecord> = {}): Atte
     ...overrides
   };
 }
+
+test("attendance geofence measures the distance between GPS points", () => {
+  const distance = calculateAttendanceDistanceMeters(
+    { latitude: 24.7136, longitude: 46.6753 },
+    { latitude: 24.7145, longitude: 46.6753 }
+  );
+
+  assert.ok(distance > 95 && distance < 105);
+});
 
 test("normal clock-out records the exact elapsed attendance hours", () => {
   assert.equal(

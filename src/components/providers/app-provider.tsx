@@ -259,6 +259,14 @@ type RegisterInstalledShopInput = {
   adminEmail: string;
   adminPhone?: string;
   adminPassword: string;
+  attendanceEnabled?: boolean;
+  attendanceAllowQrLink?: boolean;
+  attendanceRequireLocation?: boolean;
+  attendanceRequireSelfie?: boolean;
+  attendanceAllowKioskPin?: boolean;
+  attendanceAllowFingerprint?: boolean;
+  attendanceAllowPersonalBiometric?: boolean;
+  attendanceGeofenceRadiusMeters?: number;
   createCashier?: boolean;
   cashierName?: string;
   cashierEmail?: string;
@@ -942,6 +950,20 @@ function mergeSettingsByShop(storedSettings: DemoAppState["settingsByShop"] | un
           true,
         attendanceRequireSelfie:
           storedBundle?.pos?.attendanceRequireSelfie ?? defaultBundle?.pos?.attendanceRequireSelfie ?? false,
+        attendanceAllowKioskPin:
+          storedBundle?.pos?.attendanceAllowKioskPin ?? defaultBundle?.pos?.attendanceAllowKioskPin ?? true,
+        attendanceAllowFingerprint:
+          storedBundle?.pos?.attendanceAllowFingerprint ?? defaultBundle?.pos?.attendanceAllowFingerprint ?? false,
+        attendanceAllowPersonalBiometric:
+          storedBundle?.pos?.attendanceAllowPersonalBiometric ?? defaultBundle?.pos?.attendanceAllowPersonalBiometric ?? false,
+        attendanceKioskSelfieWithPin:
+          storedBundle?.pos?.attendanceKioskSelfieWithPin ?? defaultBundle?.pos?.attendanceKioskSelfieWithPin ?? false,
+        attendanceGeofenceRadiusMeters:
+          storedBundle?.pos?.attendanceGeofenceRadiusMeters ?? defaultBundle?.pos?.attendanceGeofenceRadiusMeters ?? 100,
+        attendanceLatitude:
+          storedBundle?.pos?.attendanceLatitude ?? defaultBundle?.pos?.attendanceLatitude,
+        attendanceLongitude:
+          storedBundle?.pos?.attendanceLongitude ?? defaultBundle?.pos?.attendanceLongitude,
         rolePermissions:
           storedBundle?.pos?.rolePermissions ?? defaultBundle?.pos?.rolePermissions ?? {
             shop_admin: ["billing", "customers", "products", "inventory", "bills", "refunds", "reports", "settings", "backup"],
@@ -3832,7 +3854,16 @@ export function AppProvider({
                   website: payload.website?.trim() || undefined,
                   currency: payload.currency.trim() || "SAR",
                   vatNumber: payload.vatNumber?.trim() || undefined,
-                  autoDayRolloverEnabled: working.settingsByShop[shopId]?.pos.autoDayRolloverEnabled ?? false
+                  autoDayRolloverEnabled: working.settingsByShop[shopId]?.pos.autoDayRolloverEnabled ?? false,
+                  attendanceEnabled: payload.attendanceEnabled ?? true,
+                  attendanceAllowQrLink: payload.attendanceAllowQrLink ?? true,
+                  attendanceRequireLocation: payload.attendanceRequireLocation ?? true,
+                  attendanceRequireSelfie: payload.attendanceRequireSelfie ?? false,
+                  attendanceAllowKioskPin: payload.attendanceAllowKioskPin ?? true,
+                  attendanceAllowFingerprint: payload.attendanceAllowFingerprint ?? false,
+                  attendanceAllowPersonalBiometric: payload.attendanceAllowPersonalBiometric ?? false,
+                  attendanceKioskSelfieWithPin: false,
+                  attendanceGeofenceRadiusMeters: Math.max(25, Math.min(5000, payload.attendanceGeofenceRadiusMeters ?? 100))
                 },
                 printer: {
                   receiptSize: "80mm" as const,
@@ -4036,7 +4067,16 @@ export function AppProvider({
                   email: email?.trim() || undefined,
                   currency: "SAR",
                   vatNumber: "",
-                  autoDayRolloverEnabled: false
+                  autoDayRolloverEnabled: false,
+                  attendanceEnabled: true,
+                  attendanceAllowQrLink: true,
+                  attendanceRequireLocation: true,
+                  attendanceRequireSelfie: false,
+                  attendanceAllowKioskPin: true,
+                  attendanceAllowFingerprint: false,
+                  attendanceAllowPersonalBiometric: false,
+                  attendanceKioskSelfieWithPin: false,
+                  attendanceGeofenceRadiusMeters: 100
                 },
                 printer: {
                   receiptSize: "80mm" as const,

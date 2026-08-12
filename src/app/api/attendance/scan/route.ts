@@ -6,7 +6,7 @@ import { optimizePosImage } from "@/lib/server/optimize-pos-image";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { isShopSessionCurrent, readShopUserSession } from "@/lib/supabase/shop-session";
 import { uploadPrivatePosAsset } from "@/lib/supabase/storage-assets";
-import { DEFAULT_SHIFT_END_TIME, DEFAULT_SHIFT_START_TIME } from "@/lib/attendance";
+import { calculateAttendanceDistanceMeters, DEFAULT_SHIFT_END_TIME, DEFAULT_SHIFT_START_TIME } from "@/lib/attendance";
 import type { DemoAppState } from "@/types/pos";
 
 const MAX_SELFIE_INPUT_BYTES = 5 * 1024 * 1024;
@@ -64,6 +64,9 @@ async function resolveSession(shopId: string, userId: string, businessDate: stri
     qrSession,
     requireLocation: settings?.attendanceRequireLocation ?? true,
     requireSelfie: settings?.attendanceRequireSelfie ?? false,
+    attendanceLatitude: settings?.attendanceLatitude,
+    attendanceLongitude: settings?.attendanceLongitude,
+    attendanceGeofenceRadiusMeters: settings?.attendanceGeofenceRadiusMeters ?? 100,
     shop,
     shopId,
     supabase,
@@ -117,6 +120,9 @@ async function resolveDirectSession(request: Request, businessDate: string) {
     qrSession: null,
     requireLocation: settings?.attendanceRequireLocation ?? true,
     requireSelfie: settings?.attendanceRequireSelfie ?? false,
+    attendanceLatitude: settings?.attendanceLatitude,
+    attendanceLongitude: settings?.attendanceLongitude,
+    attendanceGeofenceRadiusMeters: settings?.attendanceGeofenceRadiusMeters ?? 100,
     shop,
     shopId: userSession.shopId,
     supabase,
@@ -218,6 +224,28 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: "A valid clock-in location is required." }, { status: 400 });
     }
 
+    if (resolved.requireLocation && hasValidLocation && accuracy > 250) {
+      return NextResponse.json({ ok: false, message: "Location accuracy is too low. Move near a window and try again." }, { status: 400 });
+    }
+
+    const hasStoreBoundary =
+      Number.isFinite(resolved.attendanceLatitude) &&
+      Number.isFinite(resolved.attendanceLongitude);
+    const distanceFromStore = hasStoreBoundary && hasValidLocation
+      ? calculateAttendanceDistanceMeters(
+          { latitude: Number(resolved.attendanceLatitude), longitude: Number(resolved.attendanceLongitude) },
+          { latitude, longitude }
+        )
+      : null;
+    const allowedDistance = Math.max(25, Math.min(5000, Number(resolved.attendanceGeofenceRadiusMeters) || 100)) + Math.min(Math.max(accuracy, 0), 100);
+
+    if (distanceFromStore != null && distanceFromStore > allowedDistance) {
+      return NextResponse.json(
+        { ok: false, message: `You are ${Math.round(distanceFromStore)}m from the store. Move within the attendance boundary and try again.` },
+        { status: 403 }
+      );
+    }
+
     if (resolved.requireSelfie && !hasValidSelfie) {
       return NextResponse.json({ ok: false, message: "A selfie image up to 5 MB is required." }, { status: 400 });
     }
@@ -269,15 +297,23 @@ export async function POST(request: Request) {
         clock_in_at: now,
         clock_in_latitude: hasValidLocation ? latitude : null,
         clock_in_longitude: hasValidLocation ? longitude : null,
+        clock_in_accuracy: hasValidLocation && accuracy > 0 ? accuracy : null,
         clock_in_selfie_url: uploaded?.url ?? null,
         hourly_rate: Number(payrollRate?.hourly_rate ?? 0),
-        note: hasValidLocation && accuracy > 0 ? `Location accuracy: ${Math.round(accuracy)}m` : null,
+        note: hasValidLocation
+          ? [
+              accuracy > 0 ? `Location accuracy: ${Math.round(accuracy)}m` : null,
+              distanceFromStore != null ? `Distance from store: ${Math.round(distanceFromStore)}m` : null
+            ].filter(Boolean).join(" | ") || null
+          : null,
         scheduled_hours: Number(payrollRate?.default_daily_hours ?? 8),
         shop_id: resolvedShopId,
         shift_end_time: payrollRate?.shift_end_time ?? DEFAULT_SHIFT_END_TIME,
         shift_start_time: payrollRate?.shift_start_time ?? DEFAULT_SHIFT_START_TIME,
         overnight_shift: Boolean(payrollRate?.overnight_shift),
         source: direct ? "manual" : "qr",
+        verification_method: direct ? "mobile_direct" : "mobile_qr",
+        verification_strength: hasValidLocation && hasValidSelfie ? "high" : "medium",
         user_id: resolvedUserId
       };
     const saveAttendance = (payload: Record<string, unknown>) =>

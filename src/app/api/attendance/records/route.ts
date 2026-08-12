@@ -183,7 +183,16 @@ function normalizeAttendanceRecord(record: Record<string, unknown>): AttendanceR
     userId: String(record.user_id),
     businessDate: String(record.business_date),
     status: clockOutAt ? "closed" : "open",
-    source: record.source === "manual" || record.source === "admin_bypass" ? record.source : "qr",
+    source: ["qr", "manual", "admin_bypass", "kiosk_pin", "fingerprint", "passkey"].includes(String(record.source))
+      ? (String(record.source) as AttendanceRecord["source"])
+      : "qr",
+    verificationMethod: record.verification_method
+      ? (String(record.verification_method) as AttendanceRecord["verificationMethod"])
+      : undefined,
+    verificationStrength: ["basic", "medium", "high"].includes(String(record.verification_strength))
+      ? (String(record.verification_strength) as AttendanceRecord["verificationStrength"])
+      : undefined,
+    attendanceDeviceId: record.attendance_device_id ? String(record.attendance_device_id) : undefined,
     clockInAt,
     clockOutAt,
     clockInLocation:
