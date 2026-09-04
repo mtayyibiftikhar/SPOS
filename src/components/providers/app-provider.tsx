@@ -51,7 +51,9 @@ import {
   calculateShiftSummary,
   getActiveBusinessDay,
   getActiveShift,
-  getBusinessDateInTimezone
+  getBusinessDateInTimezone,
+  getHistoricalBusinessDateMinimum,
+  isBusinessDateWithinHistoricalEntryWindow
 } from "@/lib/cash-control";
 import {
   buildCashMovementLedgerEntries,
@@ -2740,7 +2742,7 @@ export function AppProvider({
       const openDay = getActiveBusinessDay(current.businessDays, currentShopId);
       const shop = current.shops.find((entry) => entry.id === currentShopId);
       const timeZone = shop?.timezone ?? currentShop.timezone ?? "Asia/Riyadh";
-      const shouldCloseOldDay = Boolean(openDay && openDay.businessDate < businessDateNow);
+      const shouldCloseOldDay = Boolean(openDay && !openDay.historicalEntry && openDay.businessDate < businessDateNow);
       const shouldOpenToday = !openDay || shouldCloseOldDay;
 
       if (!shouldOpenToday) {
@@ -7385,8 +7387,16 @@ export function AppProvider({
           const today = getBusinessDateInTimezone(shop?.timezone ?? "Asia/Riyadh", new Date());
           const resolvedBusinessDate = businessDate?.trim() || today;
 
-          if (resolvedBusinessDate !== today) {
-            result = { ok: false, message: `Business days can only start for today (${today}) in the shop time zone.` };
+          if (!isBusinessDateWithinHistoricalEntryWindow(resolvedBusinessDate, today)) {
+            result = {
+              ok: false,
+              message: `Choose a business date from ${getHistoricalBusinessDateMinimum(today)} through today (${today}).`
+            };
+            return current;
+          }
+
+          if (resolvedBusinessDate < today && !["shop_admin", "super_admin"].includes(session.role)) {
+            result = { ok: false, message: "Only the shop admin can open a historical business day." };
             return current;
           }
 
@@ -7399,6 +7409,7 @@ export function AppProvider({
                 id: createId("day"),
                 shopId: currentShopId,
                 businessDate: resolvedBusinessDate,
+                historicalEntry: resolvedBusinessDate < today,
                 openingNote: openingNote?.trim() || undefined,
                 startedBy: session.id,
                 startedAt: new Date().toISOString()
@@ -7470,6 +7481,33 @@ export function AppProvider({
             return current;
           }
           const closedAt = new Date().toISOString();
+          const existingDayClose = current.dayCloses.find(
+            (dayClose) => dayClose.shopId === currentShopId && dayClose.businessDate === openDay.businessDate
+          );
+          const dayCloseRecord = {
+            id: existingDayClose?.id ?? createId("day_close"),
+            shopId: currentShopId,
+            businessDate: openDay.businessDate,
+            totalSales: summary.totalSales,
+            cashSales: summary.cashSales,
+            cardSales: summary.cardSales,
+            accountSales: summary.accountSales,
+            accountPaymentsReceived: summary.accountPaymentsReceived,
+            accountCashPayments: summary.accountCashPayments,
+            accountCardPayments: summary.accountCardPayments,
+            refunds: summary.refunds,
+            expenses: summary.expenses,
+            netSales: summary.netSales,
+            expectedCash: summary.expectedCash,
+            countedCash,
+            cashDifference,
+            expectedCard: summary.expectedCard,
+            countedCard: normalizedCard,
+            cardDifference,
+            varianceReason: normalizedVarianceReason,
+            note: note?.trim() || undefined,
+            closedAt
+          };
 
           result = { ok: true };
 
@@ -7483,33 +7521,9 @@ export function AppProvider({
                   }
                 : day
             ),
-            dayCloses: [
-              {
-                id: createId("day_close"),
-                shopId: currentShopId,
-                businessDate: openDay.businessDate,
-                totalSales: summary.totalSales,
-                cashSales: summary.cashSales,
-                cardSales: summary.cardSales,
-                accountSales: summary.accountSales,
-                accountPaymentsReceived: summary.accountPaymentsReceived,
-                accountCashPayments: summary.accountCashPayments,
-                accountCardPayments: summary.accountCardPayments,
-                refunds: summary.refunds,
-                expenses: summary.expenses,
-                netSales: summary.netSales,
-                expectedCash: summary.expectedCash,
-                countedCash,
-                cashDifference,
-                expectedCard: summary.expectedCard,
-                countedCard: normalizedCard,
-                cardDifference,
-                varianceReason: normalizedVarianceReason,
-                note: note?.trim() || undefined,
-                closedAt
-              },
-              ...current.dayCloses
-            ],
+            dayCloses: existingDayClose
+              ? current.dayCloses.map((dayClose) => dayClose.id === existingDayClose.id ? dayCloseRecord : dayClose)
+              : [dayCloseRecord, ...current.dayCloses],
             attendanceRecords: current.attendanceRecords.map((record) => {
               const closure =
                 record.shopId === currentShopId &&
@@ -8339,8 +8353,13 @@ export function AppProvider({
 
           const shop = current.shops.find((entry) => entry.id === currentShopId);
           const today = getBusinessDateInTimezone(shop?.timezone ?? "Asia/Riyadh", new Date());
-          if (openDay.businessDate !== today) {
-            result = { ok: false, message: `A shift can only start in today's business day (${today}). Close or roll over the old day first.` };
+          if (openDay.businessDate !== today && (!openDay.historicalEntry || !["shop_admin", "super_admin"].includes(session.role))) {
+            result = {
+              ok: false,
+              message: openDay.historicalEntry
+                ? "Only the shop admin can start a shift for a historical business day."
+                : `A shift can only start in today's business day (${today}). Close or roll over the old day first.`
+            };
             return current;
           }
 

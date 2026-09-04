@@ -32,7 +32,7 @@ import { sanitizePhoneInput } from "@/lib/phone";
 import { getReceiptItemNameLines, getReceiptItemNameText } from "@/lib/receipt-language";
 import { buildPolishedReceiptMessage } from "@/lib/receipt-sharing";
 import { loadFreshReceiptHandoff, type FreshReceiptHandoff } from "@/lib/receipt-handoff";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { formatBusinessDate, formatCurrency, formatDateTime } from "@/lib/utils";
 import type { Customer } from "@/types/pos";
 
 export function ReceiptView({ billId }: { billId: string }) {
@@ -544,6 +544,7 @@ export function ReceiptView({ billId }: { billId: string }) {
             { label: t("common.receiptNumber"), value: bill.number },
             { label: t("common.paymentMethod"), value: t(paymentMethodLabelKeys[bill.paymentMethod]) },
             { label: t("common.dateTime"), value: formatDateTime(bill.createdAt, locale) },
+            ...(bill.businessDate ? [{ label: "Business date", value: formatBusinessDate(bill.businessDate, locale) }] : []),
             { label: t("common.status"), value: t(billStatusLabelKeys[bill.status]) },
             ...(receiptSettings?.showCashier ? [{ label: t("common.cashier"), value: cashier?.name ?? t("common.notAvailable") }] : []),
             { label: t("common.dueAmount"), value: formatCurrency(bill.dueAmount, shop?.currency ?? "SAR", locale) }

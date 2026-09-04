@@ -6,6 +6,7 @@ import {
   calculateBusinessDaySummary,
   calculateShiftSummary,
   getBusinessDateInTimezone,
+  getHistoricalBusinessDateMinimum,
   getLatestClosedShift
 } from "@/lib/cash-control";
 import { calculateSalesReportSummaryRange } from "@/lib/refunds";
@@ -181,6 +182,7 @@ export function CashControlPanel() {
     t
   } = usePosApp();
   const canManageDay = hasShopPermission(session, currentSettings?.pos, "dashboard");
+  const isShopAdmin = session?.role === "shop_admin" || session?.role === "super_admin";
   const canUseShift = hasShopPermission(session, currentSettings?.pos, "timeClock") || hasShopPermission(session, currentSettings?.pos, "billing");
   const timeZone = currentShop?.timezone ?? "Asia/Riyadh";
   const currency = currentShop?.currency ?? "SAR";
@@ -529,7 +531,13 @@ export function CashControlPanel() {
   );
 
   const handleStartDay = async () => {
-    if (!serverBusinessDate || businessDate !== serverBusinessDate) {
+    const historicalMinimum = serverBusinessDate ? getHistoricalBusinessDateMinimum(serverBusinessDate) : "";
+    if (
+      !serverBusinessDate ||
+      businessDate > serverBusinessDate ||
+      businessDate < historicalMinimum ||
+      (businessDate < serverBusinessDate && !isShopAdmin)
+    ) {
       setDayFeedback({ kind: "error", message: "Online date verification is required before starting the business day." });
       return;
     }
@@ -650,8 +658,12 @@ export function CashControlPanel() {
   };
 
   const handleStartShift = async () => {
-    if (!serverBusinessDate || currentBusinessDay?.businessDate !== serverBusinessDate) {
-      setShiftFeedback({ kind: "error", message: "Online date verification failed or the open business day is not today. Close or roll over the day first." });
+    if (
+      !serverBusinessDate ||
+      !currentBusinessDay ||
+      (currentBusinessDay.businessDate !== serverBusinessDate && (!currentBusinessDay.historicalEntry || !isShopAdmin))
+    ) {
+      setShiftFeedback({ kind: "error", message: "Online date verification failed or this user cannot start a shift for the selected business day." });
       return;
     }
     const cash = Number(openingCash || 0);
@@ -983,8 +995,14 @@ export function CashControlPanel() {
             <div className="rounded-3xl bg-shell p-5">
               <div className="flex flex-wrap items-center gap-3">
                 <Badge variant="neutral">{formatBusinessDate(currentBusinessDay.businessDate, locale)}</Badge>
+                {currentBusinessDay.historicalEntry ? <Badge variant="warning">Historical entry</Badge> : null}
                 <Badge variant="neutral">{t("cashControl.openShiftCount", { count: openShiftsForDay.length })}</Badge>
               </div>
+              {currentBusinessDay.historicalEntry ? (
+                <p className="mt-3 text-sm font-medium text-amber-800">
+                  Historical entry mode: new sales and QR-verified receipts are assigned to this business date. The real creation time remains in the audit trail.
+                </p>
+              ) : null}
               {currentBusinessDay.openingNote ? (
                 <p className="mt-3 text-sm leading-6 text-slate-600">{currentBusinessDay.openingNote}</p>
               ) : null}
@@ -1186,8 +1204,21 @@ export function CashControlPanel() {
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.businessDate")}</label>
-              <Input type="date" value={businessDate} readOnly />
-              <p className="mt-2 text-xs text-slate-500">{serverBusinessDate ? `Online verified for ${timeZone}. Past and future business days are blocked.` : "Checking online date… Day start is disabled until verified."}</p>
+              <Input
+                max={serverBusinessDate ?? undefined}
+                min={serverBusinessDate && isShopAdmin ? getHistoricalBusinessDateMinimum(serverBusinessDate) : serverBusinessDate ?? undefined}
+                onChange={(event) => setBusinessDate(event.target.value)}
+                readOnly={!isShopAdmin}
+                type="date"
+                value={businessDate}
+              />
+              <p className="mt-2 text-xs text-slate-500">
+                {serverBusinessDate
+                  ? isShopAdmin
+                    ? `Online verified for ${timeZone}. Admins may select today or any of the previous 7 days; future dates remain blocked.`
+                    : `Online verified for ${timeZone}. Only today's date is available for this user.`
+                  : "Checking online date… Day start is disabled until verified."}
+              </p>
             </div>
             <div className="sm:col-span-2">
               <label className="mb-2 block text-sm font-medium text-ink">{t("cashControl.openingNote")}</label>

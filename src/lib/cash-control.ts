@@ -57,6 +57,34 @@ export type BusinessDaySummary = {
   expectedCard: number;
 };
 
+export const HISTORICAL_BUSINESS_DAY_LOOKBACK_DAYS = 7;
+
+export function shiftBusinessDate(businessDate: string, days: number) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(businessDate);
+  if (!match) return "";
+
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (
+    date.getUTCFullYear() !== Number(match[1]) ||
+    date.getUTCMonth() !== Number(match[2]) - 1 ||
+    date.getUTCDate() !== Number(match[3])
+  ) {
+    return "";
+  }
+
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+export function getHistoricalBusinessDateMinimum(today: string) {
+  return shiftBusinessDate(today, -HISTORICAL_BUSINESS_DAY_LOOKBACK_DAYS);
+}
+
+export function isBusinessDateWithinHistoricalEntryWindow(businessDate: string, today: string) {
+  const minimum = getHistoricalBusinessDateMinimum(today);
+  return Boolean(minimum && businessDate >= minimum && businessDate <= today);
+}
+
 function isSalesBill(bill: Bill) {
   return bill.status !== "cancelled";
 }

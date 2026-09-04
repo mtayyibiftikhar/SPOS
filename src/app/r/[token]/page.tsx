@@ -109,6 +109,7 @@ export default async function PublicReceiptPage({ params, searchParams }: Public
     { label: "Receipt number", value: bill.number },
     { label: "Payment method", value: paymentLabel },
     { label: "Date / time", value: formatDateTime(bill.createdAt, "en") },
+    ...(bill.businessDate ? [{ label: "Business date", value: formatBusinessDate(bill.businessDate, "en") }] : []),
     { label: "Status", value: statusLabel },
     { label: "Cashier", value: cashier?.name ?? "Not available" },
     { label: "Due amount", value: money(bill.dueAmount) }

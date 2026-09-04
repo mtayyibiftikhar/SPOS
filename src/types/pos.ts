@@ -479,6 +479,7 @@ export interface BusinessDay {
   id: string;
   shopId: string;
   businessDate: string;
+  historicalEntry?: boolean;
   openingNote?: string;
   startedBy: string;
   startedAt: string;

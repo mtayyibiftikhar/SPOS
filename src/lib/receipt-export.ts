@@ -4,7 +4,7 @@ import { buildQrCodeImageUrl } from "@/lib/qr-code";
 import { getPosAssetDeliveryUrl } from "@/lib/pos-asset-url";
 import { buildPublicReceiptUrl } from "@/lib/public-receipts";
 import { getReceiptItemNameLines } from "@/lib/receipt-language";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { formatBusinessDate, formatCurrency, formatDateTime } from "@/lib/utils";
 
 type TextAlign = "left" | "center" | "right";
 
@@ -594,6 +594,9 @@ export function buildReceiptPdfDocument({
   appendRule(elements, { spacingAfter: 10 });
   appendPair(elements, "Receipt", bill.number, { valueBold: true, size: 10, spacingAfter: 4 });
   appendPair(elements, "Date", formatDateTime(bill.createdAt, "en"), { size: 9.5, spacingAfter: 4 });
+  if (bill.businessDate) {
+    appendPair(elements, "Business date", formatBusinessDate(bill.businessDate, "en"), { size: 9.5, spacingAfter: 4 });
+  }
 
   if (receiptSettings?.showCashier) {
     appendPair(

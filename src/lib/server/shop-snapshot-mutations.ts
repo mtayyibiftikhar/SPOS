@@ -19,7 +19,9 @@ import {
   calculateShiftSummary,
   getActiveBusinessDay,
   getActiveShift,
-  getBusinessDateInTimezone
+  getBusinessDateInTimezone,
+  getHistoricalBusinessDateMinimum,
+  isBusinessDateWithinHistoricalEntryWindow
 } from "@/lib/cash-control";
 import { applySettlementToBills, getCustomerAccountMetrics } from "@/lib/customer-accounts";
 import { createPublicReceiptToken } from "@/lib/public-receipts";
@@ -100,6 +102,10 @@ function contextHasPermission(
   );
 }
 
+function contextIsShopAdmin(context: MutationContext) {
+  return context.role === "shop_admin" || context.role === "super_admin";
+}
+
 function startBusinessDayMutation(
   state: Partial<DemoAppState>,
   payload: Extract<CriticalShopMutation, { type: "start_business_day" }>["payload"],
@@ -121,8 +127,17 @@ function startBusinessDayMutation(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) {
     return { result: { ok: false, message: "Enter a valid business date." }, state };
   }
-  if (businessDate !== today) {
-    return { result: { ok: false, message: `Business days can only start for today (${today}) in the shop time zone.` }, state };
+  if (!isBusinessDateWithinHistoricalEntryWindow(businessDate, today)) {
+    return {
+      result: {
+        ok: false,
+        message: `Choose a business date from ${getHistoricalBusinessDateMinimum(today)} through today (${today}).`
+      },
+      state
+    };
+  }
+  if (businessDate < today && !contextIsShopAdmin(context)) {
+    return { result: { ok: false, message: "Only the shop admin can open a historical business day." }, state };
   }
 
   return {
@@ -134,6 +149,7 @@ function startBusinessDayMutation(
           id: createId("day"),
           shopId: context.shopId,
           businessDate,
+          historicalEntry: businessDate < today,
           openingNote: payload.openingNote?.trim() || undefined,
           startedBy: context.userId,
           startedAt: now.toISOString()
@@ -191,6 +207,33 @@ function closeBusinessDayMutation(
     return { result: { ok: false, message: "Explain the cash or card variance before closing the day." }, state };
   }
   const closedAt = new Date().toISOString();
+  const existingDayClose = (state.dayCloses ?? []).find(
+    (dayClose) => dayClose.shopId === context.shopId && dayClose.businessDate === openDay.businessDate
+  );
+  const dayCloseRecord = {
+    id: existingDayClose?.id ?? createId("day_close"),
+    shopId: context.shopId,
+    businessDate: openDay.businessDate,
+    totalSales: summary.totalSales,
+    cashSales: summary.cashSales,
+    cardSales: summary.cardSales,
+    accountSales: summary.accountSales,
+    accountPaymentsReceived: summary.accountPaymentsReceived,
+    accountCashPayments: summary.accountCashPayments,
+    accountCardPayments: summary.accountCardPayments,
+    refunds: summary.refunds,
+    expenses: summary.expenses,
+    netSales: summary.netSales,
+    expectedCash: summary.expectedCash,
+    countedCash,
+    cashDifference,
+    expectedCard: summary.expectedCard,
+    countedCard,
+    cardDifference,
+    varianceReason,
+    note: payload.note?.trim() || undefined,
+    closedAt
+  };
 
   return {
     result: { ok: true },
@@ -219,33 +262,9 @@ function closeBusinessDayMutation(
             }
           : record;
       }),
-      dayCloses: [
-        {
-          id: createId("day_close"),
-          shopId: context.shopId,
-          businessDate: openDay.businessDate,
-          totalSales: summary.totalSales,
-          cashSales: summary.cashSales,
-          cardSales: summary.cardSales,
-          accountSales: summary.accountSales,
-          accountPaymentsReceived: summary.accountPaymentsReceived,
-          accountCashPayments: summary.accountCashPayments,
-          accountCardPayments: summary.accountCardPayments,
-          refunds: summary.refunds,
-          expenses: summary.expenses,
-          netSales: summary.netSales,
-          expectedCash: summary.expectedCash,
-          countedCash,
-          cashDifference,
-          expectedCard: summary.expectedCard,
-          countedCard,
-          cardDifference,
-          varianceReason,
-          note: payload.note?.trim() || undefined,
-          closedAt
-        },
-        ...(state.dayCloses ?? [])
-      ]
+      dayCloses: existingDayClose
+        ? (state.dayCloses ?? []).map((dayClose) => dayClose.id === existingDayClose.id ? dayCloseRecord : dayClose)
+        : [dayCloseRecord, ...(state.dayCloses ?? [])]
     }
   };
 }
@@ -268,8 +287,16 @@ function startShiftMutation(
   if (!openDay) return { result: { ok: false, message: "Start the business day before starting a shift." }, state };
   const shop = state.shops?.find((entry) => entry.id === context.shopId);
   const today = getBusinessDateInTimezone(shop?.timezone ?? "Asia/Riyadh", new Date());
-  if (openDay.businessDate !== today) {
-    return { result: { ok: false, message: `A shift can only start in today's business day (${today}). Close or roll over the old day first.` }, state };
+  if (openDay.businessDate !== today && (!openDay.historicalEntry || !contextIsShopAdmin(context))) {
+    return {
+      result: {
+        ok: false,
+        message: openDay.historicalEntry
+          ? "Only the shop admin can start a shift for a historical business day."
+          : `A shift can only start in today's business day (${today}). Close or roll over the old day first.`
+      },
+      state
+    };
   }
   if (getActiveShift(state.shifts ?? [], context.shopId, context.userId)) {
     return { result: { ok: false, message: "Close the current shift before starting a new one." }, state };

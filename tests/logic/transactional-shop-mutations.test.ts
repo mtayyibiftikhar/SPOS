@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { applyCriticalShopMutation } from "../../src/lib/server/shop-snapshot-mutations";
 import { getCustomerAccountMetrics } from "../../src/lib/customer-accounts";
-import { getBusinessDateInTimezone } from "../../src/lib/cash-control";
+import { getBusinessDateInTimezone, shiftBusinessDate } from "../../src/lib/cash-control";
 import type { Bill, BillItem, Customer, DemoAppState, Product } from "../../src/types/pos";
 
 const SHOP_ID = "shop_transactional";
@@ -389,17 +389,75 @@ test("only one business day can be open for a shop", () => {
   assert.match(duplicate.result.message ?? "", /close the current business day/i);
 });
 
-test("business day start rejects a date that is not today in the shop time zone", () => {
+test("shop admin can start a historical business day within the previous seven days", () => {
   const initial = openState({ businessDays: [], shifts: [] });
-  const rejected = applyCriticalShopMutation(
+  const historicalDate = shiftBusinessDate(TODAY, -7);
+  const started = applyCriticalShopMutation(
     initial,
-    { type: "start_business_day", payload: { businessDate: "2020-01-01" } },
+    { type: "start_business_day", payload: { businessDate: historicalDate } },
     { role: "shop_admin", shopId: SHOP_ID, userId: ADMIN_ID }
   );
 
-  assert.equal(rejected.result.ok, false);
-  assert.match(rejected.result.message ?? "", /only start for today/i);
-  assert.equal(rejected.state.businessDays?.length, 0);
+  assert.equal(started.result.ok, true);
+  assert.equal(started.state.businessDays?.[0].businessDate, historicalDate);
+  assert.equal(started.state.businessDays?.[0].historicalEntry, true);
+});
+
+test("historical business day rejects staff, future dates, and dates older than seven days", () => {
+  const initial = openState({ businessDays: [], shifts: [] });
+  const historicalDate = shiftBusinessDate(TODAY, -1);
+  const staffRejected = applyCriticalShopMutation(
+    initial,
+    { type: "start_business_day", payload: { businessDate: historicalDate } },
+    { role: "cashier", shopId: SHOP_ID, userId: USER_ID }
+  );
+  const futureRejected = applyCriticalShopMutation(
+    initial,
+    { type: "start_business_day", payload: { businessDate: shiftBusinessDate(TODAY, 1) } },
+    { role: "shop_admin", shopId: SHOP_ID, userId: ADMIN_ID }
+  );
+  const oldRejected = applyCriticalShopMutation(
+    initial,
+    { type: "start_business_day", payload: { businessDate: shiftBusinessDate(TODAY, -8) } },
+    { role: "shop_admin", shopId: SHOP_ID, userId: ADMIN_ID }
+  );
+
+  assert.equal(staffRejected.result.ok, false);
+  assert.match(staffRejected.result.message ?? "", /only the shop admin/i);
+  assert.equal(futureRejected.result.ok, false);
+  assert.match(futureRejected.result.message ?? "", /choose a business date/i);
+  assert.equal(oldRejected.result.ok, false);
+  assert.match(oldRejected.result.message ?? "", /choose a business date/i);
+});
+
+test("only an admin can start a shift in an intentionally historical business day", () => {
+  const historicalDate = shiftBusinessDate(TODAY, -2);
+  const state = openState({
+    businessDays: [{
+      id: "day_historical",
+      shopId: SHOP_ID,
+      businessDate: historicalDate,
+      historicalEntry: true,
+      startedBy: ADMIN_ID,
+      startedAt: NOW
+    }],
+    shifts: []
+  });
+  const staffRejected = applyCriticalShopMutation(
+    state,
+    { type: "start_shift", payload: { openingCash: 0 } },
+    { role: "cashier", shopId: SHOP_ID, userId: USER_ID }
+  );
+  const adminStarted = applyCriticalShopMutation(
+    state,
+    { type: "start_shift", payload: { openingCash: 0 } },
+    { role: "shop_admin", shopId: SHOP_ID, userId: ADMIN_ID }
+  );
+
+  assert.equal(staffRejected.result.ok, false);
+  assert.match(staffRejected.result.message ?? "", /only the shop admin/i);
+  assert.equal(adminStarted.result.ok, true);
+  assert.equal(adminStarted.state.shifts?.[0].businessDate, historicalDate);
 });
 
 test("open shift capacity follows the active product-key device limit", () => {
